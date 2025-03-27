@@ -1380,7 +1380,16 @@ public class MainActivity extends AppCompatActivity {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
-                String durationFormatted = formatTime((int)duration);
+                
+                // Make sure we're handling duration properly
+                String durationFormatted;
+                try {
+                    durationFormatted = formatTime((int)duration);
+                } catch (Exception e) {
+                    // Fallback in case of formatting errors
+                    durationFormatted = "0:00";
+                    Log.e(TAG, "Error formatting duration: " + duration, e);
+                }
 
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
@@ -1550,81 +1559,91 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         
-        // Sort both lists based on current sort order
-        Comparator<AudioFile> comparator = null;
-        
-        switch (currentSortOrder) {
-            case SORT_BY_NAME_ASC:
-                // Sort by name (A-Z)
-                comparator = (a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle());
-                Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
-                break;
+        try {
+            // Sort both lists based on current sort order
+            Comparator<AudioFile> comparator = null;
             
-            case SORT_BY_NAME_DESC:
-                // Sort by name (Z-A)
-                comparator = (a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle());
-                Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
-                break;
-            
-            case SORT_BY_DURATION_ASC:
-                // Sort by duration (shortest first)
-                comparator = (a1, a2) -> {
-                    try {
+            switch (currentSortOrder) {
+                case SORT_BY_NAME_ASC:
+                    // Sort by name (A-Z)
+                    comparator = (a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle());
+                    Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
+                    break;
+                
+                case SORT_BY_NAME_DESC:
+                    // Sort by name (Z-A)
+                    comparator = (a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle());
+                    Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
+                    break;
+                
+                case SORT_BY_DURATION_ASC:
+                    // Sort by duration (shortest first)
+                    comparator = (a1, a2) -> {
                         long duration1 = parseDuration(a1.getDuration());
                         long duration2 = parseDuration(a2.getDuration());
                         return Long.compare(duration1, duration2);
-                    } catch (Exception e) {
-                        return 0;
-                    }
-                };
-                Toast.makeText(this, getString(R.string.sort_by_duration_asc), Toast.LENGTH_SHORT).show();
-                break;
-            
-            case SORT_BY_DURATION_DESC:
-                // Sort by duration (longest first)
-                comparator = (a1, a2) -> {
-                    try {
+                    };
+                    Toast.makeText(this, getString(R.string.sort_by_duration_asc), Toast.LENGTH_SHORT).show();
+                    break;
+                
+                case SORT_BY_DURATION_DESC:
+                    // Sort by duration (longest first)
+                    comparator = (a1, a2) -> {
                         long duration1 = parseDuration(a1.getDuration());
                         long duration2 = parseDuration(a2.getDuration());
                         return Long.compare(duration2, duration1);
-                    } catch (Exception e) {
-                        return 0;
-                    }
-                };
-                Toast.makeText(this, getString(R.string.sort_by_duration_desc), Toast.LENGTH_SHORT).show();
-                break;
-            
-            case SORT_BY_DATE_ASC:
-            case SORT_BY_DATE_DESC:
-                // For date sorting, we need to query MediaStore again
-                sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
-                return; // Exit early, as sortByDate handles the update
-        }
-        
-        if (comparator != null) {
-            // Apply the sort comparator to both lists
-            allAudioFiles.sort(comparator);
-            filteredAudioFiles.sort(comparator);
-            
-            // Update the RecyclerView
-            if (audioAdapter != null) {
-                audioAdapter.notifyDataSetChanged();
+                    };
+                    Toast.makeText(this, getString(R.string.sort_by_duration_desc), Toast.LENGTH_SHORT).show();
+                    break;
+                
+                case SORT_BY_DATE_ASC:
+                case SORT_BY_DATE_DESC:
+                    // For date sorting, we need to query MediaStore again
+                    sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
+                    return; // Exit early, as sortByDate handles the update
             }
+            
+            if (comparator != null) {
+                // Apply the sort comparator to both lists
+                allAudioFiles.sort(comparator);
+                
+                // Update filtered list based on current search
+                if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                    filterAudioFiles(searchEditText.getText().toString());
+                } else {
+                    // No filter active, update filtered list directly
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(allAudioFiles);
+                    // Update the UI
+                    updateAudioFilesList();
+                }
+            }
+        } catch (Exception e) {
+            // Log any errors that might be happening during sorting
+            Log.e(TAG, "Error during sort operation", e);
+            Toast.makeText(this, "Error sorting files", Toast.LENGTH_SHORT).show();
         }
     }
 
     // Add a helper method to parse duration strings
     private long parseDuration(String durationStr) {
-        // Format is typically "m:ss"
-        String[] parts = durationStr.split(":");
-        if (parts.length == 2) {
-            try {
+        try {
+            // Format is typically "m:ss"
+            String[] parts = durationStr.split(":");
+            
+            if (parts.length == 2) {
                 int minutes = Integer.parseInt(parts[0]);
                 int seconds = Integer.parseInt(parts[1]);
-                return minutes * 60 + seconds;
-            } catch (NumberFormatException e) {
-                Log.e(TAG, "Error parsing duration: " + durationStr, e);
+                return (minutes * 60L) + seconds;
+            } else if (parts.length == 3) {
+                // Handle "h:mm:ss" format if present
+                int hours = Integer.parseInt(parts[0]);
+                int minutes = Integer.parseInt(parts[1]);
+                int seconds = Integer.parseInt(parts[2]);
+                return (hours * 3600L) + (minutes * 60L) + seconds;
             }
+        } catch (NumberFormatException e) {
+            Log.e(TAG, "Error parsing duration: " + durationStr, e);
         }
         return 0;
     }
@@ -1669,9 +1688,20 @@ public class MainActivity extends AppCompatActivity {
             }
             cursor.close();
             
-            // Replace the current list with the sorted list
+            // Replace the current lists with the sorted list
             allAudioFiles.clear();
             allAudioFiles.addAll(sortedFiles);
+            
+            // Update filtered list based on current search
+            if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                filterAudioFiles(searchEditText.getText().toString());
+            } else {
+                // No search filter, update filtered list with all
+                filteredAudioFiles.clear();
+                filteredAudioFiles.addAll(allAudioFiles);
+                // Update the UI
+                updateAudioFilesList();
+            }
             
             // Show appropriate toast
             if (descending) {
