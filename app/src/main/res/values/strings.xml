@@ -63,4 +63,19 @@
     <string name="mixer_mode_off">Mixer Mode OFF - Select Primary Audio</string>
     <string name="sort_by_size_asc">Sort by Size (Smallest First)</string>
     <string name="sort_by_size_desc">Sort by Size (Largest First)</string>
+    <string name="file_details">File Details</string>
+    <string name="rename_file">Rename</string>
+    <string name="delete_file">Delete</string>
+    <string name="share_file">Share</string>
+    <string name="file_details_title">File Details</string>
+    <string name="file_title">Title</string>
+    <string name="file_duration">Duration</string>
+    <string name="file_size">Size</string>
+    <string name="file_path">Path</string>
+    <string name="rename_file_title">Rename File</string>
+    <string name="new_file_name">New File Name</string>
+    <string name="file_deleted">File deleted</string>
+    <string name="error_deleting_file">Error deleting file</string>
+    <string name="error_renaming_file">Error renaming file</string>
+    <string name="file_renamed">File renamed</string>
 </resources>

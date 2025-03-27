@@ -20,9 +20,10 @@
             android:contentDescription="@string/audio_icon" />
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:orientation="vertical"
+            android:layout_weight="1"
             android:layout_marginStart="16dp">
 
             <TextView
@@ -41,5 +42,16 @@
                 android:textSize="14sp"
                 android:textColor="#757575" />
         </LinearLayout>
+        
+        <ImageView
+            android:id="@+id/fileOptionsMenu"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_more_vert"
+            android:layout_gravity="center_vertical"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="File options" />
     </LinearLayout>
 </androidx.cardview.widget.CardView> 

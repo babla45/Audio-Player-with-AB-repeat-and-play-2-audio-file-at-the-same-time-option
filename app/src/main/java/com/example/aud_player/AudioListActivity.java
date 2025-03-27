@@ -49,7 +49,8 @@ public class AudioListActivity extends AppCompatActivity {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
-                MediaStore.Audio.Media.SIZE
+                MediaStore.Audio.Media.SIZE,
+                MediaStore.Audio.Media.DISPLAY_NAME
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -74,12 +75,24 @@ public class AudioListActivity extends AppCompatActivity {
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
                 long size = cursor.getLong(sizeColumn);
+                
+                // Try to get display name with extension
+                String displayName = title;
+                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+                if (displayNameColumn != -1) {
+                    String fullName = cursor.getString(displayNameColumn);
+                    if (fullName != null && !fullName.isEmpty()) {
+                        displayName = fullName;
+                    }
+                }
+                
                 String durationFormatted = formatDuration(duration);
 
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                audioFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
+                // Use display name instead of title
+                audioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size));
             }
             cursor.close();
         }

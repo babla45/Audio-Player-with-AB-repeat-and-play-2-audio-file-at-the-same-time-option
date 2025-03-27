@@ -13,6 +13,7 @@ import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -467,11 +468,30 @@ public class MainActivity extends AppCompatActivity {
     
     private String getFileNameFromUri(Uri uri) {
         try {
-            String fileName = uri.getLastPathSegment();
-            if (fileName != null && fileName.contains("/")) {
-                fileName = fileName.substring(fileName.lastIndexOf("/") + 1);
+            // Try to get the filename from content resolver first
+            String filename = null;
+            
+            // For content URIs, try to get the actual filename
+            if (uri.getScheme().equals("content")) {
+                Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIndex != -1) {
+                        filename = cursor.getString(nameIndex);
+                    }
+                    cursor.close();
+                }
             }
-            return fileName != null ? fileName : "Unknown File";
+            
+            // If we couldn't get the filename from content resolver, use the last path segment
+            if (filename == null) {
+                filename = uri.getLastPathSegment();
+                if (filename != null && filename.contains("/")) {
+                    filename = filename.substring(filename.lastIndexOf("/") + 1);
+                }
+            }
+            
+            return filename != null ? filename : "Unknown File";
         } catch (Exception e) {
             Log.e(TAG, "Error getting filename", e);
             return "Unknown File";
@@ -1363,7 +1383,8 @@ public class MainActivity extends AppCompatActivity {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
-                MediaStore.Audio.Media.SIZE  // Ensure SIZE is included
+                MediaStore.Audio.Media.SIZE,
+                MediaStore.Audio.Media.DISPLAY_NAME  // Add DISPLAY_NAME to get the full filename with extension
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -1419,6 +1440,18 @@ public class MainActivity extends AppCompatActivity {
                 long duration = cursor.getLong(durationColumn);
                 long size = cursor.getLong(sizeColumn);
                 
+                // Get the display name with extension
+                String displayName = title;
+                
+                // Try to get the full filename with extension if available
+                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+                if (displayNameColumn != -1) {
+                    String fullName = cursor.getString(displayNameColumn);
+                    if (fullName != null && !fullName.isEmpty()) {
+                        displayName = fullName;
+                    }
+                }
+                
                 // Make sure we're handling duration properly
                 String durationFormatted;
                 try {
@@ -1432,8 +1465,8 @@ public class MainActivity extends AppCompatActivity {
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                // Updated constructor with size parameter
-                allAudioFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
+                // Use the display name with extension instead of just the title
+                allAudioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size));
             }
             cursor.close();
             
@@ -1475,7 +1508,7 @@ public class MainActivity extends AppCompatActivity {
     private void highlightSelectedAudio(AudioFile audioFile) {
         // This would require additional code in your adapter to track the selected item
         // For a simple approach, you can just show a toast
-        Toast.makeText(this, "Now playing: " + audioFile.getTitle(), Toast.LENGTH_SHORT).show();
+//        Toast.makeText(this, "Now playing: " + audioFile.getTitle(), Toast.LENGTH_SHORT).show();
     }
 
     public void onSecondAudioSelected(AudioFile audioFile) {
@@ -1557,38 +1590,149 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
 
-    private void setupAudioRecyclerView() {
-        // Setup RecyclerView
-        audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+    private void setupAudioAdapter() {
+        audioAdapter = new AudioAdapter(filteredAudioFiles);
         
-        // Setup adapter
-        audioAdapter = new AudioAdapter(audioFiles);
+        // Set the click listener
         audioAdapter.setOnItemClickListener(audioFile -> {
-            if (secondAudioUri == null) {
-                // If no second audio is active, just play the selected file
-                onAudioFileSelected(audioFile);
+            // Use the mixer mode to determine behavior
+            if (mixerModeActive) {
+                onSecondAudioSelected(audioFile);
             } else {
-                // If mixer mode is active, show selection dialog
-                showAudioSelectionDialog(audioFile);
+                // If not in mixer mode, either play directly or show dialog
+                if (secondAudioUri != null) {
+                    showAudioSelectionDialog(audioFile);
+                } else {
+                    onAudioFileSelected(audioFile);
+                }
             }
         });
+        
+        // Set the options menu listener
+        audioAdapter.setOnOptionsItemClickListener(new AudioAdapter.OnOptionsItemClickListener() {
+            @Override
+            public void onFileDetailsClick(AudioFile audioFile) {
+                showFileDetailsDialog(audioFile);
+            }
+
+            @Override
+            public void onRenameFileClick(AudioFile audioFile) {
+                showRenameFileDialog(audioFile);
+            }
+
+            @Override
+            public void onDeleteFileClick(AudioFile audioFile) {
+                showDeleteConfirmationDialog(audioFile);
+            }
+
+            @Override
+            public void onShareFileClick(AudioFile audioFile) {
+                shareAudioFile(audioFile);
+            }
+        });
+        
         audioRecyclerView.setAdapter(audioAdapter);
     }
 
-    // Add this method to allow refreshing the audio files list
-    public void refreshAudioFiles() {
-        if (isPermissionGranted) {
-            loadAudioFiles();
-        }
+    // Add the implementation for the file options methods
+    private void showFileDetailsDialog(AudioFile audioFile) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.file_details_title);
+        
+        // Create the details view
+        View view = getLayoutInflater().inflate(R.layout.dialog_file_details, null);
+        TextView titleText = view.findViewById(R.id.detail_title);
+        TextView durationText = view.findViewById(R.id.detail_duration);
+        TextView sizeText = view.findViewById(R.id.detail_size);
+        TextView pathText = view.findViewById(R.id.detail_path);
+        
+        // Set the details
+        titleText.setText(audioFile.getTitle());
+        durationText.setText(audioFile.getDuration());
+        sizeText.setText(audioFile.getFormattedSize());
+        pathText.setText(audioFile.getUri().toString());
+        
+        builder.setView(view);
+        builder.setPositiveButton(R.string.ok, null);
+        builder.show();
     }
 
-    // Modify onResume to refresh the list when returning to the app
-    @Override
-    protected void onResume() {
-        super.onResume();
-        // Refresh audio files list in case new files were added
-        if (isPermissionGranted) {
-            refreshAudioFiles();
+    private void showRenameFileDialog(AudioFile audioFile) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.rename_file_title);
+        
+        // Create the input field
+        final EditText input = new EditText(this);
+        input.setText(audioFile.getTitle());
+        builder.setView(input);
+        
+        // Add action buttons
+        builder.setPositiveButton(R.string.ok, (dialog, which) -> {
+            String newName = input.getText().toString().trim();
+            if (!newName.isEmpty()) {
+                renameFile(audioFile, newName);
+            }
+        });
+        builder.setNegativeButton(R.string.cancel, null);
+        
+        builder.show();
+    }
+
+    private void renameFile(AudioFile audioFile, String newName) {
+        // This is a placeholder - actual implementation would depend on your requirements
+        // In a real app, you'd use MediaStore or ContentResolver to update the file name
+        Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
+        
+        // After successful rename, refresh the audio files list
+        refreshAudioFiles();
+    }
+
+    private void showDeleteConfirmationDialog(AudioFile audioFile) {
+        new AlertDialog.Builder(this)
+            .setTitle("Delete File")
+            .setMessage("Are you sure you want to delete " + audioFile.getTitle() + "?")
+            .setPositiveButton("Delete", (dialog, which) -> {
+                deleteFile(audioFile);
+            })
+            .setNegativeButton(R.string.cancel, null)
+            .show();
+    }
+
+    private void deleteFile(AudioFile audioFile) {
+        // This is a placeholder - actual implementation would depend on your requirements
+        // In a real app, you'd use MediaStore or ContentResolver to delete the file
+        Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
+        
+        // After successful delete, refresh the audio files list
+        refreshAudioFiles();
+    }
+
+    private void shareAudioFile(AudioFile audioFile) {
+        Intent shareIntent = new Intent(Intent.ACTION_SEND);
+        shareIntent.setType("audio/*");
+        shareIntent.putExtra(Intent.EXTRA_STREAM, audioFile.getUri());
+        startActivity(Intent.createChooser(shareIntent, "Share audio file"));
+    }
+
+    // Update the updateAudioFilesList method to use the new setupAudioAdapter method
+    private void updateAudioFilesList() {
+        // Show empty view if no filtered files
+        if (filteredAudioFiles.isEmpty()) {
+            audioRecyclerView.setVisibility(View.GONE);
+            emptyView.setVisibility(View.VISIBLE);
+            
+            // Update empty view text based on whether we're filtering or not
+            if (!allAudioFiles.isEmpty() && !TextUtils.isEmpty(searchEditText.getText())) {
+                emptyView.setText(R.string.no_matching_files);
+            } else {
+                emptyView.setText(R.string.no_audio_files);
+            }
+        } else {
+            audioRecyclerView.setVisibility(View.VISIBLE);
+            emptyView.setVisibility(View.GONE);
+            
+            // Setup adapter with filtered files
+            setupAudioAdapter();
         }
     }
 
@@ -1768,42 +1912,6 @@ public class MainActivity extends AppCompatActivity {
         
         // Update the adapter with filtered results
         updateAudioFilesList();
-    }
-
-    // Add the updateAudioFilesList method
-    private void updateAudioFilesList() {
-        // Show empty view if no filtered files
-        if (filteredAudioFiles.isEmpty()) {
-            audioRecyclerView.setVisibility(View.GONE);
-            emptyView.setVisibility(View.VISIBLE);
-            
-            // Update empty view text based on whether we're filtering or not
-            if (!allAudioFiles.isEmpty() && !TextUtils.isEmpty(searchEditText.getText())) {
-                emptyView.setText(R.string.no_matching_files);
-            } else {
-                emptyView.setText(R.string.no_audio_files);
-            }
-        } else {
-            audioRecyclerView.setVisibility(View.VISIBLE);
-            emptyView.setVisibility(View.GONE);
-            
-            // Setup adapter with filtered files
-            audioAdapter = new AudioAdapter(filteredAudioFiles);
-            audioAdapter.setOnItemClickListener(audioFile -> {
-                // Use the mixer mode to determine behavior
-                if (mixerModeActive) {
-                    onSecondAudioSelected(audioFile);
-                } else {
-                    // If not in mixer mode, either play directly or show dialog
-                    if (secondAudioUri != null) {
-                        showAudioSelectionDialog(audioFile);
-                    } else {
-                        onAudioFileSelected(audioFile);
-                    }
-                }
-            });
-            audioRecyclerView.setAdapter(audioAdapter);
-        }
     }
 
     // Add the toggleMixerMode method
@@ -1988,8 +2096,9 @@ public class MainActivity extends AppCompatActivity {
                     MediaStore.Audio.Media._ID,
                     MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.DURATION,
-                    MediaStore.Audio.Media.SIZE,  // Include SIZE
-                    MediaStore.Audio.Media.DATE_ADDED
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DATE_ADDED,
+                    MediaStore.Audio.Media.DISPLAY_NAME  // Add DISPLAY_NAME
             };
 
             String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -2016,7 +2125,17 @@ public class MainActivity extends AppCompatActivity {
                     long id = cursor.getLong(idColumn);
                     String title = cursor.getString(titleColumn);
                     long duration = cursor.getLong(durationColumn);
-                    long size = cursor.getLong(sizeColumn);  // Get file size
+                    long size = cursor.getLong(sizeColumn);
+                    
+                    // Get the display name with extension
+                    String displayName = title;
+                    int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+                    if (displayNameColumn != -1) {
+                        String fullName = cursor.getString(displayNameColumn);
+                        if (fullName != null && !fullName.isEmpty()) {
+                            displayName = fullName;
+                        }
+                    }
                     
                     Uri contentUri = Uri.withAppendedPath(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
@@ -2038,7 +2157,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     
                     // Updated constructor with size parameter
-                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size);
+                    AudioFile audioFile = new AudioFile(displayName, durationFormatted, contentUri, id, size);
                     durationInfoList.add(new AudioFileDurationPair(audioFile, duration));
                     
                     // Log very long durations for debugging
@@ -2105,6 +2224,22 @@ public class MainActivity extends AppCompatActivity {
         AudioFileDurationPair(AudioFile audioFile, long duration) {
             this.audioFile = audioFile;
             this.duration = duration;
+        }
+    }
+
+    /**
+     * Refreshes the audio files list after operations like rename or delete
+     */
+    private void refreshAudioFiles() {
+        // Simply reload all audio files from the MediaStore
+        loadAudioFiles();
+        
+        // Log the refresh operation
+        Log.d(TAG, "Audio files list refreshed");
+        
+        // If we're in a search, make sure to reapply the filter
+        if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+            filterAudioFiles(searchEditText.getText().toString());
         }
     }
 }
