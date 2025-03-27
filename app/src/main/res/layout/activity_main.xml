@@ -8,7 +8,43 @@
     android:padding="16dp"
     tools:context=".MainActivity">
 
-    <!-- Title header for audio files section -->
+    <!-- Search bar at the top -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/searchBarCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        app:cardCornerRadius="8dp"
+        app:cardElevation="2dp"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp">
+
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@android:drawable/ic_menu_search"
+                android:contentDescription="@string/search_icon"
+                android:layout_marginEnd="8dp" />
+
+            <EditText
+                android:id="@+id/searchEditText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@null"
+                android:hint="@string/search_audio_files"
+                android:inputType="text"
+                android:imeOptions="actionSearch"
+                android:padding="8dp" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Title header for audio files section (now below search) -->
     <TextView
         android:id="@+id/audioFilesHeader"
         android:layout_width="match_parent"
@@ -17,9 +53,10 @@
         android:textSize="18sp"
         android:textStyle="bold"
         android:gravity="center"
-        app:layout_constraintTop_toTopOf="parent" />
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toBottomOf="@id/searchBarCard" />
 
-    <!-- Audio files RecyclerView in upper half -->
+    <!-- Audio files RecyclerView (moved down to make room for search) -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/audioRecyclerView"
         android:layout_width="match_parent"

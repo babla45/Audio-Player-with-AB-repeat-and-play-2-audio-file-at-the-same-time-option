@@ -54,4 +54,7 @@
     <string name="sort_by_duration_desc">Duration (longest first)</string>
     <string name="sort_by_date_asc">Date (oldest first)</string>
     <string name="sort_by_date_desc">Date (newest first)</string>
+    <string name="search_icon">Search icon</string>
+    <string name="search_audio_files">Search audio files...</string>
+    <string name="no_matching_files">No matching audio files found</string>
 </resources>

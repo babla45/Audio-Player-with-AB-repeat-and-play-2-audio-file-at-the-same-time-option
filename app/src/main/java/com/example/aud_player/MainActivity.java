@@ -41,6 +41,13 @@ import java.util.concurrent.TimeUnit;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
+import java.util.Comparator;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "AudioPlayerApp";
@@ -86,6 +93,11 @@ public class MainActivity extends AppCompatActivity {
     private AudioAdapter audioAdapter;
 
     private int currentSortOrder = SORT_BY_NAME_ASC; // Default sort order
+
+    // Add these instance variables
+    private EditText searchEditText;
+    private List<AudioFile> allAudioFiles = new ArrayList<>(); // Store all files
+    private List<AudioFile> filteredAudioFiles = new ArrayList<>(); // Store filtered results
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -201,6 +213,9 @@ public class MainActivity extends AppCompatActivity {
             
             // Setup RecyclerView
             audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+            
+            // Initialize search EditText
+            searchEditText = findViewById(R.id.searchEditText);
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -333,6 +348,36 @@ public class MainActivity extends AppCompatActivity {
         
         // Add the menu button listener
         menuButton.setOnClickListener(v -> showPopupMenu(v));
+        
+        // Add search functionality
+        searchEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                // Not needed
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                // Filter audio files based on search query
+                filterAudioFiles(s.toString());
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                // Not needed
+            }
+        });
+        
+        // Add "enter" key listener for search
+        searchEditText.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                // Hide keyboard
+                InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                return true;
+            }
+            return false;
+        });
     }
     
     private void checkPermissions() {
@@ -1251,7 +1296,7 @@ public class MainActivity extends AppCompatActivity {
                 sortOrder);
 
         if (cursor != null) {
-            audioFiles.clear();
+            allAudioFiles.clear(); // Clear the master list
             
             int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
@@ -1266,23 +1311,19 @@ public class MainActivity extends AppCompatActivity {
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                audioFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+                allAudioFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
             }
             cursor.close();
-        }
-
-        // Show empty view if no audio files
-        if (audioFiles.isEmpty()) {
-            audioRecyclerView.setVisibility(View.GONE);
-            emptyView.setVisibility(View.VISIBLE);
-        } else {
-            audioRecyclerView.setVisibility(View.VISIBLE);
-            emptyView.setVisibility(View.GONE);
             
-            // Setup adapter with dialog click listener
-            audioAdapter = new AudioAdapter(audioFiles);
-            audioAdapter.setOnItemClickListener(audioFile -> showAudioSelectionDialog(audioFile));
-            audioRecyclerView.setAdapter(audioAdapter);
+            // Apply any current search filter
+            if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                filterAudioFiles(searchEditText.getText().toString());
+            } else {
+                // No filter, show all files
+                filteredAudioFiles.clear();
+                filteredAudioFiles.addAll(allAudioFiles);
+                updateAudioFilesList();
+            }
         }
     }
 
@@ -1413,28 +1454,29 @@ public class MainActivity extends AppCompatActivity {
 
     // Add a new method to sort audio files
     private void sortAudioFiles() {
-        if (audioFiles == null || audioFiles.isEmpty()) {
+        if (allAudioFiles == null || allAudioFiles.isEmpty()) {
             return;
         }
         
-        // Sort based on current sort order
+        // Sort both lists based on current sort order
+        Comparator<AudioFile> comparator = null;
+        
         switch (currentSortOrder) {
             case SORT_BY_NAME_ASC:
                 // Sort by name (A-Z)
-                audioFiles.sort((a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle()));
+                comparator = (a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle());
                 Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
                 break;
             
             case SORT_BY_NAME_DESC:
                 // Sort by name (Z-A)
-                audioFiles.sort((a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle()));
+                comparator = (a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle());
                 Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
                 break;
             
             case SORT_BY_DURATION_ASC:
                 // Sort by duration (shortest first)
-                audioFiles.sort((a1, a2) -> {
-                    // Parse the duration strings (format: "m:ss")
+                comparator = (a1, a2) -> {
                     try {
                         long duration1 = parseDuration(a1.getDuration());
                         long duration2 = parseDuration(a2.getDuration());
@@ -1442,14 +1484,13 @@ public class MainActivity extends AppCompatActivity {
                     } catch (Exception e) {
                         return 0;
                     }
-                });
+                };
                 Toast.makeText(this, getString(R.string.sort_by_duration_asc), Toast.LENGTH_SHORT).show();
                 break;
             
             case SORT_BY_DURATION_DESC:
                 // Sort by duration (longest first)
-                audioFiles.sort((a1, a2) -> {
-                    // Parse the duration strings (format: "m:ss")
+                comparator = (a1, a2) -> {
                     try {
                         long duration1 = parseDuration(a1.getDuration());
                         long duration2 = parseDuration(a2.getDuration());
@@ -1457,21 +1498,26 @@ public class MainActivity extends AppCompatActivity {
                     } catch (Exception e) {
                         return 0;
                     }
-                });
+                };
                 Toast.makeText(this, getString(R.string.sort_by_duration_desc), Toast.LENGTH_SHORT).show();
                 break;
             
             case SORT_BY_DATE_ASC:
             case SORT_BY_DATE_DESC:
-                // For date sorting, we need to modify loadAudioFiles() to include date info
-                // For now, we'll retrieve it again
+                // For date sorting, we need to query MediaStore again
                 sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
-                break;
+                return; // Exit early, as sortByDate handles the update
         }
         
-        // Update the RecyclerView to show the sorted list
-        if (audioAdapter != null) {
-            audioAdapter.notifyDataSetChanged();
+        if (comparator != null) {
+            // Apply the sort comparator to both lists
+            allAudioFiles.sort(comparator);
+            filteredAudioFiles.sort(comparator);
+            
+            // Update the RecyclerView
+            if (audioAdapter != null) {
+                audioAdapter.notifyDataSetChanged();
+            }
         }
     }
 
@@ -1532,8 +1578,8 @@ public class MainActivity extends AppCompatActivity {
             cursor.close();
             
             // Replace the current list with the sorted list
-            audioFiles.clear();
-            audioFiles.addAll(sortedFiles);
+            allAudioFiles.clear();
+            allAudioFiles.addAll(sortedFiles);
             
             // Show appropriate toast
             if (descending) {
@@ -1541,6 +1587,53 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 Toast.makeText(this, getString(R.string.sort_by_date_asc), Toast.LENGTH_SHORT).show();
             }
+        }
+    }
+
+    // Add the filterAudioFiles method
+    private void filterAudioFiles(String query) {
+        filteredAudioFiles.clear();
+        
+        if (TextUtils.isEmpty(query)) {
+            // If query is empty, show all files
+            filteredAudioFiles.addAll(allAudioFiles);
+        } else {
+            // Convert query to lowercase for case-insensitive search
+            String lowerCaseQuery = query.toLowerCase();
+            
+            // Filter files that contain the query in their title
+            for (AudioFile file : allAudioFiles) {
+                if (file.getTitle().toLowerCase().contains(lowerCaseQuery)) {
+                    filteredAudioFiles.add(file);
+                }
+            }
+        }
+        
+        // Update the adapter with filtered results
+        updateAudioFilesList();
+    }
+
+    // Add the updateAudioFilesList method
+    private void updateAudioFilesList() {
+        // Show empty view if no filtered files
+        if (filteredAudioFiles.isEmpty()) {
+            audioRecyclerView.setVisibility(View.GONE);
+            emptyView.setVisibility(View.VISIBLE);
+            
+            // Update empty view text based on whether we're filtering or not
+            if (!allAudioFiles.isEmpty() && !TextUtils.isEmpty(searchEditText.getText())) {
+                emptyView.setText(R.string.no_matching_files);
+            } else {
+                emptyView.setText(R.string.no_audio_files);
+            }
+        } else {
+            audioRecyclerView.setVisibility(View.VISIBLE);
+            emptyView.setVisibility(View.GONE);
+            
+            // Setup adapter with filtered files
+            audioAdapter = new AudioAdapter(filteredAudioFiles);
+            audioAdapter.setOnItemClickListener(audioFile -> showAudioSelectionDialog(audioFile));
+            audioRecyclerView.setAdapter(audioAdapter);
         }
     }
 }
