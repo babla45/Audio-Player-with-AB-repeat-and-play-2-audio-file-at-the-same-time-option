@@ -39,7 +39,10 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     public void onBindViewHolder(@NonNull AudioViewHolder holder, int position) {
         AudioFile audioFile = audioFiles.get(position);
         holder.titleTextView.setText(audioFile.getTitle());
-        holder.durationTextView.setText(audioFile.getDuration());
+        
+        // Combine duration and file size with a separator
+        String durationAndSize = audioFile.getDuration() + " • " + audioFile.getFormattedSize();
+        holder.durationTextView.setText(durationAndSize);
         
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
@@ -57,7 +60,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         TextView titleTextView;
         TextView durationTextView;
 
-        public AudioViewHolder(@NonNull View itemView) {
+        AudioViewHolder(View itemView) {
             super(itemView);
             titleTextView = itemView.findViewById(R.id.audioTitle);
             durationTextView = itemView.findViewById(R.id.audioDuration);

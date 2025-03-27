@@ -48,6 +48,8 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.content.Context;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -62,6 +64,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int SORT_BY_DURATION_DESC = 3;
     private static final int SORT_BY_DATE_ASC = 4;
     private static final int SORT_BY_DATE_DESC = 5;
+    private static final int SORT_BY_SIZE_ASC = 6;
+    private static final int SORT_BY_SIZE_DESC = 7;
     
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -600,10 +604,21 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private String formatTime(int milliseconds) {
-        long minutes = TimeUnit.MILLISECONDS.toMinutes(milliseconds);
-        long seconds = TimeUnit.MILLISECONDS.toSeconds(milliseconds) - 
-                      TimeUnit.MINUTES.toSeconds(minutes);
-        return String.format("%d:%02d", minutes, seconds);
+        // Convert to positive value in case of overflow
+        long positiveMillis = milliseconds < 0 ? Integer.MAX_VALUE : (long) milliseconds;
+        
+        long hours = TimeUnit.MILLISECONDS.toHours(positiveMillis);
+        long minutes = TimeUnit.MILLISECONDS.toMinutes(positiveMillis) - 
+                      TimeUnit.HOURS.toMinutes(hours);
+        long seconds = TimeUnit.MILLISECONDS.toSeconds(positiveMillis) - 
+                      TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(positiveMillis));
+        
+        // Format with hours if needed
+        if (hours > 0) {
+            return String.format("%d:%02d:%02d", hours, minutes, seconds);
+        } else {
+            return String.format("%d:%02d", minutes, seconds);
+        }
     }
     
     private void releaseMediaPlayer() {
@@ -655,6 +670,12 @@ public class MainActivity extends AppCompatActivity {
                 case SORT_BY_DATE_DESC:
                     itemToCheck = sortMenu.findItem(R.id.sort_date_desc);
                     break;
+                case SORT_BY_SIZE_ASC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_size_asc);
+                    break;
+                case SORT_BY_SIZE_DESC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_size_desc);
+                    break;
             }
             if (itemToCheck != null) {
                 itemToCheck.setChecked(true);
@@ -687,6 +708,14 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             } else if (itemId == R.id.sort_date_desc) {
                 currentSortOrder = SORT_BY_DATE_DESC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_size_asc) {
+                currentSortOrder = SORT_BY_SIZE_ASC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_size_desc) {
+                currentSortOrder = SORT_BY_SIZE_DESC;
                 sortAudioFiles();
                 return true;
             }
@@ -1333,7 +1362,8 @@ public class MainActivity extends AppCompatActivity {
         String[] projection = {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
-                MediaStore.Audio.Media.DURATION
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.SIZE  // Ensure SIZE is included
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -1356,6 +1386,12 @@ public class MainActivity extends AppCompatActivity {
             case SORT_BY_DATE_DESC:
                 sortOrder = MediaStore.Audio.Media.DATE_ADDED + " DESC";
                 break;
+            case SORT_BY_SIZE_ASC:
+                sortOrder = MediaStore.Audio.Media.SIZE + " ASC";
+                break;
+            case SORT_BY_SIZE_DESC:
+                sortOrder = MediaStore.Audio.Media.SIZE + " DESC";
+                break;
             case SORT_BY_NAME_ASC:
             default:
                 sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
@@ -1375,11 +1411,13 @@ public class MainActivity extends AppCompatActivity {
             int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+            int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
+                long size = cursor.getLong(sizeColumn);
                 
                 // Make sure we're handling duration properly
                 String durationFormatted;
@@ -1394,7 +1432,8 @@ public class MainActivity extends AppCompatActivity {
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                allAudioFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+                // Updated constructor with size parameter
+                allAudioFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
             }
             cursor.close();
             
@@ -1577,30 +1616,22 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 
                 case SORT_BY_DURATION_ASC:
-                    // Sort by duration (shortest first)
-                    comparator = (a1, a2) -> {
-                        long duration1 = parseDuration(a1.getDuration());
-                        long duration2 = parseDuration(a2.getDuration());
-                        return Long.compare(duration1, duration2);
-                    };
-                    Toast.makeText(this, getString(R.string.sort_by_duration_asc), Toast.LENGTH_SHORT).show();
-                    break;
-                
                 case SORT_BY_DURATION_DESC:
-                    // Sort by duration (longest first)
-                    comparator = (a1, a2) -> {
-                        long duration1 = parseDuration(a1.getDuration());
-                        long duration2 = parseDuration(a2.getDuration());
-                        return Long.compare(duration2, duration1);
-                    };
-                    Toast.makeText(this, getString(R.string.sort_by_duration_desc), Toast.LENGTH_SHORT).show();
-                    break;
+                    // Use our new method for duration sorting
+                    sortByDuration(currentSortOrder == SORT_BY_DURATION_DESC);
+                    return; // Exit early, as sortByDuration handles everything
                 
                 case SORT_BY_DATE_ASC:
                 case SORT_BY_DATE_DESC:
                     // For date sorting, we need to query MediaStore again
                     sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
                     return; // Exit early, as sortByDate handles the update
+                
+                case SORT_BY_SIZE_ASC:
+                case SORT_BY_SIZE_DESC:
+                    // For size sorting, query MediaStore again
+                    sortBySize(currentSortOrder == SORT_BY_SIZE_DESC);
+                    return; // Exit early, as sortBySize handles the update
             }
             
             if (comparator != null) {
@@ -1625,21 +1656,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // Add a helper method to parse duration strings
+    // Fix parseDuration to better handle large durations
     private long parseDuration(String durationStr) {
         try {
-            // Format is typically "m:ss"
+            // Format can be "m:ss" or "h:mm:ss"
             String[] parts = durationStr.split(":");
             
             if (parts.length == 2) {
-                int minutes = Integer.parseInt(parts[0]);
-                int seconds = Integer.parseInt(parts[1]);
+                long minutes = Long.parseLong(parts[0]);
+                long seconds = Long.parseLong(parts[1]);
                 return (minutes * 60L) + seconds;
             } else if (parts.length == 3) {
-                // Handle "h:mm:ss" format if present
-                int hours = Integer.parseInt(parts[0]);
-                int minutes = Integer.parseInt(parts[1]);
-                int seconds = Integer.parseInt(parts[2]);
+                // Handle "h:mm:ss" format
+                long hours = Long.parseLong(parts[0]);
+                long minutes = Long.parseLong(parts[1]);
+                long seconds = Long.parseLong(parts[2]);
                 return (hours * 3600L) + (minutes * 60L) + seconds;
             }
         } catch (NumberFormatException e) {
@@ -1655,7 +1686,8 @@ public class MainActivity extends AppCompatActivity {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
-                MediaStore.Audio.Media.DATE_ADDED
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.SIZE  // Add SIZE to projection
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -1674,17 +1706,20 @@ public class MainActivity extends AppCompatActivity {
             int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+            int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE); // Get size column
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
+                long size = cursor.getLong(sizeColumn); // Get the file size
                 String durationFormatted = formatTime((int)duration);
 
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+                // Add the size parameter to the constructor
+                sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
             }
             cursor.close();
             
@@ -1801,5 +1836,275 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, 
             getString(mixerModeActive ? R.string.mixer_mode_on : R.string.mixer_mode_off), 
             Toast.LENGTH_SHORT).show();
+    }
+
+    // Update the sortBySize method to ensure it shows all files
+    private void sortBySize(boolean descending) {
+        try {
+            // Log operation for debugging
+            Log.d(TAG, "Sorting by size " + (descending ? "DESC" : "ASC"));
+            
+            // Query ALL audio files with their sizes directly from MediaStore
+            String[] projection = {
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DATE_ADDED
+            };
+
+            String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+            
+            // No sort order in query to prevent MediaStore limitations
+            List<AudioFileSizePair> sizeInfoList = new ArrayList<>();
+            
+            Cursor cursor = getContentResolver().query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    null,
+                    null);  // No sort order - we'll sort in memory
+            
+            long largestSize = 0;
+            String largestFileName = "";
+            
+            if (cursor != null) {
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+                int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+                int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+                
+                Log.d(TAG, "Found " + cursor.getCount() + " music files in query");
+                
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idColumn);
+                    String title = cursor.getString(titleColumn);
+                    long duration = cursor.getLong(durationColumn);
+                    long size = cursor.getLong(sizeColumn);
+                    
+                    // Track the largest file for debugging
+                    if (size > largestSize) {
+                        largestSize = size;
+                        largestFileName = title;
+                    }
+                    
+                    // Log large files for debugging (files larger than 100MB)
+                    if (size > 100 * 1024 * 1024) {
+                        Log.d(TAG, "Large file found: " + title + " - Size: " + 
+                               (size / (1024 * 1024)) + " MB");
+                    }
+                    
+                    String durationFormatted;
+                    try {
+                        durationFormatted = formatTime((int)duration);
+                    } catch (Exception e) {
+                        if (duration > Integer.MAX_VALUE) {
+                            long hours = duration / 3600000;
+                            long minutes = (duration % 3600000) / 60000;
+                            long seconds = (duration % 60000) / 1000;
+                            durationFormatted = String.format("%d:%02d:%02d", hours, minutes, seconds);
+                        } else {
+                            durationFormatted = ">999 min";
+                        }
+                    }
+
+                    Uri contentUri = Uri.withAppendedPath(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+
+                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size);
+                    sizeInfoList.add(new AudioFileSizePair(audioFile, size));
+                }
+                cursor.close();
+                
+                // Log the largest file found
+                Log.d(TAG, "Largest file detected: " + largestFileName + " - Size: " + 
+                       (largestSize / (1024 * 1024)) + " MB");
+                
+                // Sort in memory using Java's comparator with explicit long comparison
+                sizeInfoList.sort((pair1, pair2) -> {
+                    // Ensure we use Long.compare for proper comparison of large values
+                    if (descending) {
+                        return Long.compare(pair2.size, pair1.size);
+                    } else {
+                        return Long.compare(pair1.size, pair2.size);
+                    }
+                });
+                
+                // Log top 5 files after sorting to verify
+                for (int i = 0; i < Math.min(5, sizeInfoList.size()); i++) {
+                    AudioFileSizePair pair = sizeInfoList.get(i);
+                    Log.d(TAG, "Top " + (i+1) + " file by size: " + pair.audioFile.getTitle() + 
+                           " - Size: " + (pair.size / (1024 * 1024)) + " MB");
+                }
+                
+                // Extract sorted AudioFile objects
+                List<AudioFile> sortedFiles = new ArrayList<>();
+                for (AudioFileSizePair pair : sizeInfoList) {
+                    sortedFiles.add(pair.audioFile);
+                }
+                
+                // Replace the current lists with the sorted list
+                allAudioFiles.clear();
+                allAudioFiles.addAll(sortedFiles);
+                
+                // Update filtered list based on current search
+                if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                    filterAudioFiles(searchEditText.getText().toString());
+                } else {
+                    // No search filter, update filtered list with all
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(allAudioFiles);
+                    // Update the UI
+                    updateAudioFilesList();
+                }
+                
+                // Show appropriate toast
+                Toast.makeText(this, getString(descending ? 
+                    R.string.sort_by_size_desc : R.string.sort_by_size_asc), Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error during size sorting", e);
+            Toast.makeText(this, "Error sorting by size", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // Add a helper class to associate AudioFile with its size for sorting
+    private static class AudioFileSizePair {
+        AudioFile audioFile;
+        long size;
+        
+        AudioFileSizePair(AudioFile audioFile, long size) {
+            this.audioFile = audioFile;
+            this.size = size;
+        }
+    }
+
+    // Update the sortByDuration method for better handling of very long files
+    private void sortByDuration(boolean descending) {
+        try {
+            Log.d(TAG, "Sorting by duration " + (descending ? "DESC" : "ASC"));
+            
+            String[] projection = {
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.SIZE,  // Include SIZE
+                    MediaStore.Audio.Media.DATE_ADDED
+            };
+
+            String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+            
+            // No sorting in the query - we'll sort in memory
+            List<AudioFileDurationPair> durationInfoList = new ArrayList<>();
+            
+            Cursor cursor = getContentResolver().query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    null,
+                    null);  // No sort order - to avoid MediaStore limitations
+            
+            if (cursor != null) {
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+                int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+                int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+                
+                Log.d(TAG, "Found " + cursor.getCount() + " music files in query");
+                
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idColumn);
+                    String title = cursor.getString(titleColumn);
+                    long duration = cursor.getLong(durationColumn);
+                    long size = cursor.getLong(sizeColumn);  // Get file size
+                    
+                    Uri contentUri = Uri.withAppendedPath(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                    
+                    String durationFormatted;
+                    try {
+                        durationFormatted = formatTime((int)duration);
+                    } catch (Exception e) {
+                        // Handle extremely long durations that might cause integer overflow
+                        if (duration > Integer.MAX_VALUE) {
+                            long hours = duration / 3600000;
+                            long minutes = (duration % 3600000) / 60000;
+                            long seconds = (duration % 60000) / 1000;
+                            durationFormatted = String.format("%d:%02d:%02d", hours, minutes, seconds);
+                        } else {
+                            durationFormatted = ">999 min";
+                        }
+                        Log.e(TAG, "Error formatting long duration: " + duration, e);
+                    }
+                    
+                    // Updated constructor with size parameter
+                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size);
+                    durationInfoList.add(new AudioFileDurationPair(audioFile, duration));
+                    
+                    // Log very long durations for debugging
+                    if (duration > 10800000) { // > 3 hours
+                        Log.d(TAG, "Long duration file found: " + title + 
+                               " - Duration: " + duration + "ms (" + durationFormatted + ")");
+                    }
+                }
+                cursor.close();
+                
+                // Sort in memory using Java's comparator
+                durationInfoList.sort((pair1, pair2) -> {
+                    if (descending) {
+                        return Long.compare(pair2.duration, pair1.duration);
+                    } else {
+                        return Long.compare(pair1.duration, pair2.duration);
+                    }
+                });
+                
+                // Extract sorted AudioFile objects
+                List<AudioFile> sortedFiles = new ArrayList<>();
+                for (AudioFileDurationPair pair : durationInfoList) {
+                    sortedFiles.add(pair.audioFile);
+                    
+                    // Log the top 10 files if descending (longest first)
+                    if (descending && sortedFiles.size() <= 10) {
+                        Log.d(TAG, "Top duration file " + sortedFiles.size() + ": " + 
+                               pair.audioFile.getTitle() + " - " + 
+                               pair.audioFile.getDuration() + " (" + pair.duration + "ms)");
+                    }
+                }
+                
+                // Replace the current lists with the sorted list
+                allAudioFiles.clear();
+                allAudioFiles.addAll(sortedFiles);
+                
+                // Update filtered list based on current search
+                if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                    filterAudioFiles(searchEditText.getText().toString());
+                } else {
+                    // No search filter, update filtered list with all
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(allAudioFiles);
+                    // Update the UI
+                    updateAudioFilesList();
+                }
+                
+                // Show appropriate toast
+                Toast.makeText(this, getString(descending ? 
+                    R.string.sort_by_duration_desc : R.string.sort_by_duration_asc), 
+                    Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error during duration sorting", e);
+            Toast.makeText(this, "Error sorting by duration", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // Add a helper class for duration sorting
+    private static class AudioFileDurationPair {
+        AudioFile audioFile;
+        long duration;
+        
+        AudioFileDurationPair(AudioFile audioFile, long duration) {
+            this.audioFile = audioFile;
+            this.duration = duration;
+        }
     }
 }

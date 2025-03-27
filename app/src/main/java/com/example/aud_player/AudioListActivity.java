@@ -48,7 +48,8 @@ public class AudioListActivity extends AppCompatActivity {
         String[] projection = {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
-                MediaStore.Audio.Media.DURATION
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.SIZE
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -66,17 +67,19 @@ public class AudioListActivity extends AppCompatActivity {
             int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+            int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
+                long size = cursor.getLong(sizeColumn);
                 String durationFormatted = formatDuration(duration);
 
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                audioFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+                audioFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
             }
             cursor.close();
         }

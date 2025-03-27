@@ -93,6 +93,14 @@
                 android:id="@+id/sort_date_desc"
                 android:title="@string/sort_by_date_desc"
                 android:checkable="true"/>
+            <item
+                android:id="@+id/sort_size_asc"
+                android:title="@string/sort_by_size_asc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_size_desc"
+                android:title="@string/sort_by_size_desc"
+                android:checkable="true"/>
         </menu>
     </item>
 </menu> 

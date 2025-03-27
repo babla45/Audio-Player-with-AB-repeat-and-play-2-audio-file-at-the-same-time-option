@@ -61,4 +61,6 @@
     <string name="toggle_mixer_mode">Toggle Mixer Mode</string>
     <string name="mixer_mode_on">Mixer Mode ON - Select Secondary Audio</string>
     <string name="mixer_mode_off">Mixer Mode OFF - Select Primary Audio</string>
+    <string name="sort_by_size_asc">Sort by Size (Smallest First)</string>
+    <string name="sort_by_size_desc">Sort by Size (Largest First)</string>
 </resources>
