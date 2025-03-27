@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
+        android:id="@+id/menu_browse_files"
+        android:title="@string/browse_files" />
+        
+    <item
         android:id="@+id/menu_timer"
         android:title="@string/timer">
         <menu>
@@ -38,6 +42,25 @@
             <item
                 android:id="@+id/ab_clear_points"
                 android:title="@string/clear_ab_points" />
+        </menu>
+    </item>
+    
+    <item
+        android:id="@+id/menu_mixer"
+        android:title="@string/music_mixer">
+        <menu>
+            <item
+                android:id="@+id/mixer_select_second"
+                android:title="@string/select_second_audio" />
+            <item
+                android:id="@+id/mixer_browse_second"
+                android:title="@string/second_audio" />
+            <item
+                android:id="@+id/mixer_clear_second"
+                android:title="@string/clear_second_audio" />
+            <item
+                android:id="@+id/mixer_balance"
+                android:title="@string/adjust_balance" />
         </menu>
     </item>
 </menu> 

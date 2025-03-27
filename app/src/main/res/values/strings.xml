@@ -32,4 +32,19 @@
     <string name="ab_repeat_active">A-B Repeat active</string>
     <string name="ab_repeat_cleared">A-B Repeat cleared</string>
     <string name="point_b_before_a">Point B must be after Point A</string>
+    <string name="music_mixer">Music Mixer</string>
+    <string name="select_second_audio">Select Second Audio</string>
+    <string name="clear_second_audio">Clear Second Audio</string>
+    <string name="adjust_balance">Adjust Balance</string>
+    <string name="second_file_selected">Second file: %1$s</string>
+    <string name="mixer_active">Mixer active with 2 files</string>
+    <string name="second_file_cleared">Second audio cleared</string>
+    <string name="balance_dialog_title">Adjust Audio Balance</string>
+    <string name="first_audio">First Audio</string>
+    <string name="balance_saved">Balance saved</string>
+    <string name="audio_files">Audio Files</string>
+    <string name="no_audio_files">No audio files found</string>
+    <string name="audio_icon">Audio icon</string>
+    <string name="browse_files">Browse Audio Files</string>
+    <string name="second_audio">Select Second Audio</string>
 </resources>

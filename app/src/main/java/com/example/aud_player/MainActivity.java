@@ -33,10 +33,19 @@ import com.google.android.material.button.MaterialButton;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import android.provider.MediaStore;
+import android.database.Cursor;
+import java.util.ArrayList;
+import java.util.List;
+
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "AudioPlayerApp";
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final int REQUEST_BROWSE_AUDIO = 1001;
+    private static final int REQUEST_BROWSE_SECOND_AUDIO = 1002;
     
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -56,6 +65,17 @@ public class MainActivity extends AppCompatActivity {
     private int pointB = -1;
     private boolean abRepeatActive = false;
     private TextView abRepeatIndicator;
+    private MediaPlayer secondMediaPlayer = null;
+    private Uri secondAudioUri = null;
+    private boolean secondAudioActive = false;
+    private TextView mixerIndicator;
+    private float firstAudioVolume = 1.0f;
+    private float secondAudioVolume = 1.0f;
+
+    private RecyclerView audioRecyclerView;
+    private TextView emptyView;
+    private List<AudioFile> audioFiles = new ArrayList<>();
+    private AudioAdapter audioAdapter;
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -88,11 +108,48 @@ public class MainActivity extends AppCompatActivity {
                 isPermissionGranted = isGranted;
                 if (isGranted) {
                     Toast.makeText(this, "Permission granted", Toast.LENGTH_SHORT).show();
+                    // Load audio files after permission is granted
+                    loadAudioFiles();
                 } else {
                     Toast.makeText(this, "Permission denied. Cannot access audio files.", 
                                    Toast.LENGTH_LONG).show();
                 }
             });
+
+    // Create a second activity result launcher for the second audio file
+    private final ActivityResultLauncher<Intent> secondAudioPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getData();
+                    if (uri != null) {
+                        secondAudioUri = uri;
+                        String fileName = getFileNameFromUri(uri);
+                        
+                        // Display toast with selected file
+                        Toast.makeText(this, 
+                            getString(R.string.second_file_selected, fileName), 
+                            Toast.LENGTH_SHORT).show();
+                        
+                        // Take persistent permission for this URI
+                        try {
+                            getContentResolver().takePersistableUriPermission(uri, 
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        } catch (SecurityException e) {
+                            Log.e(TAG, "Failed to take persistable URI permission", e);
+                        }
+                        
+                        // Prepare the second media player
+                        prepareSecondMediaPlayer();
+                        
+                        // Show mixer indicator
+                        if (mixerIndicator != null) {
+                            mixerIndicator.setVisibility(View.VISIBLE);
+                        }
+                    }
+                }
+            }
+    );
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +164,11 @@ public class MainActivity extends AppCompatActivity {
         
         // Check for permissions
         checkPermissions();
+        
+        // Load audio files if permission granted
+        if (isPermissionGranted) {
+            loadAudioFiles();
+        }
     }
     
     private void initializeViews() {
@@ -121,6 +183,14 @@ public class MainActivity extends AppCompatActivity {
             menuButton = findViewById(R.id.menuButton);
             timerIndicator = findViewById(R.id.timerIndicator);
             abRepeatIndicator = findViewById(R.id.abRepeatIndicator);
+            mixerIndicator = findViewById(R.id.mixerIndicator);
+            
+            // New view initializations for audio files list
+            audioRecyclerView = findViewById(R.id.audioRecyclerView);
+            emptyView = findViewById(R.id.emptyView);
+            
+            // Setup RecyclerView
+            audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -143,10 +213,22 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     if (isPlaying) {
                         mediaPlayer.pause();
+                        
+                        // Also pause the second audio if it's active
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.pause();
+                        }
+                        
                         playPauseButton.setIconResource(R.drawable.ic_play);
                         isPlaying = false;
                     } else {
                         mediaPlayer.start();
+                        
+                        // Also start the second audio if it's ready
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.start();
+                        }
+                        
                         playPauseButton.setIconResource(R.drawable.ic_pause);
                         isPlaying = true;
                         updateSeekBar();
@@ -163,6 +245,30 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     if (mediaPlayer.isPlaying()) {
                         mediaPlayer.stop();
+                        
+                        // Also stop the second audio if it's active
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            try {
+                                if (secondMediaPlayer.isPlaying()) {
+                                    secondMediaPlayer.stop();
+                                }
+                                // Prepare it again properly
+                                secondMediaPlayer.reset();
+                                secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+                                secondMediaPlayer.prepareAsync();
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error stopping/resetting second player", e);
+                                // If reset fails, release and recreate
+                                try {
+                                    secondMediaPlayer.release();
+                                    secondMediaPlayer = null;
+                                    prepareSecondMediaPlayer();
+                                } catch (Exception ex) {
+                                    Log.e(TAG, "Error recreating second player", ex);
+                                }
+                            }
+                        }
+                        
                         playPauseButton.setIconResource(R.drawable.ic_play);
                         isPlaying = false;
                     }
@@ -188,6 +294,19 @@ public class MainActivity extends AppCompatActivity {
                 if (fromUser && mediaPlayer != null) {
                     try {
                         mediaPlayer.seekTo(progress);
+                        
+                        // Synchronize the second player position when user seeks
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            // Calculate relative position in second audio
+                            float mainDuration = mediaPlayer.getDuration();
+                            float secondDuration = secondMediaPlayer.getDuration();
+                            float positionPercentage = progress / mainDuration;
+                            int secondPosition = (int) (positionPercentage * secondDuration);
+                            
+                            // Seek second player to the relative position
+                            secondMediaPlayer.seekTo(secondPosition);
+                        }
+                        
                         updateTimeText(progress, mediaPlayer.getDuration());
                     } catch (IllegalStateException e) {
                         Log.e(TAG, "Error seeking media player", e);
@@ -325,10 +444,21 @@ public class MainActivity extends AppCompatActivity {
             try {
                 int currentPosition = mediaPlayer.getCurrentPosition();
                 
+                // Check if A-B repeat is active and we need to loop
                 if (abRepeatActive && pointA != -1 && pointB != -1) {
                     if (currentPosition >= pointB) {
+                        // Reached point B, loop back to point A
                         mediaPlayer.seekTo(pointA);
                         currentPosition = pointA;
+                        
+                        // Also seek second player if active
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            float mainDuration = mediaPlayer.getDuration();
+                            float secondDuration = secondMediaPlayer.getDuration();
+                            float aPercentage = pointA / mainDuration;
+                            int secondPositionA = (int) (aPercentage * secondDuration);
+                            secondMediaPlayer.seekTo(secondPositionA);
+                        }
                     }
                 }
                 
@@ -372,6 +502,17 @@ public class MainActivity extends AppCompatActivity {
         PopupMenu popup = new PopupMenu(this, v);
         popup.getMenuInflater().inflate(R.menu.audio_player_menu, popup.getMenu());
         
+        // Since we now show audio files directly, we can remove Browse Files options from menu
+        MenuItem browseItem = popup.getMenu().findItem(R.id.menu_browse_files);
+        if (browseItem != null) {
+            browseItem.setVisible(false);
+        }
+        
+        MenuItem browseSecondItem = popup.getMenu().findItem(R.id.mixer_browse_second);
+        if (browseSecondItem != null) {
+            browseSecondItem.setVisible(false);
+        }
+        
         // If a timer is already active, check the appropriate item
         if (timerActive) {
             MenuItem currentTimer = null;
@@ -386,6 +527,12 @@ public class MainActivity extends AppCompatActivity {
             if (sleepTimer != null) {
                 sleepTimer.cancel();
                 timerActive = false;
+            }
+            
+            // Handle browse files option
+            if (itemId == R.id.menu_browse_files) {
+                browseAudioFiles(false);
+                return true;
             }
             
             // Set new timer based on selection
@@ -418,6 +565,21 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             } else if (itemId == R.id.ab_clear_points) {
                 clearABPoints();
+                return true;
+            }
+            
+            // Handle Mixer menu items with new browse option
+            else if (itemId == R.id.mixer_select_second) {
+                selectSecondAudio();
+                return true;
+            } else if (itemId == R.id.mixer_browse_second) {
+                browseAudioFiles(true);
+                return true;
+            } else if (itemId == R.id.mixer_clear_second) {
+                clearSecondAudio();
+                return true;
+            } else if (itemId == R.id.mixer_balance) {
+                showBalanceDialog();
                 return true;
             }
             
@@ -600,11 +762,285 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     
+    private void selectSecondAudio() {
+        if (isPermissionGranted) {
+            // First check if we have a valid first audio file
+            if (selectedAudioUri == null) {
+                Toast.makeText(this, "Please select a primary audio file first", 
+                    Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            // Save current states before selection
+            checkMediaPlayersState();
+            
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("audio/*");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            
+            try {
+                // Use the second launcher explicitly for the second file
+                secondAudioPickerLauncher.launch(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Error launching second audio picker", e);
+                Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            checkPermissions();
+            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void clearSecondAudio() {
+        if (secondMediaPlayer != null) {
+            try {
+                if (secondMediaPlayer.isPlaying()) {
+                    secondMediaPlayer.stop();
+                }
+                secondMediaPlayer.release();
+                secondMediaPlayer = null;
+            } catch (Exception e) {
+                Log.e(TAG, "Error clearing second audio", e);
+            }
+        }
+        
+        secondAudioUri = null;
+        secondAudioActive = false;
+        
+        // Hide the mixer indicator
+        if (mixerIndicator != null) {
+            mixerIndicator.setVisibility(View.GONE);
+        }
+        
+        Toast.makeText(this, R.string.second_file_cleared, Toast.LENGTH_SHORT).show();
+    }
+    
+    private void showBalanceDialog() {
+        if (secondAudioUri == null || secondMediaPlayer == null) {
+            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_audio_balance, null);
+        
+        SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
+        SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
+        
+        // Set initial values based on current volume
+        firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
+        secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
+        
+        // Create method to apply volume immediately
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.balance_dialog_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.ok, (dialogInterface, i) -> {
+                // Save the new volumes and apply them
+                applyAudioVolumes(
+                    firstAudioSeekBar.getProgress() / 100f,
+                    secondAudioSeekBar.getProgress() / 100f
+                );
+                Toast.makeText(this, R.string.balance_saved, Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(R.string.cancel, (dialogInterface, i) -> {
+                // Restore original volumes on cancel
+                applyAudioVolumes(firstAudioVolume, secondAudioVolume);
+            })
+            .create();
+        
+        // Set real-time volume adjustment as user moves the seekbars
+        firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null) {
+                    float volume = progress / 100f;
+                    mediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && secondMediaPlayer != null) {
+                    float volume = progress / 100f;
+                    secondMediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        dialog.show();
+    }
+    
+    private void applyAudioVolumes(float firstVolume, float secondVolume) {
+        // Store the values
+        firstAudioVolume = firstVolume;
+        secondAudioVolume = secondVolume;
+        
+        // Apply to players
+        try {
+            if (mediaPlayer != null) {
+                mediaPlayer.setVolume(firstAudioVolume, firstAudioVolume);
+            }
+            
+            if (secondMediaPlayer != null && secondAudioActive) {
+                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+            }
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Error setting audio volumes", e);
+        }
+    }
+    
+    private void prepareSecondMediaPlayer() {
+        if (secondAudioUri == null) return;
+        
+        // Log the initial state before any changes
+        Log.d(TAG, "Before preparing second player:");
+        checkMediaPlayersState();
+        
+        // Save the state of the first player
+        boolean wasPlaying = false;
+        int firstPosition = 0;
+        if (mediaPlayer != null && selectedAudioUri != null) {
+            try {
+                wasPlaying = mediaPlayer.isPlaying();
+                firstPosition = mediaPlayer.getCurrentPosition();
+                Log.d(TAG, "Saved first player state: playing=" + wasPlaying + ", position=" + firstPosition);
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Error checking first player state", e);
+            }
+        }
+        
+        // Release existing second player if needed
+        if (secondMediaPlayer != null) {
+            try {
+                secondMediaPlayer.release();
+            } catch (Exception e) {
+                Log.e(TAG, "Error releasing second media player", e);
+            }
+            secondMediaPlayer = null;
+        }
+        
+        // Create new second media player - use a completely separate instance creation
+        secondMediaPlayer = new MediaPlayer();
+        
+        try {
+            // Use a completely separate preparation path for the second player
+            secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+            
+            // Set listeners with careful error handling
+            secondMediaPlayer.setOnPreparedListener(mp -> {
+                secondAudioActive = true;
+                
+                // Set volume based on saved balance
+                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+                
+                // Log the state after second player is prepared
+                Log.d(TAG, "Second player prepared:");
+                checkMediaPlayersState();
+                
+                // Start playing the second audio if the first one is playing
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    try {
+                        // Start second audio at position relative to first audio
+                        syncSecondPlayerPosition();
+                        secondMediaPlayer.start();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error starting second audio", e);
+                    }
+                }
+            });
+            
+            // Error listener with improved error handling
+            secondMediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "Second MediaPlayer error: " + what + ", " + extra);
+                Toast.makeText(MainActivity.this, 
+                    "Error with second audio file", Toast.LENGTH_SHORT).show();
+                
+                secondAudioActive = false;
+                if (secondMediaPlayer != null) {
+                    try {
+                        secondMediaPlayer.release();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error releasing second player after error", e);
+                    }
+                    secondMediaPlayer = null;
+                }
+                return true;
+            });
+            
+            // Prepare the player asynchronously
+            secondMediaPlayer.prepareAsync();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error preparing second media player", e);
+            Toast.makeText(this, "Error loading second audio file", Toast.LENGTH_SHORT).show();
+            secondAudioActive = false;
+        }
+        
+        // Verify first player state is preserved
+        if (mediaPlayer != null && selectedAudioUri != null) {
+            try {
+                boolean isStillPlaying = mediaPlayer.isPlaying();
+                if (wasPlaying && !isStillPlaying) {
+                    Log.d(TAG, "First player stopped playing during second player prep, restarting");
+                    mediaPlayer.start();
+                }
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Error checking first player state after second player prep", e);
+                // First player may have been reset - try to restore it
+                prepareMediaPlayer();
+                if (wasPlaying) {
+                    try {
+                        mediaPlayer.seekTo(firstPosition);
+                        mediaPlayer.start();
+                    } catch (Exception ex) {
+                        Log.e(TAG, "Failed to restore first player", ex);
+                    }
+                }
+            }
+        }
+    }
+    
+    private void syncSecondPlayerPosition() {
+        if (mediaPlayer == null || secondMediaPlayer == null || !secondAudioActive) {
+            return;
+        }
+        
+        try {
+            float mainDuration = mediaPlayer.getDuration();
+            float mainPosition = mediaPlayer.getCurrentPosition();
+            float positionPercentage = mainPosition / mainDuration;
+            
+            float secondDuration = secondMediaPlayer.getDuration();
+            int secondPosition = (int) (positionPercentage * secondDuration);
+            
+            secondMediaPlayer.seekTo(secondPosition);
+        } catch (Exception e) {
+            Log.e(TAG, "Error syncing second player position", e);
+        }
+    }
+    
     @Override
     protected void onPause() {
         super.onPause();
         if (mediaPlayer != null && mediaPlayer.isPlaying()) {
             mediaPlayer.pause();
+            
+            // Also pause the second audio
+            if (secondMediaPlayer != null && secondAudioActive) {
+                secondMediaPlayer.pause();
+            }
+            
             playPauseButton.setIconResource(R.drawable.ic_play);
             isPlaying = false;
         }
@@ -614,6 +1050,17 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         releaseMediaPlayer();
+        
+        // Release the second media player
+        if (secondMediaPlayer != null) {
+            try {
+                secondMediaPlayer.release();
+                secondMediaPlayer = null;
+            } catch (Exception e) {
+                Log.e(TAG, "Error releasing second media player", e);
+            }
+        }
+        
         if (handler != null) {
             handler.removeCallbacks(runnable);
         }
@@ -621,6 +1068,271 @@ public class MainActivity extends AppCompatActivity {
         // Cancel any active timer
         if (sleepTimer != null) {
             sleepTimer.cancel();
+        }
+    }
+
+    // Add this helper method to check both MediaPlayer instances
+    private void checkMediaPlayersState() {
+        // Log the state of both MediaPlayers
+        Log.d(TAG, "MediaPlayer 1 state: " + 
+            (mediaPlayer == null ? "null" : 
+                (selectedAudioUri == null ? "no URI" : 
+                    (mediaPlayer.isPlaying() ? "playing" : "prepared"))));
+            
+        Log.d(TAG, "MediaPlayer 2 state: " + 
+            (secondMediaPlayer == null ? "null" : 
+                (secondAudioUri == null ? "no URI" : 
+                    (secondAudioActive ? "active" : "inactive"))));
+    }
+
+    // Add this method to launch the AudioListActivity
+    private void browseAudioFiles(boolean selectSecondFile) {
+        if (isPermissionGranted) {
+            // For second file selection, ensure first file is selected
+            if (selectSecondFile && selectedAudioUri == null) {
+                Toast.makeText(this, "Please select a primary audio file first", 
+                    Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            Intent intent = new Intent(this, AudioListActivity.class);
+            intent.putExtra("select_second_file", selectSecondFile);
+            startActivityForResult(intent, selectSecondFile ? REQUEST_BROWSE_SECOND_AUDIO : REQUEST_BROWSE_AUDIO);
+        } else {
+            checkPermissions();
+            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // Override onActivityResult to handle returning from AudioListActivity
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            
+            if (requestCode == REQUEST_BROWSE_AUDIO) {
+                // Handle primary audio selection
+                selectedAudioUri = uri;
+                String fileName = getFileNameFromUri(uri);
+                fileNameText.setText(fileName);
+                
+                // Take persistent permission
+                try {
+                    getContentResolver().takePersistableUriPermission(uri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException e) {
+                    Log.e(TAG, "Failed to take persistable URI permission", e);
+                }
+                
+                prepareMediaPlayer();
+                
+            } else if (requestCode == REQUEST_BROWSE_SECOND_AUDIO) {
+                // Handle second audio selection
+                secondAudioUri = uri;
+                String fileName = getFileNameFromUri(uri);
+                
+                // Take persistent permission
+                try {
+                    getContentResolver().takePersistableUriPermission(uri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException e) {
+                    Log.e(TAG, "Failed to take persistable URI permission", e);
+                }
+                
+                Toast.makeText(this, getString(R.string.second_file_selected, fileName), 
+                    Toast.LENGTH_SHORT).show();
+                
+                // Prepare the second media player
+                prepareSecondMediaPlayer();
+                
+                // Show mixer indicator
+                if (mixerIndicator != null) {
+                    mixerIndicator.setVisibility(View.VISIBLE);
+                }
+            }
+        }
+    }
+
+    private void loadAudioFiles() {
+        // Query for all audio files
+        String[] projection = {
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.DURATION
+        };
+
+        String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+
+        Cursor cursor = getContentResolver().query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                MediaStore.Audio.Media.TITLE + " ASC");
+
+        if (cursor != null) {
+            audioFiles.clear();
+            
+            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+            int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+            int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+
+            while (cursor.moveToNext()) {
+                long id = cursor.getLong(idColumn);
+                String title = cursor.getString(titleColumn);
+                long duration = cursor.getLong(durationColumn);
+                String durationFormatted = formatTime((int)duration);
+
+                Uri contentUri = Uri.withAppendedPath(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+
+                audioFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+            }
+            cursor.close();
+        }
+
+        // Show empty view if no audio files
+        if (audioFiles.isEmpty()) {
+            audioRecyclerView.setVisibility(View.GONE);
+            emptyView.setVisibility(View.VISIBLE);
+        } else {
+            audioRecyclerView.setVisibility(View.VISIBLE);
+            emptyView.setVisibility(View.GONE);
+            
+            // Setup adapter with modified click listener
+            audioAdapter = new AudioAdapter(audioFiles);
+            
+            // Always show the selection dialog when an audio file is clicked
+            audioAdapter.setOnItemClickListener(audioFile -> showAudioSelectionDialog(audioFile));
+            
+            audioRecyclerView.setAdapter(audioAdapter);
+        }
+    }
+
+    private void onAudioFileSelected(AudioFile audioFile) {
+        // Handle primary audio selection
+        selectedAudioUri = audioFile.getUri();
+        String fileName = audioFile.getTitle();
+        fileNameText.setText(fileName);
+        
+        // Take persistent permission
+        try {
+            getContentResolver().takePersistableUriPermission(selectedAudioUri, 
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Failed to take persistable URI permission", e);
+        }
+        
+        prepareMediaPlayer();
+        
+        // Highlight the selected item - if you want to add this feature
+        highlightSelectedAudio(audioFile);
+    }
+
+    private void highlightSelectedAudio(AudioFile audioFile) {
+        // This would require additional code in your adapter to track the selected item
+        // For a simple approach, you can just show a toast
+        Toast.makeText(this, "Now playing: " + audioFile.getTitle(), Toast.LENGTH_SHORT).show();
+    }
+
+    public void onSecondAudioSelected(AudioFile audioFile) {
+        // Make sure primary audio is selected first
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "Please select a primary audio file first", 
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Check if trying to use the same file for both primary and secondary
+        if (selectedAudioUri.equals(audioFile.getUri())) {
+            Toast.makeText(this, "Cannot use the same file for both primary and secondary audio", 
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Handle second audio selection - rest of the code remains the same
+        secondAudioUri = audioFile.getUri();
+        String fileName = audioFile.getTitle();
+        
+        // Take persistent permission
+        try {
+            getContentResolver().takePersistableUriPermission(secondAudioUri, 
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Failed to take persistable URI permission", e);
+        }
+        
+        Toast.makeText(this, getString(R.string.second_file_selected, fileName), 
+            Toast.LENGTH_SHORT).show();
+        
+        // Prepare the second media player
+        prepareSecondMediaPlayer();
+        
+        // Show mixer indicator
+        if (mixerIndicator != null) {
+            mixerIndicator.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showAudioSelectionDialog(AudioFile audioFile) {
+        // Create appropriate dialog options based on current state
+        String[] options;
+        if (selectedAudioUri == null) {
+            // No primary audio set yet, only show primary option
+            options = new String[]{"Play as primary audio"};
+        } else {
+            // Primary audio is set, show both options
+            options = new String[]{"Play as primary audio", "Set as second audio (mixer)"};
+        }
+        
+        new AlertDialog.Builder(this)
+            .setTitle("Select Audio Option")
+            .setItems(options, (dialog, which) -> {
+                if (which == 0) {
+                    // Primary audio
+                    onAudioFileSelected(audioFile);
+                } else if (which == 1) {
+                    // Secondary audio
+                    onSecondAudioSelected(audioFile);
+                }
+            })
+            .show();
+    }
+
+    private void setupAudioRecyclerView() {
+        // Setup RecyclerView
+        audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
+        
+        // Setup adapter
+        audioAdapter = new AudioAdapter(audioFiles);
+        audioAdapter.setOnItemClickListener(audioFile -> {
+            if (secondAudioUri == null) {
+                // If no second audio is active, just play the selected file
+                onAudioFileSelected(audioFile);
+            } else {
+                // If mixer mode is active, show selection dialog
+                showAudioSelectionDialog(audioFile);
+            }
+        });
+        audioRecyclerView.setAdapter(audioAdapter);
+    }
+
+    // Add this method to allow refreshing the audio files list
+    public void refreshAudioFiles() {
+        if (isPermissionGranted) {
+            loadAudioFiles();
+        }
+    }
+
+    // Modify onResume to refresh the list when returning to the app
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Refresh audio files list in case new files were added
+        if (isPermissionGranted) {
+            refreshAudioFiles();
         }
     }
 }
