@@ -181,6 +181,9 @@ public class MainActivity extends AppCompatActivity {
             }
     );
 
+    // Add this as a class field
+    private boolean shouldAutoPlay = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -237,6 +240,13 @@ public class MainActivity extends AppCompatActivity {
             
             // Initialize mixer toggle button
             mixerToggleButton = findViewById(R.id.mixerToggleButton);
+            
+            // Set default color to gray
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
+            } else {
+                mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -486,8 +496,22 @@ public class MainActivity extends AppCompatActivity {
                     seekBar.setMax(mp.getDuration());
                     totalTimeText.setText(formatTime(mp.getDuration()));
                     currentTimeText.setText("0:00");
-                    playPauseButton.setIconResource(R.drawable.ic_play);
-                    isPlaying = false;
+                    
+                    // Check if we should auto-play
+                    if (shouldAutoPlay) {
+                        // Start playing automatically
+                        mediaPlayer.start();
+                        playPauseButton.setIconResource(R.drawable.ic_pause);
+                        isPlaying = true;
+                        updateSeekBar();
+                        
+                        // Reset the flag after use
+                        shouldAutoPlay = false;
+                    } else {
+                        // Standard behavior - don't auto-play
+                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        isPlaying = false;
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error in onPrepared", e);
                 }
@@ -501,6 +525,7 @@ public class MainActivity extends AppCompatActivity {
                 initMediaPlayer();
                 playPauseButton.setIconResource(R.drawable.ic_play);
                 isPlaying = false;
+                shouldAutoPlay = false; // Reset flag on error
                 return true; // Error handled
             });
             
@@ -525,9 +550,11 @@ public class MainActivity extends AppCompatActivity {
         } catch (IOException e) {
             Log.e(TAG, "Error preparing media player", e);
             Toast.makeText(this, "Error loading audio file", Toast.LENGTH_SHORT).show();
+            shouldAutoPlay = false; // Reset flag on error
         } catch (IllegalArgumentException | IllegalStateException | SecurityException e) {
             Log.e(TAG, "Media player error", e);
             Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
+            shouldAutoPlay = false; // Reset flag on error
         }
     }
     
@@ -946,8 +973,13 @@ public class MainActivity extends AppCompatActivity {
         
         // Turn off mixer mode when second audio is cleared
         mixerModeActive = false;
-        mixerToggleButton.setTextColor(
-            getResources().getColor(android.R.color.darker_gray, null));
+        
+        // Reset color to gray
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
+        } else {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+        }
         
         // Hide the mixer indicator
         if (mixerIndicator != null) {
@@ -1375,6 +1407,9 @@ public class MainActivity extends AppCompatActivity {
         String fileName = audioFile.getTitle();
         fileNameText.setText(fileName);
         
+        // Set flag to auto-play after preparation
+        shouldAutoPlay = true;
+        
         // Take persistent permission
         try {
             getContentResolver().takePersistableUriPermission(selectedAudioUri, 
@@ -1385,7 +1420,7 @@ public class MainActivity extends AppCompatActivity {
         
         prepareMediaPlayer();
         
-        // Highlight the selected item - if you want to add this feature
+        // Highlight the selected item
         highlightSelectedAudio(audioFile);
     }
 
@@ -1410,7 +1445,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         
-        // Handle second audio selection - rest of the code remains the same
+        // Handle second audio selection
         secondAudioUri = audioFile.getUri();
         String fileName = audioFile.getTitle();
         
@@ -1427,6 +1462,15 @@ public class MainActivity extends AppCompatActivity {
         
         // Prepare the second media player
         prepareSecondMediaPlayer();
+        
+        // If primary audio is not playing, start it with the second audio
+        if (mediaPlayer != null && !mediaPlayer.isPlaying() && shouldAutoPlay) {
+            mediaPlayer.start();
+            playPauseButton.setIconResource(R.drawable.ic_pause);
+            isPlaying = true;
+            updateSeekBar();
+            shouldAutoPlay = false;
+        }
         
         // Show mixer indicator
         if (mixerIndicator != null) {
