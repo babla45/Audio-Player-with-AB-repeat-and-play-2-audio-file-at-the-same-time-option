@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/menu_timer"
+        android:title="@string/timer">
+        <menu>
+            <item
+                android:id="@+id/timer_off"
+                android:title="@string/timer_off" />
+            <item
+                android:id="@+id/timer_15"
+                android:title="@string/timer_15_min" />
+            <item
+                android:id="@+id/timer_30"
+                android:title="@string/timer_30_min" />
+            <item
+                android:id="@+id/timer_45"
+                android:title="@string/timer_45_min" />
+            <item
+                android:id="@+id/timer_60"
+                android:title="@string/timer_60_min" />
+            <item
+                android:id="@+id/timer_custom"
+                android:title="@string/timer_custom" />
+        </menu>
+    </item>
+    
+    <item
+        android:id="@+id/menu_ab_repeat"
+        android:title="@string/ab_repeat">
+        <menu>
+            <item
+                android:id="@+id/ab_set_point_a"
+                android:title="@string/set_point_a" />
+            <item
+                android:id="@+id/ab_set_point_b"
+                android:title="@string/set_point_b" />
+            <item
+                android:id="@+id/ab_clear_points"
+                android:title="@string/clear_ab_points" />
+        </menu>
+    </item>
+</menu> 
