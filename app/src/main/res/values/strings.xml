@@ -57,4 +57,5 @@
     <string name="search_icon">Search icon</string>
     <string name="search_audio_files">Search audio files...</string>
     <string name="no_matching_files">No matching audio files found</string>
+    <string name="clear_search">Clear search</string>
 </resources>

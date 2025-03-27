@@ -21,6 +21,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -98,6 +99,9 @@ public class MainActivity extends AppCompatActivity {
     private EditText searchEditText;
     private List<AudioFile> allAudioFiles = new ArrayList<>(); // Store all files
     private List<AudioFile> filteredAudioFiles = new ArrayList<>(); // Store filtered results
+
+    // Add this as a class variable
+    private ImageView clearSearchButton;
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -214,8 +218,9 @@ public class MainActivity extends AppCompatActivity {
             // Setup RecyclerView
             audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
             
-            // Initialize search EditText
+            // Initialize search EditText and clear button
             searchEditText = findViewById(R.id.searchEditText);
+            clearSearchButton = findViewById(R.id.clearSearchButton);
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -349,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
         // Add the menu button listener
         menuButton.setOnClickListener(v -> showPopupMenu(v));
         
-        // Add search functionality
+        // Add search functionality with clear button toggle
         searchEditText.addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -358,6 +363,9 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
+                // Update clear button visibility
+                clearSearchButton.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
+                
                 // Filter audio files based on search query
                 filterAudioFiles(s.toString());
             }
@@ -366,6 +374,16 @@ public class MainActivity extends AppCompatActivity {
             public void afterTextChanged(Editable s) {
                 // Not needed
             }
+        });
+        
+        // Add click listener for clear button
+        clearSearchButton.setOnClickListener(v -> {
+            // Clear the search text
+            searchEditText.setText("");
+            
+            // Hide keyboard
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
         });
         
         // Add "enter" key listener for search

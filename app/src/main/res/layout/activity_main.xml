@@ -34,13 +34,26 @@
 
             <EditText
                 android:id="@+id/searchEditText"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:background="@null"
                 android:hint="@string/search_audio_files"
                 android:inputType="text"
                 android:imeOptions="actionSearch"
                 android:padding="8dp" />
+
+            <ImageView
+                android:id="@+id/clearSearchButton"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:contentDescription="@string/clear_search"
+                android:visibility="gone"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:layout_marginStart="8dp" />
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
