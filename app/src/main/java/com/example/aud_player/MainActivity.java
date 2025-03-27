@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
@@ -11,11 +12,13 @@ import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.LayoutInflater;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.PopupMenu;
@@ -31,14 +34,12 @@ import androidx.core.content.ContextCompat;
 import com.google.android.material.button.MaterialButton;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import android.provider.MediaStore;
-import android.database.Cursor;
-import java.util.ArrayList;
-import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -46,6 +47,13 @@ public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int REQUEST_BROWSE_AUDIO = 1001;
     private static final int REQUEST_BROWSE_SECOND_AUDIO = 1002;
+    
+    private static final int SORT_BY_NAME_ASC = 0;
+    private static final int SORT_BY_NAME_DESC = 1;
+    private static final int SORT_BY_DURATION_ASC = 2;
+    private static final int SORT_BY_DURATION_DESC = 3;
+    private static final int SORT_BY_DATE_ASC = 4;
+    private static final int SORT_BY_DATE_DESC = 5;
     
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -76,6 +84,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView emptyView;
     private List<AudioFile> audioFiles = new ArrayList<>();
     private AudioAdapter audioAdapter;
+
+    private int currentSortOrder = SORT_BY_NAME_ASC; // Default sort order
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -513,29 +523,73 @@ public class MainActivity extends AppCompatActivity {
             browseSecondItem.setVisible(false);
         }
         
-        // If a timer is already active, check the appropriate item
-        if (timerActive) {
-            MenuItem currentTimer = null;
-            // Find the right menu item to check based on your current timer
-            // This would need actual implementation based on how you track the timer
+        // Check the current sort method
+        Menu sortMenu = popup.getMenu().findItem(R.id.menu_sort).getSubMenu();
+        if (sortMenu != null) {
+            MenuItem itemToCheck = null;
+            switch (currentSortOrder) {
+                case SORT_BY_NAME_ASC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_name_asc);
+                    break;
+                case SORT_BY_NAME_DESC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_name_desc);
+                    break;
+                case SORT_BY_DURATION_ASC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_duration_asc);
+                    break;
+                case SORT_BY_DURATION_DESC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_duration_desc);
+                    break;
+                case SORT_BY_DATE_ASC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_date_asc);
+                    break;
+                case SORT_BY_DATE_DESC:
+                    itemToCheck = sortMenu.findItem(R.id.sort_date_desc);
+                    break;
+            }
+            if (itemToCheck != null) {
+                itemToCheck.setChecked(true);
+            }
         }
         
         popup.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
             
+            // Handle sort menu items
+            if (itemId == R.id.sort_name_asc) {
+                currentSortOrder = SORT_BY_NAME_ASC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_name_desc) {
+                currentSortOrder = SORT_BY_NAME_DESC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_duration_asc) {
+                currentSortOrder = SORT_BY_DURATION_ASC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_duration_desc) {
+                currentSortOrder = SORT_BY_DURATION_DESC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_date_asc) {
+                currentSortOrder = SORT_BY_DATE_ASC;
+                sortAudioFiles();
+                return true;
+            } else if (itemId == R.id.sort_date_desc) {
+                currentSortOrder = SORT_BY_DATE_DESC;
+                sortAudioFiles();
+                return true;
+            }
+            
+            // Handle existing menu items
             // Cancel any existing timer
             if (sleepTimer != null) {
                 sleepTimer.cancel();
                 timerActive = false;
             }
             
-            // Handle browse files option
-            if (itemId == R.id.menu_browse_files) {
-                browseAudioFiles(false);
-                return true;
-            }
-            
-            // Set new timer based on selection
+            // Handle timer menu items
             if (itemId == R.id.timer_15) {
                 setSleepTimer(15);
                 return true;
@@ -1156,7 +1210,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadAudioFiles() {
-        // Query for all audio files
+        // Initial load with default order
         String[] projection = {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
@@ -1164,13 +1218,37 @@ public class MainActivity extends AppCompatActivity {
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+        
+        // Determine sort order for initial load
+        String sortOrder;
+        switch (currentSortOrder) {
+            case SORT_BY_NAME_DESC:
+                sortOrder = MediaStore.Audio.Media.TITLE + " DESC";
+                break;
+            case SORT_BY_DURATION_ASC:
+                sortOrder = MediaStore.Audio.Media.DURATION + " ASC";
+                break;
+            case SORT_BY_DURATION_DESC:
+                sortOrder = MediaStore.Audio.Media.DURATION + " DESC";
+                break;
+            case SORT_BY_DATE_ASC:
+                sortOrder = MediaStore.Audio.Media.DATE_ADDED + " ASC";
+                break;
+            case SORT_BY_DATE_DESC:
+                sortOrder = MediaStore.Audio.Media.DATE_ADDED + " DESC";
+                break;
+            case SORT_BY_NAME_ASC:
+            default:
+                sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
+                break;
+        }
 
         Cursor cursor = getContentResolver().query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
                 selection,
                 null,
-                MediaStore.Audio.Media.TITLE + " ASC");
+                sortOrder);
 
         if (cursor != null) {
             audioFiles.clear();
@@ -1201,12 +1279,9 @@ public class MainActivity extends AppCompatActivity {
             audioRecyclerView.setVisibility(View.VISIBLE);
             emptyView.setVisibility(View.GONE);
             
-            // Setup adapter with modified click listener
+            // Setup adapter with dialog click listener
             audioAdapter = new AudioAdapter(audioFiles);
-            
-            // Always show the selection dialog when an audio file is clicked
             audioAdapter.setOnItemClickListener(audioFile -> showAudioSelectionDialog(audioFile));
-            
             audioRecyclerView.setAdapter(audioAdapter);
         }
     }
@@ -1333,6 +1408,139 @@ public class MainActivity extends AppCompatActivity {
         // Refresh audio files list in case new files were added
         if (isPermissionGranted) {
             refreshAudioFiles();
+        }
+    }
+
+    // Add a new method to sort audio files
+    private void sortAudioFiles() {
+        if (audioFiles == null || audioFiles.isEmpty()) {
+            return;
+        }
+        
+        // Sort based on current sort order
+        switch (currentSortOrder) {
+            case SORT_BY_NAME_ASC:
+                // Sort by name (A-Z)
+                audioFiles.sort((a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle()));
+                Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
+                break;
+            
+            case SORT_BY_NAME_DESC:
+                // Sort by name (Z-A)
+                audioFiles.sort((a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle()));
+                Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
+                break;
+            
+            case SORT_BY_DURATION_ASC:
+                // Sort by duration (shortest first)
+                audioFiles.sort((a1, a2) -> {
+                    // Parse the duration strings (format: "m:ss")
+                    try {
+                        long duration1 = parseDuration(a1.getDuration());
+                        long duration2 = parseDuration(a2.getDuration());
+                        return Long.compare(duration1, duration2);
+                    } catch (Exception e) {
+                        return 0;
+                    }
+                });
+                Toast.makeText(this, getString(R.string.sort_by_duration_asc), Toast.LENGTH_SHORT).show();
+                break;
+            
+            case SORT_BY_DURATION_DESC:
+                // Sort by duration (longest first)
+                audioFiles.sort((a1, a2) -> {
+                    // Parse the duration strings (format: "m:ss")
+                    try {
+                        long duration1 = parseDuration(a1.getDuration());
+                        long duration2 = parseDuration(a2.getDuration());
+                        return Long.compare(duration2, duration1);
+                    } catch (Exception e) {
+                        return 0;
+                    }
+                });
+                Toast.makeText(this, getString(R.string.sort_by_duration_desc), Toast.LENGTH_SHORT).show();
+                break;
+            
+            case SORT_BY_DATE_ASC:
+            case SORT_BY_DATE_DESC:
+                // For date sorting, we need to modify loadAudioFiles() to include date info
+                // For now, we'll retrieve it again
+                sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
+                break;
+        }
+        
+        // Update the RecyclerView to show the sorted list
+        if (audioAdapter != null) {
+            audioAdapter.notifyDataSetChanged();
+        }
+    }
+
+    // Add a helper method to parse duration strings
+    private long parseDuration(String durationStr) {
+        // Format is typically "m:ss"
+        String[] parts = durationStr.split(":");
+        if (parts.length == 2) {
+            try {
+                int minutes = Integer.parseInt(parts[0]);
+                int seconds = Integer.parseInt(parts[1]);
+                return minutes * 60 + seconds;
+            } catch (NumberFormatException e) {
+                Log.e(TAG, "Error parsing duration: " + durationStr, e);
+            }
+        }
+        return 0;
+    }
+
+    // Add method to sort by date (needs to query MediaStore again)
+    private void sortByDate(boolean descending) {
+        // Query for all audio files including date added
+        String[] projection = {
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.DATE_ADDED
+        };
+
+        String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
+        String sortOrder = MediaStore.Audio.Media.DATE_ADDED + (descending ? " DESC" : " ASC");
+
+        List<AudioFile> sortedFiles = new ArrayList<>();
+        
+        Cursor cursor = getContentResolver().query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                null,
+                sortOrder);
+
+        if (cursor != null) {
+            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+            int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+            int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+
+            while (cursor.moveToNext()) {
+                long id = cursor.getLong(idColumn);
+                String title = cursor.getString(titleColumn);
+                long duration = cursor.getLong(durationColumn);
+                String durationFormatted = formatTime((int)duration);
+
+                Uri contentUri = Uri.withAppendedPath(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+
+                sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id));
+            }
+            cursor.close();
+            
+            // Replace the current list with the sorted list
+            audioFiles.clear();
+            audioFiles.addAll(sortedFiles);
+            
+            // Show appropriate toast
+            if (descending) {
+                Toast.makeText(this, getString(R.string.sort_by_date_desc), Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, getString(R.string.sort_by_date_asc), Toast.LENGTH_SHORT).show();
+            }
         }
     }
 }

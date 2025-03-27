@@ -17,7 +17,6 @@
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:src="@android:drawable/ic_media_play"
-            android:tint="@color/design_default_color_primary"
             android:contentDescription="@string/audio_icon" />
 
         <LinearLayout

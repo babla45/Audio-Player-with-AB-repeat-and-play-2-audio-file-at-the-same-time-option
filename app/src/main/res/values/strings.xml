@@ -47,4 +47,11 @@
     <string name="audio_icon">Audio icon</string>
     <string name="browse_files">Browse Audio Files</string>
     <string name="second_audio">Select Second Audio</string>
+    <string name="sort_by">Sort By</string>
+    <string name="sort_by_name_asc">Name (A-Z)</string>
+    <string name="sort_by_name_desc">Name (Z-A)</string>
+    <string name="sort_by_duration_asc">Duration (shortest first)</string>
+    <string name="sort_by_duration_desc">Duration (longest first)</string>
+    <string name="sort_by_date_asc">Date (oldest first)</string>
+    <string name="sort_by_date_desc">Date (newest first)</string>
 </resources>

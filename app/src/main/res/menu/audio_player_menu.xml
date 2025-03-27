@@ -2,7 +2,8 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/menu_browse_files"
-        android:title="@string/browse_files" />
+        android:title="@string/browse_files"
+        android:visible="false" />
         
     <item
         android:id="@+id/menu_timer"
@@ -61,6 +62,37 @@
             <item
                 android:id="@+id/mixer_balance"
                 android:title="@string/adjust_balance" />
+        </menu>
+    </item>
+    
+    <item
+        android:id="@+id/menu_sort"
+        android:title="@string/sort_by">
+        <menu>
+            <item
+                android:id="@+id/sort_name_asc"
+                android:title="@string/sort_by_name_asc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_name_desc"
+                android:title="@string/sort_by_name_desc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_duration_asc"
+                android:title="@string/sort_by_duration_asc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_duration_desc"
+                android:title="@string/sort_by_duration_desc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_date_asc"
+                android:title="@string/sort_by_date_asc"
+                android:checkable="true"/>
+            <item
+                android:id="@+id/sort_date_desc"
+                android:title="@string/sort_by_date_desc"
+                android:checkable="true"/>
         </menu>
     </item>
 </menu> 
