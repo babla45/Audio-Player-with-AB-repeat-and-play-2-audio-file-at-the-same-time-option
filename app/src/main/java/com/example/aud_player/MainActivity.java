@@ -103,6 +103,10 @@ public class MainActivity extends AppCompatActivity {
     // Add this as a class variable
     private ImageView clearSearchButton;
 
+    // Add these as class variables
+    private TextView mixerToggleButton;
+    private boolean mixerModeActive = false;
+
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -185,6 +189,15 @@ public class MainActivity extends AppCompatActivity {
         // Initialize views
         initializeViews();
         
+        // Check mixer button - add this debug code
+        if (mixerToggleButton != null) {
+            Log.d(TAG, "Mixer button initialized successfully");
+            // Force visibility
+            mixerToggleButton.setVisibility(View.VISIBLE);
+        } else {
+            Log.e(TAG, "Failed to initialize mixer button");
+        }
+        
         // Setup listeners
         setupListeners();
         
@@ -221,6 +234,9 @@ public class MainActivity extends AppCompatActivity {
             // Initialize search EditText and clear button
             searchEditText = findViewById(R.id.searchEditText);
             clearSearchButton = findViewById(R.id.clearSearchButton);
+            
+            // Initialize mixer toggle button
+            mixerToggleButton = findViewById(R.id.mixerToggleButton);
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -396,6 +412,9 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
+
+        // Add mixer toggle button listener
+        mixerToggleButton.setOnClickListener(v -> toggleMixerMode());
     }
     
     private void checkPermissions() {
@@ -925,6 +944,11 @@ public class MainActivity extends AppCompatActivity {
         secondAudioUri = null;
         secondAudioActive = false;
         
+        // Turn off mixer mode when second audio is cleared
+        mixerModeActive = false;
+        mixerToggleButton.setTextColor(
+            getResources().getColor(android.R.color.darker_gray, null));
+        
         // Hide the mixer indicator
         if (mixerIndicator != null) {
             mixerIndicator.setVisibility(View.GONE);
@@ -1411,7 +1435,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showAudioSelectionDialog(AudioFile audioFile) {
-        // Create appropriate dialog options based on current state
+        // If mixer mode is active, directly select as secondary audio
+        if (mixerModeActive) {
+            onSecondAudioSelected(audioFile);
+            return;
+        }
+        
+        // Otherwise, show dialog as before for normal mode
         String[] options;
         if (selectedAudioUri == null) {
             // No primary audio set yet, only show primary option
@@ -1650,8 +1680,52 @@ public class MainActivity extends AppCompatActivity {
             
             // Setup adapter with filtered files
             audioAdapter = new AudioAdapter(filteredAudioFiles);
-            audioAdapter.setOnItemClickListener(audioFile -> showAudioSelectionDialog(audioFile));
+            audioAdapter.setOnItemClickListener(audioFile -> {
+                // Use the mixer mode to determine behavior
+                if (mixerModeActive) {
+                    onSecondAudioSelected(audioFile);
+                } else {
+                    // If not in mixer mode, either play directly or show dialog
+                    if (secondAudioUri != null) {
+                        showAudioSelectionDialog(audioFile);
+                    } else {
+                        onAudioFileSelected(audioFile);
+                    }
+                }
+            });
             audioRecyclerView.setAdapter(audioAdapter);
         }
+    }
+
+    // Add the toggleMixerMode method
+    private void toggleMixerMode() {
+        // Check if primary audio is selected before allowing mixer mode
+        if (!mixerModeActive && selectedAudioUri == null) {
+            Toast.makeText(this, "Please select a primary audio file first", 
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Toggle the mixer mode
+        mixerModeActive = !mixerModeActive;
+        
+        // Toggle the text color with backward compatibility
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            mixerToggleButton.setTextColor(
+                mixerModeActive ? 
+                getResources().getColor(android.R.color.holo_blue_dark, null) : 
+                getResources().getColor(android.R.color.darker_gray, null));
+        } else {
+            // For older Android versions
+            mixerToggleButton.setTextColor(
+                mixerModeActive ? 
+                getResources().getColor(android.R.color.holo_blue_dark) : 
+                getResources().getColor(android.R.color.darker_gray));
+        }
+        
+        // Show a toast to indicate the current mode
+        Toast.makeText(this, 
+            getString(mixerModeActive ? R.string.mixer_mode_on : R.string.mixer_mode_off), 
+            Toast.LENGTH_SHORT).show();
     }
 }

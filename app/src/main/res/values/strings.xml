@@ -58,4 +58,7 @@
     <string name="search_audio_files">Search audio files...</string>
     <string name="no_matching_files">No matching audio files found</string>
     <string name="clear_search">Clear search</string>
+    <string name="toggle_mixer_mode">Toggle Mixer Mode</string>
+    <string name="mixer_mode_on">Mixer Mode ON - Select Secondary Audio</string>
+    <string name="mixer_mode_off">Mixer Mode OFF - Select Primary Audio</string>
 </resources>
