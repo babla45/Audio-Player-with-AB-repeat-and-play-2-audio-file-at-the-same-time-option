@@ -78,4 +78,6 @@
     <string name="error_deleting_file">Error deleting file</string>
     <string name="error_renaming_file">Error renaming file</string>
     <string name="file_renamed">File renamed</string>
+    <string name="notification_channel_name">Audio Playback</string>
+    <string name="notification_channel_description">Controls for audio playback</string>
 </resources>

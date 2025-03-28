@@ -51,6 +51,9 @@ import android.content.Context;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -111,6 +114,71 @@ public class MainActivity extends AppCompatActivity {
     // Add these as class variables
     private TextView mixerToggleButton;
     private boolean mixerModeActive = false;
+
+    private AudioPlaybackService audioService;
+    private boolean serviceBound = false;
+    
+    // Define service connection
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            AudioPlaybackService.LocalBinder binder = (AudioPlaybackService.LocalBinder) service;
+            audioService = binder.getService();
+            serviceBound = true;
+            
+            // Set listener for updates from service
+            audioService.setOnPlaybackChangeListener(new AudioPlaybackService.OnPlaybackChangeListener() {
+                @Override
+                public void onPlaybackStateChanged(boolean isPlaying) {
+                    MainActivity.this.isPlaying = isPlaying;
+                    runOnUiThread(() -> {
+                        if (isPlaying) {
+                            playPauseButton.setIconResource(R.drawable.ic_pause);
+                        } else {
+                            playPauseButton.setIconResource(R.drawable.ic_play);
+                        }
+                    });
+                }
+
+                @Override
+                public void onProgressChanged(int progress, int duration) {
+                    runOnUiThread(() -> {
+                        seekBar.setMax(duration);
+                        seekBar.setProgress(progress);
+                        currentTimeText.setText(formatTime(progress));
+                        totalTimeText.setText(formatTime(duration));
+                    });
+                }
+
+                @Override
+                public void onCompletion() {
+                    runOnUiThread(() -> {
+                        isPlaying = false;
+                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        seekBar.setProgress(0);
+                        currentTimeText.setText("0:00");
+                    });
+                }
+            });
+            
+            // If we have a selected file, set it in the service
+            if (selectedAudioUri != null) {
+                String fileName = getFileNameFromUri(selectedAudioUri);
+                audioService.setAudioFile(selectedAudioUri, fileName);
+            }
+            
+            // If second audio is active
+            if (secondAudioUri != null) {
+                audioService.setSecondAudioFile(secondAudioUri);
+            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            serviceBound = false;
+            audioService = null;
+        }
+    };
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -216,6 +284,11 @@ public class MainActivity extends AppCompatActivity {
         if (isPermissionGranted) {
             loadAudioFiles();
         }
+        
+        // Bind to the service
+        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+        startService(serviceIntent);
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
     
     private void initializeViews() {
@@ -270,116 +343,52 @@ public class MainActivity extends AppCompatActivity {
         });
         
         playPauseButton.setOnClickListener(v -> {
-            if (mediaPlayer != null && selectedAudioUri != null) {
-                try {
-                    if (isPlaying) {
-                        mediaPlayer.pause();
-                        
-                        // Also pause the second audio if it's active
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            secondMediaPlayer.pause();
-                        }
-                        
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        isPlaying = false;
-                    } else {
-                        mediaPlayer.start();
-                        
-                        // Also start the second audio if it's ready
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            secondMediaPlayer.start();
-                        }
-                        
-                        playPauseButton.setIconResource(R.drawable.ic_pause);
-                        isPlaying = true;
-                        updateSeekBar();
-                    }
-                } catch (IllegalStateException e) {
-                    Log.e(TAG, "Error with play/pause", e);
-                    prepareMediaPlayer();
+            if (selectedAudioUri == null) {
+                Toast.makeText(MainActivity.this, "No audio file selected", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            if (serviceBound && audioService != null) {
+                if (audioService.isPlaying()) {
+                    audioService.pause();
+                    isPlaying = false;
+                    playPauseButton.setIconResource(R.drawable.ic_play);
+                } else {
+                    audioService.play();
+                    isPlaying = true;
+                    playPauseButton.setIconResource(R.drawable.ic_pause);
                 }
             }
         });
         
         stopButton.setOnClickListener(v -> {
-            if (mediaPlayer != null) {
-                try {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.stop();
-                        
-                        // Also stop the second audio if it's active
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            try {
-                                if (secondMediaPlayer.isPlaying()) {
-                                    secondMediaPlayer.stop();
-                                }
-                                // Prepare it again properly
-                                secondMediaPlayer.reset();
-                                secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
-                                secondMediaPlayer.prepareAsync();
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error stopping/resetting second player", e);
-                                // If reset fails, release and recreate
-                                try {
-                                    secondMediaPlayer.release();
-                                    secondMediaPlayer = null;
-                                    prepareSecondMediaPlayer();
-                                } catch (Exception ex) {
-                                    Log.e(TAG, "Error recreating second player", ex);
-                                }
-                            }
-                        }
-                        
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        isPlaying = false;
-                    }
-                    mediaPlayer.reset();
-                    seekBar.setProgress(0);
-                    currentTimeText.setText("0:00");
-                    
-                    prepareMediaPlayer();
-                } catch (IllegalStateException e) {
-                    Log.e(TAG, "Error stopping media player", e);
-                    releaseMediaPlayer();
-                    if (selectedAudioUri != null) {
-                        initMediaPlayer();
-                        prepareMediaPlayer();
-                    }
-                }
+            if (serviceBound && audioService != null) {
+                audioService.stop();
+                isPlaying = false;
+                playPauseButton.setIconResource(R.drawable.ic_play);
+                seekBar.setProgress(0);
+                currentTimeText.setText("0:00");
             }
         });
         
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && mediaPlayer != null) {
-                    try {
-                        mediaPlayer.seekTo(progress);
-                        
-                        // Synchronize the second player position when user seeks
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            // Calculate relative position in second audio
-                            float mainDuration = mediaPlayer.getDuration();
-                            float secondDuration = secondMediaPlayer.getDuration();
-                            float positionPercentage = progress / mainDuration;
-                            int secondPosition = (int) (positionPercentage * secondDuration);
-                            
-                            // Seek second player to the relative position
-                            secondMediaPlayer.seekTo(secondPosition);
-                        }
-                        
-                        updateTimeText(progress, mediaPlayer.getDuration());
-                    } catch (IllegalStateException e) {
-                        Log.e(TAG, "Error seeking media player", e);
-                    }
+                if (fromUser && serviceBound && audioService != null) {
+                    audioService.seekTo(progress);
+                    currentTimeText.setText(formatTime(progress));
                 }
             }
-            
+
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-            
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                // Not used
+            }
+
             @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                // Not used
+            }
         });
         
         // Add the menu button listener
@@ -507,78 +516,17 @@ public class MainActivity extends AppCompatActivity {
     private void prepareMediaPlayer() {
         if (selectedAudioUri == null) return;
         
-        // Initialize media player if null
-        initMediaPlayer();
-        
-        try {
-            mediaPlayer.reset();
-            mediaPlayer.setDataSource(getApplicationContext(), selectedAudioUri);
+        if (serviceBound && audioService != null) {
+            String fileName = getFileNameFromUri(selectedAudioUri);
+            audioService.setAudioFile(selectedAudioUri, fileName);
             
-            // Set listeners before preparing
-            mediaPlayer.setOnPreparedListener(mp -> {
-                try {
-                    seekBar.setMax(mp.getDuration());
-                    totalTimeText.setText(formatTime(mp.getDuration()));
-                    currentTimeText.setText("0:00");
-                    
-                    // Check if we should auto-play
-                    if (shouldAutoPlay) {
-                        // Start playing automatically
-                        mediaPlayer.start();
-                        playPauseButton.setIconResource(R.drawable.ic_pause);
-                        isPlaying = true;
-                        updateSeekBar();
-                        
-                        // Reset the flag after use
-                        shouldAutoPlay = false;
-                    } else {
-                        // Standard behavior - don't auto-play
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        isPlaying = false;
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error in onPrepared", e);
-                }
-            });
-            
-            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
-                Toast.makeText(MainActivity.this, 
-                    "Error playing this file", Toast.LENGTH_SHORT).show();
-                releaseMediaPlayer();
-                initMediaPlayer();
-                playPauseButton.setIconResource(R.drawable.ic_play);
-                isPlaying = false;
-                shouldAutoPlay = false; // Reset flag on error
-                return true; // Error handled
-            });
-            
-            mediaPlayer.setOnCompletionListener(mp -> {
-                try {
-                    if (abRepeatActive) {
-                        // Do nothing, as we'll handle this in the position checking
-                    } else {
-                        seekBar.setProgress(0);
-                        currentTimeText.setText("0:00");
-                        handler.removeCallbacks(runnable);
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        isPlaying = false;
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error in onCompletion", e);
-                }
-            });
-            
-            mediaPlayer.prepareAsync();
-            
-        } catch (IOException e) {
-            Log.e(TAG, "Error preparing media player", e);
-            Toast.makeText(this, "Error loading audio file", Toast.LENGTH_SHORT).show();
-            shouldAutoPlay = false; // Reset flag on error
-        } catch (IllegalArgumentException | IllegalStateException | SecurityException e) {
-            Log.e(TAG, "Media player error", e);
-            Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
-            shouldAutoPlay = false; // Reset flag on error
+            // Auto-play if needed
+            if (shouldAutoPlay) {
+                audioService.play();
+                isPlaying = true;
+                playPauseButton.setIconResource(R.drawable.ic_pause);
+                shouldAutoPlay = false;
+            }
         }
     }
     
@@ -883,73 +831,35 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void setPointA() {
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                pointA = mediaPlayer.getCurrentPosition();
-                String pointATime = formatTime(pointA);
-                Toast.makeText(this, getString(R.string.point_a_set, pointATime), Toast.LENGTH_SHORT).show();
-                
-                // If point B is set and is before point A, clear point B
-                if (pointB != -1 && pointB <= pointA) {
-                    pointB = -1;
-                    abRepeatActive = false;
-                }
-                
-                // If both points are set, enable A-B repeat
-                if (pointB != -1) {
-                    enableABRepeat();
-                }
-                
-                // Update indicator
-                updateABRepeatIndicator();
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error setting point A", e);
+        if (serviceBound && audioService != null) {
+            pointA = audioService.getCurrentPosition();
+            if (pointB > pointA) {
+                audioService.setABPoints(pointA, pointB);
+                abRepeatActive = true;
+                abRepeatIndicator.setVisibility(View.VISIBLE);
             }
         }
     }
     
     private void setPointB() {
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                int currentPosition = mediaPlayer.getCurrentPosition();
-                
-                // Make sure point A is set and point B is after point A
-                if (pointA == -1) {
-                    Toast.makeText(this, "Set point A first", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                if (currentPosition <= pointA) {
-                    Toast.makeText(this, R.string.point_b_before_a, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                pointB = currentPosition;
-                String pointBTime = formatTime(pointB);
-                Toast.makeText(this, getString(R.string.point_b_set, pointBTime), Toast.LENGTH_SHORT).show();
-                
-                // Enable A-B repeat
-                enableABRepeat();
-                
-                // Update indicator
-                updateABRepeatIndicator();
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error setting point B", e);
+        if (serviceBound && audioService != null) {
+            pointB = audioService.getCurrentPosition();
+            if (pointA >= 0 && pointB > pointA) {
+                audioService.setABPoints(pointA, pointB);
+                abRepeatActive = true;
+                abRepeatIndicator.setVisibility(View.VISIBLE);
             }
         }
     }
     
     private void clearABPoints() {
-        pointA = -1;
-        pointB = -1;
-        abRepeatActive = false;
-        
-        // Hide the indicator
-        if (abRepeatIndicator != null) {
+        if (serviceBound && audioService != null) {
+            audioService.clearABPoints();
+            pointA = -1;
+            pointB = -1;
+            abRepeatActive = false;
             abRepeatIndicator.setVisibility(View.GONE);
         }
-        
-        Toast.makeText(this, R.string.ab_repeat_cleared, Toast.LENGTH_SHORT).show();
     }
     
     private void enableABRepeat() {
@@ -1125,110 +1035,16 @@ public class MainActivity extends AppCompatActivity {
     private void prepareSecondMediaPlayer() {
         if (secondAudioUri == null) return;
         
-        // Log the initial state before any changes
-        Log.d(TAG, "Before preparing second player:");
-        checkMediaPlayersState();
-        
-        // Save the state of the first player
-        boolean wasPlaying = false;
-        int firstPosition = 0;
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                wasPlaying = mediaPlayer.isPlaying();
-                firstPosition = mediaPlayer.getCurrentPosition();
-                Log.d(TAG, "Saved first player state: playing=" + wasPlaying + ", position=" + firstPosition);
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error checking first player state", e);
-            }
-        }
-        
-        // Release existing second player if needed
-        if (secondMediaPlayer != null) {
-            try {
-                secondMediaPlayer.release();
-            } catch (Exception e) {
-                Log.e(TAG, "Error releasing second media player", e);
-            }
-            secondMediaPlayer = null;
-        }
-        
-        // Create new second media player - use a completely separate instance creation
-        secondMediaPlayer = new MediaPlayer();
-        
-        try {
-            // Use a completely separate preparation path for the second player
-            secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+        if (serviceBound && audioService != null) {
+            audioService.setSecondAudioFile(secondAudioUri);
+            secondAudioActive = true;
             
-            // Set listeners with careful error handling
-            secondMediaPlayer.setOnPreparedListener(mp -> {
-                secondAudioActive = true;
-                
-                // Set volume based on saved balance
-                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
-                
-                // Log the state after second player is prepared
-                Log.d(TAG, "Second player prepared:");
-                checkMediaPlayersState();
-                
-                // Start playing the second audio if the first one is playing
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    try {
-                        // Start second audio at position relative to first audio
-                        syncSecondPlayerPosition();
-                        secondMediaPlayer.start();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error starting second audio", e);
-                    }
-                }
-            });
-            
-            // Error listener with improved error handling
-            secondMediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                Log.e(TAG, "Second MediaPlayer error: " + what + ", " + extra);
-                Toast.makeText(MainActivity.this, 
-                    "Error with second audio file", Toast.LENGTH_SHORT).show();
-                
-                secondAudioActive = false;
-                if (secondMediaPlayer != null) {
-                    try {
-                        secondMediaPlayer.release();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error releasing second player after error", e);
-                    }
-                    secondMediaPlayer = null;
-                }
-                return true;
-            });
-            
-            // Prepare the player asynchronously
-            secondMediaPlayer.prepareAsync();
-            
-        } catch (Exception e) {
-            Log.e(TAG, "Error preparing second media player", e);
-            Toast.makeText(this, "Error loading second audio file", Toast.LENGTH_SHORT).show();
-            secondAudioActive = false;
-        }
-        
-        // Verify first player state is preserved
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                boolean isStillPlaying = mediaPlayer.isPlaying();
-                if (wasPlaying && !isStillPlaying) {
-                    Log.d(TAG, "First player stopped playing during second player prep, restarting");
-                    mediaPlayer.start();
-                }
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error checking first player state after second player prep", e);
-                // First player may have been reset - try to restore it
-                prepareMediaPlayer();
-                if (wasPlaying) {
-                    try {
-                        mediaPlayer.seekTo(firstPosition);
-                        mediaPlayer.start();
-                    } catch (Exception ex) {
-                        Log.e(TAG, "Failed to restore first player", ex);
-                    }
-                }
+            // Auto-play if needed
+            if (shouldAutoPlay && !isPlaying) {
+                audioService.play();
+                isPlaying = true;
+                playPauseButton.setIconResource(R.drawable.ic_pause);
+                shouldAutoPlay = false;
             }
         }
     }
@@ -1270,6 +1086,10 @@ public class MainActivity extends AppCompatActivity {
     
     @Override
     protected void onDestroy() {
+        if (serviceBound) {
+            unbindService(serviceConnection);
+            serviceBound = false;
+        }
         super.onDestroy();
         releaseMediaPlayer();
         
