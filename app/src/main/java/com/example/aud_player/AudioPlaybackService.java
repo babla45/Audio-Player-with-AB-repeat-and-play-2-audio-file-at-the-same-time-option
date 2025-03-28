@@ -19,6 +19,9 @@ public class AudioPlaybackService extends Service {
     private static final String TAG = "AudioPlaybackService";
     private static final String CHANNEL_ID = "AudioPlaybackChannel";
     private static final int NOTIFICATION_ID = 1;
+    private static final String ACTION_PLAY = "ACTION_PLAY";
+    private static final String ACTION_PAUSE = "ACTION_PAUSE";
+    private static final String ACTION_STOP = "ACTION_STOP";
 
     private MediaPlayer mediaPlayer;
     private MediaPlayer secondMediaPlayer;
@@ -48,7 +51,7 @@ public class AudioPlaybackService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.getAction() != null) {
             switch (intent.getAction()) {
-                case "ACTION_PLAY":
+                case ACTION_PLAY:
                     if (mediaPlayer != null) {
                         if (!isPlaying) {
                             try {
@@ -64,7 +67,7 @@ public class AudioPlaybackService extends Service {
                         }
                     }
                     break;
-                case "ACTION_PAUSE":
+                case ACTION_PAUSE:
                     if (mediaPlayer != null) {
                         if (isPlaying) {
                             try {
@@ -77,6 +80,26 @@ public class AudioPlaybackService extends Service {
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error pausing playback in service", e);
                             }
+                        }
+                    }
+                    break;
+                case ACTION_STOP:
+                    if (mediaPlayer != null) {
+                        try {
+                            if (mediaPlayer.isPlaying()) {
+                                mediaPlayer.stop();
+                            }
+                            if (secondMediaPlayer != null && secondAudioActive) {
+                                if (secondMediaPlayer.isPlaying()) {
+                                    secondMediaPlayer.stop();
+                                }
+                            }
+                            isPlaying = false;
+                            // Stop the service
+                            stopForeground(true);
+                            stopSelf();
+                        } catch (IllegalStateException e) {
+                            Log.e(TAG, "Error stopping playback in service", e);
                         }
                     }
                     break;
@@ -124,9 +147,17 @@ public class AudioPlaybackService extends Service {
 
         // Create play/pause intent
         Intent playPauseIntent = new Intent(this, AudioPlaybackService.class);
-        playPauseIntent.setAction(isPlaying ? "ACTION_PAUSE" : "ACTION_PLAY");
+        playPauseIntent.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent playPausePendingIntent = PendingIntent.getService(
             this, 1, playPauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        // Create stop intent
+        Intent stopIntent = new Intent(this, AudioPlaybackService.class);
+        stopIntent.setAction(ACTION_STOP);
+        PendingIntent stopPendingIntent = PendingIntent.getService(
+            this, 2, stopIntent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
@@ -136,9 +167,12 @@ public class AudioPlaybackService extends Service {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            // Add play/pause action
             .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play, 
                       isPlaying ? "Pause" : "Play", 
-                      playPausePendingIntent);
+                      playPausePendingIntent)
+            // Add stop action
+            .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent);
 
         return builder.build();
     }

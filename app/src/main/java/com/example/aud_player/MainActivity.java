@@ -366,19 +366,16 @@ public class MainActivity extends AppCompatActivity {
                                 secondMediaPlayer.prepareAsync();
                             } catch (Exception e) {
                                 Log.e(TAG, "Error stopping/resetting second player", e);
-                                // If reset fails, release and recreate
-                                try {
-                                    secondMediaPlayer.release();
-                                    secondMediaPlayer = null;
-                                    prepareSecondMediaPlayer();
-                                } catch (Exception ex) {
-                                    Log.e(TAG, "Error recreating second player", ex);
-                                }
                             }
                         }
                         
                         playPauseButton.setIconResource(R.drawable.ic_play);
                         isPlaying = false;
+                        
+                        // Stop the service
+                        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+                        serviceIntent.setAction("ACTION_STOP");
+                        startService(serviceIntent);
                     }
                     mediaPlayer.reset();
                     seekBar.setProgress(0);
