@@ -84,23 +84,34 @@ public class AudioPlaybackService extends Service {
                     }
                     break;
                 case ACTION_STOP:
-                    if (mediaPlayer != null) {
-                        try {
+                    try {
+                        // Stop first media player
+                        if (mediaPlayer != null) {
                             if (mediaPlayer.isPlaying()) {
                                 mediaPlayer.stop();
                             }
-                            if (secondMediaPlayer != null && secondAudioActive) {
-                                if (secondMediaPlayer.isPlaying()) {
-                                    secondMediaPlayer.stop();
-                                }
-                            }
-                            isPlaying = false;
-                            // Stop the service
-                            stopForeground(true);
-                            stopSelf();
-                        } catch (IllegalStateException e) {
-                            Log.e(TAG, "Error stopping playback in service", e);
+                            mediaPlayer.reset();
                         }
+                        
+                        // Stop second media player if active
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            if (secondMediaPlayer.isPlaying()) {
+                                secondMediaPlayer.stop();
+                            }
+                            secondMediaPlayer.reset();
+                        }
+                        
+                        isPlaying = false;
+                        // Stop the service and remove notification
+                        stopForeground(true);
+                        stopSelf();
+                        
+                        // Send broadcast to activity to update UI
+                        Intent updateIntent = new Intent("PLAYBACK_STOPPED");
+                        sendBroadcast(updateIntent);
+                        
+                    } catch (IllegalStateException e) {
+                        Log.e(TAG, "Error stopping playback in service", e);
                     }
                     break;
             }
@@ -128,6 +139,7 @@ public class AudioPlaybackService extends Service {
         this.secondMediaPlayer = second;
         this.currentTitle = title != null ? title : "Audio Player";
         this.isPlaying = main != null && main.isPlaying();
+        this.secondAudioActive = second != null;
         updateNotification();
     }
 
@@ -180,27 +192,25 @@ public class AudioPlaybackService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (mediaPlayer != null) {
-            try {
+        try {
+            if (mediaPlayer != null) {
                 if (mediaPlayer.isPlaying()) {
                     mediaPlayer.stop();
                 }
                 mediaPlayer.release();
-            } catch (Exception e) {
-                Log.e(TAG, "Error releasing media player", e);
+                mediaPlayer = null;
             }
-            mediaPlayer = null;
-        }
-        if (secondMediaPlayer != null) {
-            try {
+            if (secondMediaPlayer != null && secondAudioActive) {
                 if (secondMediaPlayer.isPlaying()) {
                     secondMediaPlayer.stop();
                 }
                 secondMediaPlayer.release();
-            } catch (Exception e) {
-                Log.e(TAG, "Error releasing second media player", e);
+                secondMediaPlayer = null;
             }
-            secondMediaPlayer = null;
+            secondAudioActive = false;
+            isPlaying = false;
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onDestroy", e);
         }
     }
 } 
