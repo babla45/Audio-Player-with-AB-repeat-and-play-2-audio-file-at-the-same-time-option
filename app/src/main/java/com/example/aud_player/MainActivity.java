@@ -51,6 +51,9 @@ import android.content.Context;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.os.IBinder;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -111,6 +114,29 @@ public class MainActivity extends AppCompatActivity {
     // Add these as class variables
     private TextView mixerToggleButton;
     private boolean mixerModeActive = false;
+
+    private AudioPlaybackService audioService;
+    private boolean serviceBound = false;
+
+    private ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder service) {
+            AudioPlaybackService.LocalBinder binder = (AudioPlaybackService.LocalBinder) service;
+            audioService = binder.getService();
+            serviceBound = true;
+            
+            // Pass the current MediaPlayer instances to the service with title
+            if (mediaPlayer != null && secondMediaPlayer != null) {
+                String currentTitle = fileNameText != null ? fileNameText.getText().toString() : "Audio Player";
+                audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, currentTitle);
+            }
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            serviceBound = false;
+        }
+    };
 
     // Activity result launcher for file picking
     private final ActivityResultLauncher<Intent> audioPickerLauncher = registerForActivityResult(
@@ -216,6 +242,10 @@ public class MainActivity extends AppCompatActivity {
         if (isPermissionGranted) {
             loadAudioFiles();
         }
+
+        // Bind to the service
+        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
     }
     
     private void initializeViews() {
@@ -272,6 +302,7 @@ public class MainActivity extends AppCompatActivity {
         playPauseButton.setOnClickListener(v -> {
             if (mediaPlayer != null && selectedAudioUri != null) {
                 try {
+                    Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
                     if (isPlaying) {
                         mediaPlayer.pause();
                         
@@ -282,6 +313,7 @@ public class MainActivity extends AppCompatActivity {
                         
                         playPauseButton.setIconResource(R.drawable.ic_play);
                         isPlaying = false;
+                        serviceIntent.setAction("ACTION_PAUSE");
                     } else {
                         mediaPlayer.start();
                         
@@ -293,7 +325,22 @@ public class MainActivity extends AppCompatActivity {
                         playPauseButton.setIconResource(R.drawable.ic_pause);
                         isPlaying = true;
                         updateSeekBar();
+                        serviceIntent.setAction("ACTION_PLAY");
                     }
+                    
+                    // Update service with current state
+                    if (serviceBound && audioService != null) {
+                        audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, 
+                            fileNameText.getText().toString());
+                    }
+                    
+                    // Start or update the service
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent);
+                    } else {
+                        startService(serviceIntent);
+                    }
+                    
                 } catch (IllegalStateException e) {
                     Log.e(TAG, "Error with play/pause", e);
                     prepareMediaPlayer();
@@ -434,13 +481,20 @@ public class MainActivity extends AppCompatActivity {
     
     private void checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // For Android 13+ use READ_MEDIA_AUDIO
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) 
-                    == PackageManager.PERMISSION_GRANTED) {
-                isPermissionGranted = true;
-            } else {
+            // Check both READ_MEDIA_AUDIO and POST_NOTIFICATIONS permissions
+            boolean hasAudioPermission = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
+            boolean hasNotificationPermission = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+
+            if (!hasAudioPermission) {
                 requestPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO);
             }
+            if (!hasNotificationPermission) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            }
+            
+            isPermissionGranted = hasAudioPermission; // We mainly care about audio permission for playback
         } else {
             // For older versions use READ_EXTERNAL_STORAGE
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
@@ -528,6 +582,21 @@ public class MainActivity extends AppCompatActivity {
                         playPauseButton.setIconResource(R.drawable.ic_pause);
                         isPlaying = true;
                         updateSeekBar();
+                        
+                        // Start the service
+                        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+                        serviceIntent.setAction("ACTION_PLAY");
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(serviceIntent);
+                        } else {
+                            startService(serviceIntent);
+                        }
+                        
+                        // Update service with media players
+                        if (serviceBound && audioService != null) {
+                            audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, 
+                                fileNameText.getText().toString());
+                        }
                         
                         // Reset the flag after use
                         shouldAutoPlay = false;
@@ -1255,26 +1324,24 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-            
-            // Also pause the second audio
-            if (secondMediaPlayer != null && secondAudioActive) {
-                secondMediaPlayer.pause();
-            }
-            
-            playPauseButton.setIconResource(R.drawable.ic_play);
-            isPlaying = false;
-        }
+        // Remove the auto-pause code to allow background playback
     }
     
     @Override
     protected void onDestroy() {
-        super.onDestroy();
-        releaseMediaPlayer();
+        // Unbind from the service
+        if (serviceBound) {
+            unbindService(serviceConnection);
+            serviceBound = false;
+        }
         
-        // Release the second media player
-        if (secondMediaPlayer != null) {
+        // Only release MediaPlayer if it's not playing
+        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+            releaseMediaPlayer();
+        }
+        
+        // Only release second MediaPlayer if it's not playing
+        if (secondMediaPlayer != null && !secondMediaPlayer.isPlaying()) {
             try {
                 secondMediaPlayer.release();
                 secondMediaPlayer = null;
@@ -1291,6 +1358,8 @@ public class MainActivity extends AppCompatActivity {
         if (sleepTimer != null) {
             sleepTimer.cancel();
         }
+        
+        super.onDestroy();
     }
 
     // Add this helper method to check both MediaPlayer instances
@@ -2240,6 +2309,29 @@ public class MainActivity extends AppCompatActivity {
         // If we're in a search, make sure to reapply the filter
         if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
             filterAudioFiles(searchEditText.getText().toString());
+        }
+    }
+
+    private void startPlayback() {
+        if (mediaPlayer != null) {
+            // Check for notification permission on Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+                    return;
+                }
+            }
+
+            // Start the service for background playback
+            Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+            
+            // ... existing playback code ...
         }
     }
 }
