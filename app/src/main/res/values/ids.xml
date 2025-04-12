@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="radio_pause" type="id"/>
+    <item name="radio_close" type="id"/>
+    <item name="radio_end_of_song" type="id"/>
+</resources> 

@@ -2,10 +2,14 @@ package com.example.aud_player;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.media.MediaPlayer;
+import android.media.PlaybackParams;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +23,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.SubMenu;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -27,6 +32,11 @@ import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.RadioGroup;
+import android.text.InputType;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.view.Gravity;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -37,6 +47,7 @@ import com.google.android.material.button.MaterialButton;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -47,13 +58,13 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.content.Context;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.Map;
 import android.content.ComponentName;
 import android.content.ServiceConnection;
 import android.os.IBinder;
+import android.content.SharedPreferences;
+import java.util.Locale;
+import android.widget.RadioButton;
+import android.content.DialogInterface;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -71,19 +82,22 @@ public class MainActivity extends AppCompatActivity {
     private static final int SORT_BY_SIZE_ASC = 6;
     private static final int SORT_BY_SIZE_DESC = 7;
     
+    private static final int TIMER_ACTION_PAUSE = 0;
+    private static final int TIMER_ACTION_CLOSE_APP = 1;
+    private static final int TIMER_ACTION_END_OF_SONG = 2; // New action for end of song
+    private int timerAction = TIMER_ACTION_PAUSE; // Default is pause
+    
+    private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
+    private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
+    private static final int PLAYBACK_MODE_RANDOM = 2;
+    
+    private int currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST; // Default is list play
+    
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
     private SeekBar seekBar;
-    private MaterialButton playPauseButton, stopButton, menuButton;
-    
-    private MediaPlayer mediaPlayer = null;
-    private Handler handler = new Handler(Looper.getMainLooper());
-    private Runnable runnable;
-    private Uri selectedAudioUri = null;
-    private boolean isPermissionGranted = false;
-    private boolean isPlaying = false;
-    private CountDownTimer sleepTimer;
-    private boolean timerActive = false;
+    private ImageButton playPauseButton;
+    private MaterialButton menuButton;
     private TextView timerIndicator;
     private int pointA = -1;
     private int pointB = -1;
@@ -101,7 +115,7 @@ public class MainActivity extends AppCompatActivity {
     private List<AudioFile> audioFiles = new ArrayList<>();
     private AudioAdapter audioAdapter;
 
-    private int currentSortOrder = SORT_BY_NAME_ASC; // Default sort order
+    private int currentSortOrder = SORT_BY_DATE_DESC; // Change from SORT_BY_NAME_ASC to SORT_BY_DATE_DESC
 
     // Add these instance variables
     private EditText searchEditText;
@@ -117,8 +131,62 @@ public class MainActivity extends AppCompatActivity {
 
     private AudioPlaybackService audioService;
     private boolean serviceBound = false;
-    
-    // Define service connection
+
+    // Add these constants near the top of your MainActivity class
+    private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
+    private static final int SEEK_BACKWARD_MS = 10000; // 10 seconds
+
+    // Add these UI elements as class members
+    private ImageButton seekBackwardButton;
+    private ImageButton seekForwardButton;
+
+    // Add this as a class member at the top of your class with other UI elements
+    private ImageButton syncPositionButton;
+
+    // Change these from constants to instance variables
+    private int seekForwardMs = 10000; // Default 10 seconds
+    private int seekBackwardMs = 10000; // Default 10 seconds
+
+    // Add this variable declaration with your other media player variables
+    private MediaPlayer mediaPlayer = null;
+
+    // Add these missing variables
+    private Uri selectedAudioUri = null;
+    private boolean isPermissionGranted = false;
+    private boolean isPlaying = false;
+
+    // Make sure these are properly declared in your class
+    private Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable runnable;
+
+    // Add these declarations with your other class variables
+    private CountDownTimer sleepTimer;
+    private boolean timerActive = false;
+
+    // Add a field to track the current playback speed
+    private float currentPlaybackSpeed = 1.0f;
+    private static final float MIN_PLAYBACK_SPEED = 0.25f;
+    private static final float MAX_PLAYBACK_SPEED = 4.0f;
+    private static final float PLAYBACK_SPEED_STEP = 0.25f;
+
+    // Add variables to track individual playback speeds
+    private float primaryPlaybackSpeed = 1.0f;
+    private float secondaryPlaybackSpeed = 1.0f;
+    private boolean useIndividualPlaybackSpeeds = false;
+
+    // Add PlaylistDatabaseHelper as a class field
+    private PlaylistDatabaseHelper playlistDbHelper;
+    private String currentPlaylistId = null;
+    private List<AudioFile> currentPlaylistSongs = new ArrayList<>();
+    private int currentPlaylistIndex = -1;
+
+    // Add UI elements
+    private LinearLayout playlistInfoContainer;
+    private TextView playlistNameText;
+    private Button showAllSongsButton;
+    private boolean inPlaylistView = false;
+    private Playlist currentPlaylist = null;
+
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
@@ -126,57 +194,16 @@ public class MainActivity extends AppCompatActivity {
             audioService = binder.getService();
             serviceBound = true;
             
-            // Set listener for updates from service
-            audioService.setOnPlaybackChangeListener(new AudioPlaybackService.OnPlaybackChangeListener() {
-                @Override
-                public void onPlaybackStateChanged(boolean isPlaying) {
-                    MainActivity.this.isPlaying = isPlaying;
-                    runOnUiThread(() -> {
-                        if (isPlaying) {
-                            playPauseButton.setIconResource(R.drawable.ic_pause);
-                        } else {
-                            playPauseButton.setIconResource(R.drawable.ic_play);
-                        }
-                    });
-                }
-
-                @Override
-                public void onProgressChanged(int progress, int duration) {
-                    runOnUiThread(() -> {
-                        seekBar.setMax(duration);
-                        seekBar.setProgress(progress);
-                        currentTimeText.setText(formatTime(progress));
-                        totalTimeText.setText(formatTime(duration));
-                    });
-                }
-
-                @Override
-                public void onCompletion() {
-                    runOnUiThread(() -> {
-                        isPlaying = false;
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        seekBar.setProgress(0);
-                        currentTimeText.setText("0:00");
-                    });
-                }
-            });
-            
-            // If we have a selected file, set it in the service
-            if (selectedAudioUri != null) {
-                String fileName = getFileNameFromUri(selectedAudioUri);
-                audioService.setAudioFile(selectedAudioUri, fileName);
-            }
-            
-            // If second audio is active
-            if (secondAudioUri != null) {
-                audioService.setSecondAudioFile(secondAudioUri);
+            // Pass the current MediaPlayer instances to the service with title
+            if (mediaPlayer != null && secondMediaPlayer != null) {
+                String currentTitle = fileNameText != null ? fileNameText.getText().toString() : "Audio Player";
+                audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, currentTitle);
             }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             serviceBound = false;
-            audioService = null;
         }
     };
 
@@ -257,10 +284,26 @@ public class MainActivity extends AppCompatActivity {
     // Add this as a class field
     private boolean shouldAutoPlay = false;
 
+    private BroadcastReceiver playbackStoppedReceiver;
+    private BroadcastReceiver timerUpdateReceiver;
+
+    // Add a new class variable for the receiver
+    private BroadcastReceiver closeAppReceiver;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        
+        // Initialize database helper
+        playlistDbHelper = new PlaylistDatabaseHelper(this);
+        
+        // Load seek settings from SharedPreferences
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        int forwardSeconds = prefs.getInt("seek_forward_seconds", 10); // Default 10 sec
+        int backwardSeconds = prefs.getInt("seek_backward_seconds", 10); // Default 10 sec
+        seekForwardMs = forwardSeconds * 1000;
+        seekBackwardMs = backwardSeconds * 1000;
         
         // Initialize views
         initializeViews();
@@ -284,47 +327,99 @@ public class MainActivity extends AppCompatActivity {
         if (isPermissionGranted) {
             loadAudioFiles();
         }
-        
+
         // Bind to the service
         Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
-        startService(serviceIntent);
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+        // Register broadcast receiver for playback stopped
+        playbackStoppedReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("PLAYBACK_STOPPED".equals(intent.getAction())) {
+                    // Update UI when playback is stopped from notification
+                    updateUIForPlaybackStopped();
+                }
+            }
+        };
+        registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"));
+
+        // Register broadcast receiver for app close command
+        closeAppReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("CLOSE_APP_COMMAND".equals(intent.getAction())) {
+                    // Close the app completely
+                    finishAndRemoveTask();
+                }
+            }
+        };
+        registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
     }
     
     private void initializeViews() {
         try {
+            // Core player elements
             selectButton = findViewById(R.id.selectButton);
             fileNameText = findViewById(R.id.fileNameText);
             seekBar = findViewById(R.id.seekBar);
             currentTimeText = findViewById(R.id.currentTimeText);
             totalTimeText = findViewById(R.id.totalTimeText);
             playPauseButton = findViewById(R.id.playPauseButton);
-            stopButton = findViewById(R.id.stopButton);
             menuButton = findViewById(R.id.menuButton);
+            
+            // Indicators
             timerIndicator = findViewById(R.id.timerIndicator);
             abRepeatIndicator = findViewById(R.id.abRepeatIndicator);
             mixerIndicator = findViewById(R.id.mixerIndicator);
             
-            // New view initializations for audio files list
+            // Seek buttons
+            seekBackwardButton = findViewById(R.id.seekBackwardButton);
+            seekForwardButton = findViewById(R.id.seekForwardButton);
+            
+            // RecyclerView elements
             audioRecyclerView = findViewById(R.id.audioRecyclerView);
             emptyView = findViewById(R.id.emptyView);
             
             // Setup RecyclerView
             audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
             
-            // Initialize search EditText and clear button
+            // Search elements
             searchEditText = findViewById(R.id.searchEditText);
             clearSearchButton = findViewById(R.id.clearSearchButton);
             
-            // Initialize mixer toggle button
+            // Mixer toggle
             mixerToggleButton = findViewById(R.id.mixerToggleButton);
             
-            // Set default color to gray
+            // Set default color for mixer toggle
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
             } else {
                 mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
             }
+            
+            // Sync position button
+            syncPositionButton = findViewById(R.id.syncPositionButton);
+            
+            // Log successful initialization
+            Log.d(TAG, "Views initialized successfully");
+            
+            // In your initializeViews() method, add this line after initializing the seekBackwardButton:
+            if (seekBackwardButton != null) {
+                try {
+                    seekBackwardButton.setImageResource(R.drawable.ic_backward_simple);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting backward button image", e);
+                    // Fallback to a simpler icon if available
+                    seekBackwardButton.setImageResource(android.R.drawable.ic_media_previous);
+                }
+            }
+            
+            // Initialize playlist view elements
+            playlistInfoContainer = findViewById(R.id.playlistInfoContainer);
+            playlistNameText = findViewById(R.id.playlistNameText);
+            showAllSongsButton = findViewById(R.id.showAllSongsButton);
+            
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -343,51 +438,54 @@ public class MainActivity extends AppCompatActivity {
         });
         
         playPauseButton.setOnClickListener(v -> {
-            if (selectedAudioUri == null) {
-                Toast.makeText(MainActivity.this, "No audio file selected", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            
-            if (serviceBound && audioService != null) {
-                if (audioService.isPlaying()) {
-                    audioService.pause();
-                    isPlaying = false;
-                    playPauseButton.setIconResource(R.drawable.ic_play);
-                } else {
-                    audioService.play();
-                    isPlaying = true;
-                    playPauseButton.setIconResource(R.drawable.ic_pause);
+            animateButtonPress(v);
+            if (mediaPlayer != null && selectedAudioUri != null) {
+                try {
+                    Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+                    if (isPlaying) {
+                        mediaPlayer.pause();
+                        
+                        // Also pause the second audio if it's active
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.pause();
+                        }
+                        
+                        // Use the new improved icons
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                        isPlaying = false;
+                        serviceIntent.setAction("ACTION_PAUSE");
+                    } else {
+                        mediaPlayer.start();
+                        
+                        // Also start the second audio if it's ready
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.start();
+                        }
+                        
+                        // Use the new improved icons
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                        isPlaying = true;
+                        updateSeekBar();
+                        serviceIntent.setAction("ACTION_PLAY");
+                    }
+                    
+                    // Update service with current state
+                    if (serviceBound && audioService != null) {
+                        audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, 
+                            fileNameText.getText().toString());
+                    }
+                    
+                    // Start or update the service
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent);
+                    } else {
+                        startService(serviceIntent);
+                    }
+                    
+                } catch (IllegalStateException e) {
+                    Log.e(TAG, "Error with play/pause", e);
+                    prepareMediaPlayer();
                 }
-            }
-        });
-        
-        stopButton.setOnClickListener(v -> {
-            if (serviceBound && audioService != null) {
-                audioService.stop();
-                isPlaying = false;
-                playPauseButton.setIconResource(R.drawable.ic_play);
-                seekBar.setProgress(0);
-                currentTimeText.setText("0:00");
-            }
-        });
-        
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && serviceBound && audioService != null) {
-                    audioService.seekTo(progress);
-                    currentTimeText.setText(formatTime(progress));
-                }
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-                // Not used
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                // Not used
             }
         });
         
@@ -439,17 +537,93 @@ public class MainActivity extends AppCompatActivity {
 
         // Add mixer toggle button listener
         mixerToggleButton.setOnClickListener(v -> toggleMixerMode());
+        
+        // Add seek backward button listener
+        seekBackwardButton.setOnClickListener(v -> {
+            animateButtonPress(v);
+            seekRelative(-seekBackwardMs);
+        });
+        
+        // Add seek forward button listener
+        seekForwardButton.setOnClickListener(v -> {
+            animateButtonPress(v);
+            seekRelative(seekForwardMs);
+        });
+
+        // Set click listener for sync position button
+        syncPositionButton.setOnClickListener(v -> showPositionSyncDialog());
+
+        // Inside setupListeners() method, add this code to properly handle seekbar interactions:
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null) {
+                    try {
+                        // Log user interaction for debugging
+                        Log.d(TAG, "User seeking to position: " + progress);
+                        
+                        // Apply the seek position to the media player
+                        mediaPlayer.seekTo(progress);
+                        
+                        // Update time display
+                        updateTimeText(progress, mediaPlayer.getDuration());
+                        
+                        // If we have a second player active, sync its position too
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            syncSecondPlayerPosition();
+                        }
+                    } catch (IllegalStateException e) {
+                        Log.e(TAG, "Error seeking media player", e);
+                    }
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                // Optionally pause the player while seeking
+                // If you want to pause while seeking, uncomment these lines:
+                /*
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    mediaPlayer.pause();
+                    // Don't change the play/pause button here as we'll resume playback after seeking
+                }
+                */
+            }
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                // Optionally resume playback after seeking
+                // If you paused during onStartTrackingTouch, resume here:
+                /*
+                if (mediaPlayer != null && isPlaying) {
+                    mediaPlayer.start();
+                }
+                */
+            }
+        });
+        
+        // Setup show all songs button
+        showAllSongsButton.setOnClickListener(v -> {
+            toggleToAllSongsView();
+        });
     }
     
     private void checkPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // For Android 13+ use READ_MEDIA_AUDIO
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) 
-                    == PackageManager.PERMISSION_GRANTED) {
-                isPermissionGranted = true;
-            } else {
+            // Check both READ_MEDIA_AUDIO and POST_NOTIFICATIONS permissions
+            boolean hasAudioPermission = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED;
+            boolean hasNotificationPermission = ContextCompat.checkSelfPermission(this, 
+                Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+
+            if (!hasAudioPermission) {
                 requestPermissionLauncher.launch(Manifest.permission.READ_MEDIA_AUDIO);
             }
+            if (!hasNotificationPermission) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            }
+            
+            isPermissionGranted = hasAudioPermission; // We mainly care about audio permission for playback
         } else {
             // For older versions use READ_EXTERNAL_STORAGE
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) 
@@ -514,20 +688,206 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void prepareMediaPlayer() {
-        if (selectedAudioUri == null) return;
-        
-        if (serviceBound && audioService != null) {
-            String fileName = getFileNameFromUri(selectedAudioUri);
-            audioService.setAudioFile(selectedAudioUri, fileName);
+        if (selectedAudioUri == null) {
+            return;
+        }
+
+        try {
+            if (mediaPlayer != null) {
+                mediaPlayer.reset();
+            } else {
+                mediaPlayer = new MediaPlayer();
+            }
+
+            // Update the adapter to highlight the current track
+            if (audioAdapter != null) {
+                audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+            }
             
-            // Auto-play if needed
-            if (shouldAutoPlay) {
-                audioService.play();
-                isPlaying = true;
-                playPauseButton.setIconResource(R.drawable.ic_pause);
-                shouldAutoPlay = false;
+            // Set data source from URI
+            mediaPlayer.setDataSource(getApplicationContext(), selectedAudioUri);
+            
+            // Set listeners before preparing
+            mediaPlayer.setOnPreparedListener(mp -> {
+                try {
+                    // Set the seekbar maximum to the total duration
+                    int duration = mp.getDuration();
+                    seekBar.setMax(duration);
+                    
+                    // Log for debugging
+                    Log.d(TAG, "Media duration: " + duration + "ms, seekbar max set");
+                    
+                    totalTimeText.setText(formatTime(duration));
+                    currentTimeText.setText("0:00");
+                    
+                    // Check if we should auto-play
+                    if (shouldAutoPlay) {
+                        // Start playing automatically
+                        mediaPlayer.start();
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                        isPlaying = true;
+                        updateSeekBar();
+                        
+                        // Start the service
+                        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+                        serviceIntent.setAction("ACTION_PLAY");
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(serviceIntent);
+                        } else {
+                            startService(serviceIntent);
+                        }
+                        
+                        // Update service with media players
+                        if (serviceBound && audioService != null) {
+                            audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, 
+                                fileNameText.getText().toString());
+                        }
+                        
+                        // Reset the flag after use
+                        shouldAutoPlay = false;
+                    } else {
+                        // Standard behavior - don't auto-play
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                        isPlaying = false;
+                    }
+                    
+                    // Apply playback speed if not default
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) {
+                        try {
+                            PlaybackParams params = new PlaybackParams();
+                            params.setSpeed(currentPlaybackSpeed);
+                            mediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Applied saved playback speed to primary audio: " + currentPlaybackSpeed);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error applying saved playback speed to primary audio", e);
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error in onPrepared", e);
+                }
+            });
+            
+            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
+                Toast.makeText(MainActivity.this, 
+                    "Error playing this file", Toast.LENGTH_SHORT).show();
+                releaseMediaPlayer();
+                initMediaPlayer();
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                isPlaying = false;
+                shouldAutoPlay = false; // Reset flag on error
+                return true; // Error handled
+            });
+            
+            mediaPlayer.setOnCompletionListener(mp -> {
+                handleSongCompletion();
+            });
+            
+            mediaPlayer.prepareAsync();
+            
+        } catch (IOException e) {
+            Log.e(TAG, "Error preparing media player", e);
+            Toast.makeText(this, "Error loading audio file", Toast.LENGTH_SHORT).show();
+            shouldAutoPlay = false; // Reset flag on error
+        } catch (IllegalArgumentException | IllegalStateException | SecurityException e) {
+            Log.e(TAG, "Media player error", e);
+            Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
+            shouldAutoPlay = false; // Reset flag on error
+        }
+    }
+    
+    private void handleSongCompletion() {
+        // If we're playing a playlist, handle playlist navigation
+        if (currentPlaylistId != null && !currentPlaylistSongs.isEmpty() && currentPlaylistIndex >= 0) {
+            if (currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT) {
+                // Restart the current song
+                if (mediaPlayer != null) {
+                    mediaPlayer.seekTo(0);
+                    mediaPlayer.start();
+                }
+            } else if (currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST) {
+                // Go to the next song in the playlist
+                int nextIndex = currentPlaylistIndex + 1;
+                if (nextIndex < currentPlaylistSongs.size()) {
+                    // Play the next song in the playlist
+                    selectedAudioUri = currentPlaylistSongs.get(nextIndex).getUri();
+                    currentPlaylistIndex = nextIndex;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Update adapter to highlight the current song
+                    if (audioAdapter != null) {
+                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    }
+                } else {
+                    // End of playlist, loop back to the beginning
+                    selectedAudioUri = currentPlaylistSongs.get(0).getUri();
+                    currentPlaylistIndex = 0;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Update adapter to highlight the current song
+                    if (audioAdapter != null) {
+                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    }
+                }
+            } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
+                // Pick a random song from the playlist
+                int randomIndex = new java.util.Random().nextInt(currentPlaylistSongs.size());
+                selectedAudioUri = currentPlaylistSongs.get(randomIndex).getUri();
+                currentPlaylistIndex = randomIndex;
+                shouldAutoPlay = true;
+                prepareMediaPlayer();
+                
+                // Update adapter to highlight the current song
+                if (audioAdapter != null) {
+                    audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                }
+            }
+        } else {
+            // Default handling for non-playlist playback
+            switch (currentPlaybackMode) {
+                case PLAYBACK_MODE_REPEAT_CURRENT:
+                    // Restart the current song
+                    if (mediaPlayer != null) {
+                        mediaPlayer.seekTo(0);
+                        mediaPlayer.start();
+                    }
+                    break;
+                    
+                case PLAYBACK_MODE_NEXT_IN_LIST:
+                    // Play the next song in the list
+                    int currentIndex = getCurrentSongIndex();
+                    if (currentIndex != -1 && currentIndex + 1 < audioFiles.size()) {
+                        onAudioFileSelected(audioFiles.get(currentIndex + 1));
+                    } else if (!audioFiles.isEmpty()) {
+                        // Loop back to the first song if at the end
+                        onAudioFileSelected(audioFiles.get(0));
+                    }
+                    break;
+                    
+                case PLAYBACK_MODE_RANDOM:
+                    // Play a random song from the list
+                    if (!audioFiles.isEmpty()) {
+                        int randomIndex = new java.util.Random().nextInt(audioFiles.size());
+                        onAudioFileSelected(audioFiles.get(randomIndex));
+                    }
+                    break;
             }
         }
+    }
+
+    private int getCurrentSongIndex() {
+        if (selectedAudioUri == null || audioFiles.isEmpty()) {
+            return -1;
+        }
+        
+        for (int i = 0; i < audioFiles.size(); i++) {
+            if (selectedAudioUri.toString().equals(audioFiles.get(i).getUri().toString())) {
+                return i;
+            }
+        }
+        return -1;
     }
     
     private void updateSeekBar() {
@@ -602,436 +962,658 @@ public class MainActivity extends AppCompatActivity {
     
     private void showPopupMenu(View v) {
         PopupMenu popup = new PopupMenu(this, v);
-        popup.getMenuInflater().inflate(R.menu.audio_player_menu, popup.getMenu());
         
-        // Since we now show audio files directly, we can remove Browse Files options from menu
-        MenuItem browseItem = popup.getMenu().findItem(R.id.menu_browse_files);
-        if (browseItem != null) {
-            browseItem.setVisible(false);
+        // Create menu items programmatically
+        Menu menu = popup.getMenu();
+        
+        // Add your existing menu items
+        menu.add(0, 1, 0, "Sort Audio Files");
+        menu.add(0, 2, 0, "Sleep Timer");
+        menu.add(0, 3, 0, "A-B Repeat");
+        
+        // Create Audio Mixer submenu
+        SubMenu mixerMenu = menu.addSubMenu("Audio Mixer");
+        mixerMenu.add(0, 41, 0, "Mix with Second Audio");
+        if (secondAudioActive) {
+            mixerMenu.add(0, 42, 0, "Adjust Audio Balance");
+            mixerMenu.add(0, 43, 0, "Clear Second Audio");
+            mixerMenu.add(0, 44, 0, useIndividualPlaybackSpeeds ? 
+                "Use Global Playback Speed" : "Use Individual Playback Speeds");
+            if (useIndividualPlaybackSpeeds) {
+                mixerMenu.add(0, 45, 0, "Set Primary Audio Speed (" + String.format("%.2fx", primaryPlaybackSpeed) + ")");
+                mixerMenu.add(0, 46, 0, "Set Secondary Audio Speed (" + String.format("%.2fx", secondaryPlaybackSpeed) + ")");
+            }
         }
         
-        MenuItem browseSecondItem = popup.getMenu().findItem(R.id.mixer_browse_second);
-        if (browseSecondItem != null) {
-            browseSecondItem.setVisible(false);
+        menu.add(0, 5, 0, "Settings");
+        menu.add(0, 6, 0, "Refresh List");
+        
+        // Add Playlist submenu
+        SubMenu playlistMenu = menu.addSubMenu("Playlists");
+        playlistMenu.add(0, 70, 0, "View All Playlists");
+        
+        // Add "Add to Playlist" option only if a song is selected
+        if (selectedAudioUri != null) {
+            playlistMenu.add(0, 71, 0, "Add Current Song to Playlist");
         }
         
-        // Check the current sort method
-        Menu sortMenu = popup.getMenu().findItem(R.id.menu_sort).getSubMenu();
-        if (sortMenu != null) {
-            MenuItem itemToCheck = null;
-            switch (currentSortOrder) {
-                case SORT_BY_NAME_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_name_asc);
-                    break;
-                case SORT_BY_NAME_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_name_desc);
-                    break;
-                case SORT_BY_DURATION_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_duration_asc);
-                    break;
-                case SORT_BY_DURATION_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_duration_desc);
-                    break;
-                case SORT_BY_DATE_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_date_asc);
-                    break;
-                case SORT_BY_DATE_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_date_desc);
-                    break;
-                case SORT_BY_SIZE_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_size_asc);
-                    break;
-                case SORT_BY_SIZE_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_size_desc);
-                    break;
-            }
-            if (itemToCheck != null) {
-                itemToCheck.setChecked(true);
-            }
+        // Add playback mode submenu
+        SubMenu playbackModeMenu = menu.addSubMenu("Playback Mode");
+        playbackModeMenu.add(0, 100, 0, "Repeat Current Song").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT);
+        playbackModeMenu.add(0, 101, 0, "Play Next in List").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST);
+        playbackModeMenu.add(0, 102, 0, "Random Play").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_RANDOM);
+        
+        // Add playback speed submenu
+        SubMenu playbackSpeedMenu = menu.addSubMenu("Playback Speed");
+        
+        // Add speed options from 0.25x to 4.0x with 0.25 intervals
+        for (float speed = MIN_PLAYBACK_SPEED; speed <= MAX_PLAYBACK_SPEED; speed += PLAYBACK_SPEED_STEP) {
+            // Format speed with 2 decimal places if needed
+            String speedText = speed == (int)speed ? String.format("%.0fx", speed) : String.format("%.2fx", speed);
+            
+            // Add menu item and mark current speed as checked
+            // Use a different approach for menu item IDs to accommodate the wider range
+            int menuItemId = 200 + Math.round(speed * 100);
+            playbackSpeedMenu.add(0, menuItemId, 0, speedText).setCheckable(true)
+                .setChecked(Math.abs(currentPlaybackSpeed - speed) < 0.01f);
         }
         
         popup.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
-            
-            // Handle sort menu items
-            if (itemId == R.id.sort_name_asc) {
-                currentSortOrder = SORT_BY_NAME_ASC;
-                sortAudioFiles();
+            if (itemId == 1) {
+                showSortMenu(v);
                 return true;
-            } else if (itemId == R.id.sort_name_desc) {
-                currentSortOrder = SORT_BY_NAME_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_duration_asc) {
-                currentSortOrder = SORT_BY_DURATION_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_duration_desc) {
-                currentSortOrder = SORT_BY_DURATION_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_date_asc) {
-                currentSortOrder = SORT_BY_DATE_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_date_desc) {
-                currentSortOrder = SORT_BY_DATE_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_size_asc) {
-                currentSortOrder = SORT_BY_SIZE_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_size_desc) {
-                currentSortOrder = SORT_BY_SIZE_DESC;
-                sortAudioFiles();
-                return true;
-            }
-            
-            // Handle existing menu items
-            // Cancel any existing timer
-            if (sleepTimer != null) {
-                sleepTimer.cancel();
-                timerActive = false;
-            }
-            
-            // Handle timer menu items
-            if (itemId == R.id.timer_15) {
-                setSleepTimer(15);
-                return true;
-            } else if (itemId == R.id.timer_30) {
-                setSleepTimer(30);
-                return true;
-            } else if (itemId == R.id.timer_45) {
-                setSleepTimer(45);
-                return true;
-            } else if (itemId == R.id.timer_60) {
-                setSleepTimer(60);
-                return true;
-            } else if (itemId == R.id.timer_off) {
-                Toast.makeText(MainActivity.this, R.string.timer_canceled, Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId == R.id.timer_custom) {
+            } else if (itemId == 2) {
                 showCustomTimerDialog();
                 return true;
-            }
-            
-            // Handle A-B Repeat menu items
-            else if (itemId == R.id.ab_set_point_a) {
-                setPointA();
+            } else if (itemId == 3) {
+                showABRepeatMenu(v);
                 return true;
-            } else if (itemId == R.id.ab_set_point_b) {
-                setPointB();
-                return true;
-            } else if (itemId == R.id.ab_clear_points) {
-                clearABPoints();
-                return true;
-            }
-            
-            // Handle Mixer menu items with new browse option
-            else if (itemId == R.id.mixer_select_second) {
+            } else if (itemId == 41) {
                 selectSecondAudio();
                 return true;
-            } else if (itemId == R.id.mixer_browse_second) {
-                browseAudioFiles(true);
-                return true;
-            } else if (itemId == R.id.mixer_clear_second) {
-                clearSecondAudio();
-                return true;
-            } else if (itemId == R.id.mixer_balance) {
+            } else if (itemId == 42) {
                 showBalanceDialog();
                 return true;
+            } else if (itemId == 43) {
+                clearSecondAudio();
+                return true;
+            } else if (itemId == 44) {
+                toggleIndividualPlaybackSpeeds();
+                return true;
+            } else if (itemId == 45) {
+                showIndividualSpeedDialog(true);  // For primary audio
+                return true;
+            } else if (itemId == 46) {
+                showIndividualSpeedDialog(false);  // For secondary audio
+                return true;
+            } else if (itemId == 5) {
+                showOtherSettingsDialog();
+                return true;
+            } else if (itemId == 6) {
+                refreshAudioFiles();
+                return true;
+            } else if (itemId == 70) {
+                // Open Playlists activity
+                Intent intent = new Intent(this, PlaylistActivity.class);
+                startActivity(intent);
+                return true;
+            } else if (itemId == 71) {
+                // Add current song to playlist
+                showAddToPlaylistDialog();
+                return true;
+            } else if (itemId == 100) {
+                currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
+            } else if (itemId == 102) {
+                currentPlaybackMode = PLAYBACK_MODE_RANDOM;
+                Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
+                return true;
+            } else if (itemId >= 225 && itemId <= 600) {
+                // Handle playback speed change (ID range covers 0.25x to 4.0x)
+                float selectedSpeed = (itemId - 200) / 100.0f;
+                setPlaybackSpeed(selectedSpeed);
+                return true;
             }
-            
             return false;
         });
         
         popup.show();
     }
     
+    private void setPlaybackSpeed(float speed) {
+        if (speed < MIN_PLAYBACK_SPEED) speed = MIN_PLAYBACK_SPEED;
+        if (speed > MAX_PLAYBACK_SPEED) speed = MAX_PLAYBACK_SPEED;
+        
+        // Update the stored global speed
+        currentPlaybackSpeed = speed;
+        
+        // If using individual speeds in mix mode, don't apply to both players
+        if (secondAudioActive && useIndividualPlaybackSpeeds) {
+            Toast.makeText(this, "Using individual playback speeds - global speed stored for future use", 
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Use the PlaybackParams API if available (Android 6.0+)
+            boolean speedApplied = false;
+            
+            // Apply to primary player if active
+            if (mediaPlayer != null) {
+                try {
+                    PlaybackParams params = new PlaybackParams();
+                    params.setSpeed(speed);
+                    mediaPlayer.setPlaybackParams(params);
+                    speedApplied = true;
+                    Log.d(TAG, "Applied speed " + speed + "x to primary audio");
+                    
+                    // Update individual speed if active
+                    if (useIndividualPlaybackSpeeds) {
+                        primaryPlaybackSpeed = speed;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting playback speed on primary audio", e);
+                }
+            }
+            
+            // Apply to secondary player if active (and not using individual speeds)
+            if (secondMediaPlayer != null && secondAudioActive && !useIndividualPlaybackSpeeds) {
+                try {
+                    PlaybackParams params = new PlaybackParams();
+                    params.setSpeed(speed);
+                    secondMediaPlayer.setPlaybackParams(params);
+                    speedApplied = true;
+                    Log.d(TAG, "Applied speed " + speed + "x to secondary audio");
+                    
+                    // Update individual speed if active
+                    if (useIndividualPlaybackSpeeds) {
+                        secondaryPlaybackSpeed = speed;
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting playback speed on secondary audio", e);
+                }
+            }
+            
+            // Show feedback if at least one player was updated
+            if (speedApplied) {
+                // Display toast with the new speed
+                Toast.makeText(this, "Playback speed: " + String.format("%.2fx", speed), Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "Playback speed set to " + speed);
+            } else {
+                // Still update the preference even if no player is active
+                Toast.makeText(this, "Playback speed will be " + String.format("%.2fx", speed) + 
+                    " when audio starts", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            // Show message that this feature requires Android 6.0+
+            Toast.makeText(this, "Playback speed control requires Android 6.0 or higher", 
+                Toast.LENGTH_LONG).show();
+        }
+    }
+    
+    private void toggleIndividualPlaybackSpeeds() {
+        useIndividualPlaybackSpeeds = !useIndividualPlaybackSpeeds;
+        
+        if (useIndividualPlaybackSpeeds) {
+            // Initialize individual speeds to the current global speed
+            primaryPlaybackSpeed = currentPlaybackSpeed;
+            secondaryPlaybackSpeed = currentPlaybackSpeed;
+            
+            // Show toast and immediately open the primary speed dialog
+            Toast.makeText(this, "Individual playback speeds enabled", Toast.LENGTH_SHORT).show();
+            
+            // Apply current speeds to respective players
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (mediaPlayer != null) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(primaryPlaybackSpeed);
+                        mediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied initial primary speed: " + primaryPlaybackSpeed);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error setting primary playback speed", e);
+                    }
+                }
+                
+                if (secondMediaPlayer != null && secondAudioActive) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(secondaryPlaybackSpeed);
+                        secondMediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied initial secondary speed: " + secondaryPlaybackSpeed);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error setting secondary playback speed", e);
+                    }
+                }
+            }
+            
+            // Immediately show the primary speed dialog
+            showIndividualSpeedDialog(true);
+        } else {
+            // Switch back to global speed mode
+            Toast.makeText(this, "Global playback speed restored", Toast.LENGTH_SHORT).show();
+            
+            // Apply the global speed to both players
+            setPlaybackSpeed(currentPlaybackSpeed);
+        }
+    }
+
+    private void showIndividualSpeedDialog(boolean isPrimary) {
+        final String title = isPrimary ? "Primary Audio Speed" : "Secondary Audio Speed";
+        final float currentSpeed = isPrimary ? primaryPlaybackSpeed : secondaryPlaybackSpeed;
+        
+        // Create a dialog with a slider for adjusting speed
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(title);
+        
+        // Create a simple layout with a seekbar and text display
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(50, 30, 50, 30);
+        
+        TextView speedLabel = new TextView(this);
+        speedLabel.setText(String.format("Current: %.2fx", currentSpeed));
+        speedLabel.setGravity(Gravity.CENTER);
+        speedLabel.setTextSize(18);
+        layout.addView(speedLabel);
+        
+        SeekBar speedSeekBar = new SeekBar(this);
+        // Map 0.25x-4.0x to progress values (0-375)
+        speedSeekBar.setMax(375);
+        int initialProgress = (int)((currentSpeed - 0.25f) * 100);
+        speedSeekBar.setProgress(initialProgress);
+        layout.addView(speedSeekBar);
+        
+        speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float speed = 0.25f + (progress / 100.0f);
+                if (speed > 4.0f) speed = 4.0f;
+                speedLabel.setText(String.format("Current: %.2fx", speed));
+                
+                // Preview the speed change if possible
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && fromUser) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(speed);
+                        
+                        if (isPrimary && mediaPlayer != null) {
+                            mediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Previewing primary speed: " + speed);
+                        } else if (!isPrimary && secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Previewing secondary speed: " + speed);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error previewing playback speed", e);
+                    }
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        builder.setView(layout);
+        
+        // Option to open the other dialog
+        if (secondMediaPlayer != null && secondAudioActive) {
+            builder.setNeutralButton(isPrimary ? "Set Secondary Speed" : "Set Primary Speed", 
+                (dialog, which) -> {
+                    // First apply the current setting
+                    float speed = 0.25f + (speedSeekBar.getProgress() / 100.0f);
+                    if (speed > 4.0f) speed = 4.0f;
+                    
+                    if (isPrimary) {
+                        primaryPlaybackSpeed = speed;
+                        applyPrimarySpeed(speed);
+                        // Then open the other dialog
+                        showIndividualSpeedDialog(false);
+                    } else {
+                        secondaryPlaybackSpeed = speed;
+                        applySecondarySpeed(speed);
+                        // Then open the other dialog
+                        showIndividualSpeedDialog(true);
+                    }
+                });
+        }
+        
+        builder.setPositiveButton("Set", (dialog, which) -> {
+            float speed = 0.25f + (speedSeekBar.getProgress() / 100.0f);
+            if (speed > 4.0f) speed = 4.0f;
+            
+            if (isPrimary) {
+                primaryPlaybackSpeed = speed;
+                applyPrimarySpeed(speed);
+            } else {
+                secondaryPlaybackSpeed = speed;
+                applySecondarySpeed(speed);
+            }
+        });
+        
+        builder.setNegativeButton("Cancel", (dialog, which) -> {
+            // Restore original speed
+            if (isPrimary) {
+                applyPrimarySpeed(primaryPlaybackSpeed);
+            } else {
+                applySecondarySpeed(secondaryPlaybackSpeed);
+            }
+        });
+        
+        builder.show();
+    }
+
+    // Helper methods to apply speeds with proper error handling
+    private void applyPrimarySpeed(float speed) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
+            try {
+                PlaybackParams params = new PlaybackParams();
+                params.setSpeed(speed);
+                mediaPlayer.setPlaybackParams(params);
+                Log.d(TAG, "Applied primary speed: " + speed);
+                Toast.makeText(this, "Primary audio speed set to " + String.format("%.2fx", speed), 
+                    Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Log.e(TAG, "Error applying primary playback speed", e);
+                Toast.makeText(this, "Error setting primary speed", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void applySecondarySpeed(float speed) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && 
+            secondMediaPlayer != null && secondAudioActive) {
+            try {
+                PlaybackParams params = new PlaybackParams();
+                params.setSpeed(speed);
+                secondMediaPlayer.setPlaybackParams(params);
+                Log.d(TAG, "Applied secondary speed: " + speed);
+                Toast.makeText(this, "Secondary audio speed set to " + String.format("%.2fx", speed), 
+                    Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Log.e(TAG, "Error applying secondary playback speed", e);
+                Toast.makeText(this, "Error setting secondary speed", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
     private void showCustomTimerDialog() {
         // Inflate the custom layout
         LayoutInflater inflater = LayoutInflater.from(this);
         View dialogView = inflater.inflate(R.layout.dialog_custom_timer, null);
         EditText minutesInput = dialogView.findViewById(R.id.timer_minutes);
         
+        // Configure input to accept decimal values
+        minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        
+        // Create common timer options
+        LinearLayout optionsLayout = dialogView.findViewById(R.id.timer_quick_options);
+        int[] standardMinutes = {5, 15, 30, 45, 60};
+        
+        for (int mins : standardMinutes) {
+            Button optionButton = new Button(this);
+            optionButton.setText(mins + " min");
+            optionButton.setOnClickListener(v -> {
+                minutesInput.setText(String.valueOf(mins));
+            });
+            
+            // Add some margin between buttons
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.setMargins(0, 0, 8, 0);
+            optionButton.setLayoutParams(params);
+            
+            optionsLayout.addView(optionButton);
+        }
+        
+        // Add "end of song" button
+        Button endOfSongButton = new Button(this);
+        endOfSongButton.setText("End of song");
+        endOfSongButton.setOnClickListener(v -> {
+            // Dismiss the dialog and set up end of song timer
+            setupEndOfSongTimer();
+            if (dialogView.getParent() instanceof DialogInterface) {
+                ((DialogInterface) dialogView.getParent()).dismiss();
+            }
+        });
+        
+        // Add some margin between buttons
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, 0, 8, 0);
+        endOfSongButton.setLayoutParams(params);
+        
+        optionsLayout.addView(endOfSongButton);
+        
+        // Add radio buttons for timer action
+        RadioGroup actionGroup = dialogView.findViewById(R.id.timer_action_group);
+        
+        // Set the previously selected option (if dialog is reopened)
+        if (timerAction == TIMER_ACTION_PAUSE) {
+            actionGroup.check(R.id.radio_pause);
+        } else if (timerAction == TIMER_ACTION_CLOSE_APP) {
+            actionGroup.check(R.id.radio_close);
+        }
+        
         // Create and show the dialog
         new AlertDialog.Builder(this)
-            .setTitle(R.string.timer_custom_title)
+            .setTitle("Set Sleep Timer")
             .setView(dialogView)
-            .setPositiveButton(R.string.ok, (dialog, which) -> {
+            .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                 // Get the user input
                 String minutesStr = minutesInput.getText().toString();
                 
+                // Get the selected action
+                int selectedId = actionGroup.getCheckedRadioButtonId();
+                if (selectedId == R.id.radio_pause) {
+                    timerAction = TIMER_ACTION_PAUSE;
+                } else if (selectedId == R.id.radio_close) {
+                    timerAction = TIMER_ACTION_CLOSE_APP;
+                }
+                
                 if (!TextUtils.isEmpty(minutesStr)) {
                     try {
-                        int minutes = Integer.parseInt(minutesStr);
+                        // Parse as float instead of int to support decimal values
+                        float minutes = Float.parseFloat(minutesStr);
                         
-                        // Validate the input (1-180 minutes is a reasonable range)
-                        if (minutes > 0 && minutes <= 180) {
+                        // Validate the input (0.1-180 minutes is a reasonable range)
+                        if (minutes >= 0.1f && minutes <= 180f) {
                             setSleepTimer(minutes);
                         } else {
                             Toast.makeText(MainActivity.this, 
-                                R.string.error_invalid_time, Toast.LENGTH_SHORT).show();
+                                "Invalid time value. Please enter a value between 0.1 and 180 minutes.", Toast.LENGTH_SHORT).show();
                         }
                     } catch (NumberFormatException e) {
                         Toast.makeText(MainActivity.this, 
-                            R.string.error_invalid_time, Toast.LENGTH_SHORT).show();
+                            "Invalid time format. Please enter a valid number.", Toast.LENGTH_SHORT).show();
                     }
                 }
             })
-            .setNegativeButton(R.string.cancel, null)
+            .setNegativeButton(android.R.string.cancel, null)
             .create()
             .show();
     }
     
-    private void setSleepTimer(int minutes) {
-        // Convert minutes to milliseconds
-        long milliseconds = minutes * 60 * 1000L;
+    /**
+     * Sets up a timer that will stop playback at the end of the current song
+     */
+    private void setupEndOfSongTimer() {
+        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+            Toast.makeText(this, "No audio is currently playing", Toast.LENGTH_SHORT).show();
+            return;
+        }
         
-        sleepTimer = new CountDownTimer(milliseconds, 60000) { // Update every minute
+        timerActive = true;
+        
+        // Save a reference to the standard completion handler
+        MediaPlayer.OnCompletionListener originalCompletionListener = mp -> handleSongCompletion();
+        
+        // Create a one-time completion listener
+        mediaPlayer.setOnCompletionListener(mp -> {
+            // Pause playback instead of continuing to next song
+            if (mediaPlayer != null) {
+                mediaPlayer.pause();
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                isPlaying = false;
+            }
+            
+            // If there's a second player, pause it too
+            if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.pause();
+            }
+            
+            timerActive = false;
+            timerIndicator.setVisibility(View.GONE);
+            Toast.makeText(this, "Sleep timer: end of song reached", Toast.LENGTH_SHORT).show();
+            
+            // Reset to original completion behavior
+            if (mediaPlayer != null) {
+                mediaPlayer.setOnCompletionListener(originalCompletionListener);
+            }
+        });
+        
+        // Display a message
+        String timeText = "Until end of song";
+        timerIndicator.setText(timeText);
+        timerIndicator.setVisibility(View.VISIBLE);
+        
+        Toast.makeText(this, "Timer will stop at end of current song", Toast.LENGTH_SHORT).show();
+    }
+    
+    /**
+     * Sets a sleep timer for the specified number of minutes
+     * @param minutes The duration of the timer in minutes
+     */
+    private void setSleepTimer(float minutes) {
+        // Convert minutes to milliseconds
+        long milliseconds = (long)(minutes * 60 * 1000L);
+        long endTimeMillis = System.currentTimeMillis() + milliseconds;
+        
+        // Set the timer in the service to ensure it works in background
+        if (serviceBound && audioService != null) {
+            audioService.setTimer(endTimeMillis, timerAction);
+            
+            // Register a broadcast receiver for timer updates
+            if (timerUpdateReceiver == null) {
+                timerUpdateReceiver = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        if ("TIMER_UPDATE".equals(intent.getAction())) {
+                            long timeLeft = intent.getLongExtra("TIME_LEFT", 0);
+                            updateTimerDisplay(timeLeft);
+                        } else if ("TIMER_FINISHED".equals(intent.getAction())) {
+                            timerActive = false;
+                            int action = intent.getIntExtra("TIMER_ACTION", TIMER_ACTION_PAUSE);
+                            
+                            if (action == TIMER_ACTION_CLOSE_APP) {
+                                // Make sure service is fully stopped before finishing
+                                if (serviceBound && audioService != null) {
+                                    try {
+                                        unbindService(serviceConnection);
+                                        serviceBound = false;
+                                    } catch (Exception e) {
+                                        Log.e(TAG, "Error unbinding service before app close", e);
+                                    }
+                                }
+                                // Close the app
+                                finishAndRemoveTask();
+                            } else {
+                                // Pause the playback (default behavior)
+                                runOnUiThread(() -> {
+                                    timerIndicator.setVisibility(View.GONE);
+                                    safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                                    isPlaying = false;
+                                });
+                            }
+                        }
+                    }
+                };
+                
+                IntentFilter filter = new IntentFilter();
+                filter.addAction("TIMER_UPDATE");
+                filter.addAction("TIMER_FINISHED");
+                registerReceiver(timerUpdateReceiver, filter);
+            }
+        } else {
+            // Fallback to the old timer implementation if service not bound
+            startLegacyTimer(minutes);
+        }
+        
+        timerActive = true;
+        // Show initial timer display
+        updateTimerDisplay(milliseconds);
+        
+        // Show toast with the selected action
+        String actionMsg = timerAction == TIMER_ACTION_PAUSE ? 
+            "Timer will pause playback" : "Timer will close app";
+        
+        Toast.makeText(this, "Timer set for " + 
+            (minutes == Math.floor(minutes) ? String.valueOf((int)minutes) : String.valueOf(minutes)) + 
+            " minutes: " + actionMsg, Toast.LENGTH_SHORT).show();
+    }
+    
+    private void startLegacyTimer(float minutes) {
+        if (sleepTimer != null) {
+            sleepTimer.cancel();
+        }
+        
+        long milliseconds = (long)(minutes * 60 * 1000L);
+        
+        sleepTimer = new CountDownTimer(milliseconds, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                // Calculate remaining time
-                int minutesRemaining = (int) (millisUntilFinished / 60000);
-                int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
-                
-                // Format and display the time
-                String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
-                
-                runOnUiThread(() -> {
-                    timerIndicator.setText(timeString);
-                    timerIndicator.setVisibility(View.VISIBLE);
-                });
+                updateTimerDisplay(millisUntilFinished);
             }
             
             @Override
             public void onFinish() {
-                // Stop playback when timer ends
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    mediaPlayer.pause();
-                    playPauseButton.setIconResource(R.drawable.ic_play);
-                    isPlaying = false;
-                }
                 timerActive = false;
                 
-                // Show a toast that the timer has finished
-                Toast.makeText(MainActivity.this, 
-                    "Sleep timer ended", Toast.LENGTH_SHORT).show();
-                
-                // Hide the timer indicator
-                runOnUiThread(() -> {
+                // Perform action based on timer setting
+                if (timerAction == TIMER_ACTION_CLOSE_APP) {
+                    // Close the app
+                    finishAndRemoveTask();
+                } else {
+                    // Pause playback (default)
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        mediaPlayer.pause();
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                        isPlaying = false;
+                    }
+                    
+                    if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.pause();
+                    }
+                    
                     timerIndicator.setVisibility(View.GONE);
-                });
-            }
-        }.start();
-        
-        timerActive = true;
-        Toast.makeText(this, getString(R.string.timer_set_custom, minutes), Toast.LENGTH_SHORT).show();
-    }
-    
-    private void setPointA() {
-        if (serviceBound && audioService != null) {
-            pointA = audioService.getCurrentPosition();
-            if (pointB > pointA) {
-                audioService.setABPoints(pointA, pointB);
-                abRepeatActive = true;
-                abRepeatIndicator.setVisibility(View.VISIBLE);
-            }
-        }
-    }
-    
-    private void setPointB() {
-        if (serviceBound && audioService != null) {
-            pointB = audioService.getCurrentPosition();
-            if (pointA >= 0 && pointB > pointA) {
-                audioService.setABPoints(pointA, pointB);
-                abRepeatActive = true;
-                abRepeatIndicator.setVisibility(View.VISIBLE);
-            }
-        }
-    }
-    
-    private void clearABPoints() {
-        if (serviceBound && audioService != null) {
-            audioService.clearABPoints();
-            pointA = -1;
-            pointB = -1;
-            abRepeatActive = false;
-            abRepeatIndicator.setVisibility(View.GONE);
-        }
-    }
-    
-    private void enableABRepeat() {
-        if (pointA != -1 && pointB != -1 && pointB > pointA) {
-            abRepeatActive = true;
-            Toast.makeText(this, R.string.ab_repeat_active, Toast.LENGTH_SHORT).show();
-        }
-    }
-    
-    private void updateABRepeatIndicator() {
-        if (abRepeatIndicator != null) {
-            if (pointA != -1) {
-                String text = "A: " + formatTime(pointA);
-                if (pointB != -1) {
-                    text += " - B: " + formatTime(pointB);
                 }
-                abRepeatIndicator.setText(text);
-                abRepeatIndicator.setVisibility(View.VISIBLE);
-            } else {
-                abRepeatIndicator.setVisibility(View.GONE);
             }
-        }
+        };
+        
+        sleepTimer.start();
     }
     
-    private void selectSecondAudio() {
-        if (isPermissionGranted) {
-            // First check if we have a valid first audio file
-            if (selectedAudioUri == null) {
-                Toast.makeText(this, "Please select a primary audio file first", 
-                    Toast.LENGTH_SHORT).show();
-                return;
-            }
+    private void updateTimerDisplay(long millisUntilFinished) {
+        // Make the timer indicator visible and update the time display
+        if (millisUntilFinished > 0) {
+            // Format time as mm:ss
+            int minutes = (int) (millisUntilFinished / 1000) / 60;
+            int seconds = (int) (millisUntilFinished / 1000) % 60;
+            String timeText = String.format(Locale.getDefault(), "%02d:%02d remaining", minutes, seconds);
             
-            // Save current states before selection
-            checkMediaPlayersState();
-            
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("audio/*");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            
-            try {
-                // Use the second launcher explicitly for the second file
-                secondAudioPickerLauncher.launch(intent);
-            } catch (Exception e) {
-                Log.e(TAG, "Error launching second audio picker", e);
-                Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
-            }
+            timerIndicator.setText(timeText);
+            timerIndicator.setVisibility(View.VISIBLE);
         } else {
-            checkPermissions();
-            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
+            // Hide the timer indicator when timer is not active
+            timerIndicator.setVisibility(View.GONE);
         }
     }
-    
-    private void clearSecondAudio() {
-        if (secondMediaPlayer != null) {
-            try {
-                if (secondMediaPlayer.isPlaying()) {
-                    secondMediaPlayer.stop();
-                }
-                secondMediaPlayer.release();
-                secondMediaPlayer = null;
-            } catch (Exception e) {
-                Log.e(TAG, "Error clearing second audio", e);
-            }
-        }
-        
-        secondAudioUri = null;
-        secondAudioActive = false;
-        
-        // Turn off mixer mode when second audio is cleared
-        mixerModeActive = false;
-        
-        // Reset color to gray
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
-        } else {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
-        }
-        
-        // Hide the mixer indicator
-        if (mixerIndicator != null) {
-            mixerIndicator.setVisibility(View.GONE);
-        }
-        
-        Toast.makeText(this, R.string.second_file_cleared, Toast.LENGTH_SHORT).show();
-    }
-    
-    private void showBalanceDialog() {
-        if (secondAudioUri == null || secondMediaPlayer == null) {
-            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        
-        // Inflate the custom layout
-        LayoutInflater inflater = LayoutInflater.from(this);
-        View dialogView = inflater.inflate(R.layout.dialog_audio_balance, null);
-        
-        SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
-        SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
-        
-        // Set initial values based on current volume
-        firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
-        secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
-        
-        // Create method to apply volume immediately
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle(R.string.balance_dialog_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.ok, (dialogInterface, i) -> {
-                // Save the new volumes and apply them
-                applyAudioVolumes(
-                    firstAudioSeekBar.getProgress() / 100f,
-                    secondAudioSeekBar.getProgress() / 100f
-                );
-                Toast.makeText(this, R.string.balance_saved, Toast.LENGTH_SHORT).show();
-            })
-            .setNegativeButton(R.string.cancel, (dialogInterface, i) -> {
-                // Restore original volumes on cancel
-                applyAudioVolumes(firstAudioVolume, secondAudioVolume);
-            })
-            .create();
-        
-        // Set real-time volume adjustment as user moves the seekbars
-        firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && mediaPlayer != null) {
-                    float volume = progress / 100f;
-                    mediaPlayer.setVolume(volume, volume);
-                }
-            }
-            
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && secondMediaPlayer != null) {
-                    float volume = progress / 100f;
-                    secondMediaPlayer.setVolume(volume, volume);
-                }
-            }
-            
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        dialog.show();
-    }
-    
-    private void applyAudioVolumes(float firstVolume, float secondVolume) {
-        // Store the values
-        firstAudioVolume = firstVolume;
-        secondAudioVolume = secondVolume;
-        
-        // Apply to players
-        try {
-            if (mediaPlayer != null) {
-                mediaPlayer.setVolume(firstAudioVolume, firstAudioVolume);
-            }
-            
-            if (secondMediaPlayer != null && secondAudioActive) {
-                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
-            }
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Error setting audio volumes", e);
-        }
-    }
-    
+
     private void prepareSecondMediaPlayer() {
         if (secondAudioUri == null) return;
         
@@ -1039,12 +1621,92 @@ public class MainActivity extends AppCompatActivity {
             audioService.setSecondAudioFile(secondAudioUri);
             secondAudioActive = true;
             
-            // Auto-play if needed
-            if (shouldAutoPlay && !isPlaying) {
-                audioService.play();
-                isPlaying = true;
-                playPauseButton.setIconResource(R.drawable.ic_pause);
-                shouldAutoPlay = false;
+            // Set listeners with careful error handling
+            secondMediaPlayer.setOnPreparedListener(mp -> {
+                secondAudioActive = true;
+                
+                // Set volume based on saved balance
+                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+                
+                // Apply the current playback speed to the second player to match the first
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(currentPlaybackSpeed);
+                        secondMediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied playback speed " + currentPlaybackSpeed + "x to second audio");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error applying playback speed to second audio", e);
+                    }
+                }
+                
+                // Log the state after second player is prepared
+                Log.d(TAG, "Second player prepared:");
+                checkMediaPlayersState();
+                
+                // Start playing the second audio if the first one is playing
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    try {
+                        // Start second audio at position relative to first audio
+                        syncSecondPlayerPosition();
+                        secondMediaPlayer.start();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error starting second audio", e);
+                    }
+                }
+
+                if (syncPositionButton != null) {
+                    syncPositionButton.setVisibility(View.VISIBLE);
+                }
+            });
+            
+            // Error listener with improved error handling
+            secondMediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                Log.e(TAG, "Second MediaPlayer error: " + what + ", " + extra);
+                Toast.makeText(MainActivity.this, 
+                    "Error with second audio file", Toast.LENGTH_SHORT).show();
+                
+                secondAudioActive = false;
+                if (secondMediaPlayer != null) {
+                    try {
+                        secondMediaPlayer.release();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error releasing second player after error", e);
+                    }
+                    secondMediaPlayer = null;
+                }
+                return true;
+            });
+            
+            // Prepare the player asynchronously
+            secondMediaPlayer.prepareAsync();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error preparing second media player", e);
+            Toast.makeText(this, "Error loading second audio file", Toast.LENGTH_SHORT).show();
+            secondAudioActive = false;
+        }
+        
+        // Verify first player state is preserved
+        if (mediaPlayer != null && selectedAudioUri != null) {
+            try {
+                boolean isStillPlaying = mediaPlayer.isPlaying();
+                if (wasPlaying && !isStillPlaying) {
+                    Log.d(TAG, "First player stopped playing during second player prep, restarting");
+                    mediaPlayer.start();
+                }
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Error checking first player state after second player prep", e);
+                // First player may have been reset - try to restore it
+                prepareMediaPlayer();
+                if (wasPlaying) {
+                    try {
+                        mediaPlayer.seekTo(firstPosition);
+                        mediaPlayer.start();
+                    } catch (Exception ex) {
+                        Log.e(TAG, "Failed to restore first player", ex);
+                    }
+                }
             }
         }
     }
@@ -1071,30 +1733,24 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-            
-            // Also pause the second audio
-            if (secondMediaPlayer != null && secondAudioActive) {
-                secondMediaPlayer.pause();
-            }
-            
-            playPauseButton.setIconResource(R.drawable.ic_play);
-            isPlaying = false;
-        }
+        // Remove the auto-pause code to allow background playback
     }
     
     @Override
     protected void onDestroy() {
+        // Unbind from the service
         if (serviceBound) {
             unbindService(serviceConnection);
             serviceBound = false;
         }
-        super.onDestroy();
-        releaseMediaPlayer();
         
-        // Release the second media player
-        if (secondMediaPlayer != null) {
+        // Only release MediaPlayer if it's not playing
+        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+            releaseMediaPlayer();
+        }
+        
+        // Only release second MediaPlayer if it's not playing
+        if (secondMediaPlayer != null && !secondMediaPlayer.isPlaying()) {
             try {
                 secondMediaPlayer.release();
                 secondMediaPlayer = null;
@@ -1111,6 +1767,31 @@ public class MainActivity extends AppCompatActivity {
         if (sleepTimer != null) {
             sleepTimer.cancel();
         }
+        
+        // Unregister the broadcast receivers
+        if (playbackStoppedReceiver != null) {
+            unregisterReceiver(playbackStoppedReceiver);
+        }
+        
+        // Unregister the timer update receiver
+        if (timerUpdateReceiver != null) {
+            try {
+                unregisterReceiver(timerUpdateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering timer receiver", e);
+            }
+        }
+        
+        // Unregister the close app receiver
+        if (closeAppReceiver != null) {
+            try {
+                unregisterReceiver(closeAppReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering close app receiver", e);
+            }
+        }
+        
+        super.onDestroy();
     }
 
     // Add this helper method to check both MediaPlayer instances
@@ -1198,46 +1879,20 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadAudioFiles() {
-        // Initial load with default order
+        // Initial load with default order (newest first)
         String[] projection = {
                 MediaStore.Audio.Media._ID,
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.SIZE,
-                MediaStore.Audio.Media.DISPLAY_NAME  // Add DISPLAY_NAME to get the full filename with extension
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.DATE_ADDED  // Make sure DATE_ADDED is included
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
         
-        // Determine sort order for initial load
-        String sortOrder;
-        switch (currentSortOrder) {
-            case SORT_BY_NAME_DESC:
-                sortOrder = MediaStore.Audio.Media.TITLE + " DESC";
-                break;
-            case SORT_BY_DURATION_ASC:
-                sortOrder = MediaStore.Audio.Media.DURATION + " ASC";
-                break;
-            case SORT_BY_DURATION_DESC:
-                sortOrder = MediaStore.Audio.Media.DURATION + " DESC";
-                break;
-            case SORT_BY_DATE_ASC:
-                sortOrder = MediaStore.Audio.Media.DATE_ADDED + " ASC";
-                break;
-            case SORT_BY_DATE_DESC:
-                sortOrder = MediaStore.Audio.Media.DATE_ADDED + " DESC";
-                break;
-            case SORT_BY_SIZE_ASC:
-                sortOrder = MediaStore.Audio.Media.SIZE + " ASC";
-                break;
-            case SORT_BY_SIZE_DESC:
-                sortOrder = MediaStore.Audio.Media.SIZE + " DESC";
-                break;
-            case SORT_BY_NAME_ASC:
-            default:
-                sortOrder = MediaStore.Audio.Media.TITLE + " ASC";
-                break;
-        }
+        // Always sort by date descending by default
+        String sortOrder = MediaStore.Audio.Media.DATE_ADDED + " DESC";
 
         Cursor cursor = getContentResolver().query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -1253,18 +1908,18 @@ public class MainActivity extends AppCompatActivity {
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
             int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+            int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
+            int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
                 long size = cursor.getLong(sizeColumn);
+                long dateAdded = cursor.getLong(dateAddedColumn);
                 
                 // Get the display name with extension
                 String displayName = title;
-                
-                // Try to get the full filename with extension if available
-                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
                 if (displayNameColumn != -1) {
                     String fullName = cursor.getString(displayNameColumn);
                     if (fullName != null && !fullName.isEmpty()) {
@@ -1272,21 +1927,11 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 
-                // Make sure we're handling duration properly
-                String durationFormatted;
-                try {
-                    durationFormatted = formatTime((int)duration);
-                } catch (Exception e) {
-                    // Fallback in case of formatting errors
-                    durationFormatted = "0:00";
-                    Log.e(TAG, "Error formatting duration: " + duration, e);
-                }
-
+                String durationFormatted = formatTime((int)duration);
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                // Use the display name with extension instead of just the title
-                allAudioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size));
+                allAudioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded));
             }
             cursor.close();
             
@@ -1326,9 +1971,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void highlightSelectedAudio(AudioFile audioFile) {
-        // This would require additional code in your adapter to track the selected item
-        // For a simple approach, you can just show a toast
-//        Toast.makeText(this, "Now playing: " + audioFile.getTitle(), Toast.LENGTH_SHORT).show();
+        // Update the highlight in the adapter
+        if (audioAdapter != null && audioFile != null) {
+            audioAdapter.setCurrentlyPlayingUri(audioFile.getUri());
+        }
     }
 
     public void onSecondAudioSelected(AudioFile audioFile) {
@@ -1367,7 +2013,7 @@ public class MainActivity extends AppCompatActivity {
         // If primary audio is not playing, start it with the second audio
         if (mediaPlayer != null && !mediaPlayer.isPlaying() && shouldAutoPlay) {
             mediaPlayer.start();
-            playPauseButton.setIconResource(R.drawable.ic_pause);
+            safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
             isPlaying = true;
             updateSeekBar();
             shouldAutoPlay = false;
@@ -1419,12 +2065,18 @@ public class MainActivity extends AppCompatActivity {
             if (mixerModeActive) {
                 onSecondAudioSelected(audioFile);
             } else {
-                // If not in mixer mode, either play directly or show dialog
-                if (secondAudioUri != null) {
-                    showAudioSelectionDialog(audioFile);
-                } else {
-                    onAudioFileSelected(audioFile);
+                // If in playlist view, we need to update current playlist index
+                if (inPlaylistView) {
+                    for (int i = 0; i < currentPlaylistSongs.size(); i++) {
+                        if (currentPlaylistSongs.get(i).getUri().equals(audioFile.getUri())) {
+                            currentPlaylistIndex = i;
+                            break;
+                        }
+                    }
                 }
+                
+                // Play the selected audio
+                onAudioFileSelected(audioFile);
             }
         });
         
@@ -1558,6 +2210,65 @@ public class MainActivity extends AppCompatActivity {
 
     // Add a new method to sort audio files
     private void sortAudioFiles() {
+        // First check if we're in playlist view mode
+        if (inPlaylistView && currentPlaylistSongs != null && !currentPlaylistSongs.isEmpty()) {
+            try {
+                // Apply sort to currentPlaylistSongs instead of allAudioFiles
+                Comparator<AudioFile> comparator = null;
+                
+                switch (currentSortOrder) {
+                    case SORT_BY_NAME_ASC:
+                        comparator = (a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle());
+                        Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
+                        break;
+                    
+                    case SORT_BY_NAME_DESC:
+                        comparator = (a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle());
+                        Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
+                        break;
+                    
+                    case SORT_BY_DURATION_ASC:
+                    case SORT_BY_DURATION_DESC:
+                        // Use our new method for duration sorting
+                        sortByDuration(currentSortOrder == SORT_BY_DURATION_DESC);
+                        return; // Exit early, as sortByDuration handles everything
+                
+                    case SORT_BY_DATE_ASC:
+                    case SORT_BY_DATE_DESC:
+                        // For date sorting, we need to query MediaStore again
+                        sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
+                        return; // Exit early, as sortByDate handles the update
+                
+                    case SORT_BY_SIZE_ASC:
+                    case SORT_BY_SIZE_DESC:
+                        // For size sorting, query MediaStore again
+                        sortBySize(currentSortOrder == SORT_BY_SIZE_DESC);
+                        return; // Exit early, as sortBySize handles the update
+                }
+                
+                if (comparator != null) {
+                    currentPlaylistSongs.sort(comparator);
+                    
+                    // Update the filtered list
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(currentPlaylistSongs);
+                    
+                    // Apply search filter if active
+                    if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                        filterAudioFiles(searchEditText.getText().toString());
+                    } else {
+                        updateAudioFilesList();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error sorting playlist songs", e);
+                Toast.makeText(this, "Error sorting playlist files", Toast.LENGTH_SHORT).show();
+            }
+            
+            return; // Exit here, we've handled the playlist sort
+        }
+        
+        // Handle regular mode (not in playlist view)
         if (allAudioFiles == null || allAudioFiles.isEmpty()) {
             return;
         }
@@ -1651,7 +2362,7 @@ public class MainActivity extends AppCompatActivity {
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.DATE_ADDED,
-                MediaStore.Audio.Media.SIZE  // Add SIZE to projection
+                MediaStore.Audio.Media.SIZE
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -1659,78 +2370,86 @@ public class MainActivity extends AppCompatActivity {
 
         List<AudioFile> sortedFiles = new ArrayList<>();
         
-        Cursor cursor = getContentResolver().query(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                null,
-                sortOrder);
+        try {
+            Cursor cursor = getContentResolver().query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    null,
+                    sortOrder);
 
-        if (cursor != null) {
-            int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
-            int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
-            int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
-            int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE); // Get size column
+            if (cursor != null) {
+                int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
+                int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
+                int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
+                int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+                int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
 
-            while (cursor.moveToNext()) {
-                long id = cursor.getLong(idColumn);
-                String title = cursor.getString(titleColumn);
-                long duration = cursor.getLong(durationColumn);
-                long size = cursor.getLong(sizeColumn); // Get the file size
-                String durationFormatted = formatTime((int)duration);
+                while (cursor.moveToNext()) {
+                    long id = cursor.getLong(idColumn);
+                    String title = cursor.getString(titleColumn);
+                    long duration = cursor.getLong(durationColumn);
+                    long size = cursor.getLong(sizeColumn);
+                    long dateAdded = cursor.getLong(dateAddedColumn);  // Get dateAdded from cursor
+                    
+                    String durationFormatted = formatTime((int)duration);
+                    Uri contentUri = Uri.withAppendedPath(
+                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                Uri contentUri = Uri.withAppendedPath(
-                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
-
-                // Add the size parameter to the constructor
-                sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size));
+                    sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size, dateAdded));
+                }
+                cursor.close();
+                
+                // Replace the current lists with the sorted list
+                allAudioFiles.clear();
+                allAudioFiles.addAll(sortedFiles);
+                
+                // Update filtered list based on current search
+                if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                    filterAudioFiles(searchEditText.getText().toString());
+                } else {
+                    // No search filter, update filtered list with all
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(allAudioFiles);
+                    // Update the UI
+                    updateAudioFilesList();
+                }
+                
+                // Show appropriate toast
+                Toast.makeText(this, getString(descending ? 
+                    R.string.sort_by_date_desc : R.string.sort_by_date_asc), 
+                    Toast.LENGTH_SHORT).show();
             }
-            cursor.close();
-            
-            // Replace the current lists with the sorted list
-            allAudioFiles.clear();
-            allAudioFiles.addAll(sortedFiles);
-            
-            // Update filtered list based on current search
-            if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
-                filterAudioFiles(searchEditText.getText().toString());
-            } else {
-                // No search filter, update filtered list with all
-                filteredAudioFiles.clear();
-                filteredAudioFiles.addAll(allAudioFiles);
-                // Update the UI
-                updateAudioFilesList();
-            }
-            
-            // Show appropriate toast
-            if (descending) {
-                Toast.makeText(this, getString(R.string.sort_by_date_desc), Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, getString(R.string.sort_by_date_asc), Toast.LENGTH_SHORT).show();
-            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error during date sorting", e);
+            Toast.makeText(this, "Error sorting by date", Toast.LENGTH_SHORT).show();
         }
     }
 
     // Add the filterAudioFiles method
     private void filterAudioFiles(String query) {
+        if (query == null) query = "";
+        
+        // Clear the filtered list
         filteredAudioFiles.clear();
         
-        if (TextUtils.isEmpty(query)) {
-            // If query is empty, show all files
-            filteredAudioFiles.addAll(allAudioFiles);
-        } else {
-            // Convert query to lowercase for case-insensitive search
-            String lowerCaseQuery = query.toLowerCase();
-            
-            // Filter files that contain the query in their title
-            for (AudioFile file : allAudioFiles) {
-                if (file.getTitle().toLowerCase().contains(lowerCaseQuery)) {
-                    filteredAudioFiles.add(file);
-                }
+        // Only filter within the playlist songs if in playlist view
+        List<AudioFile> sourceList = inPlaylistView ? currentPlaylistSongs : allAudioFiles;
+        
+        if (sourceList == null || sourceList.isEmpty()) {
+            // Handle empty list case
+            updateAudioFilesList();
+            return;
+        }
+        
+        // Filter based on the query
+        for (AudioFile audioFile : sourceList) {
+            if (audioFile.getTitle().toLowerCase().contains(query.toLowerCase())) {
+                filteredAudioFiles.add(audioFile);
             }
         }
         
-        // Update the adapter with filtered results
+        // Update the UI
         updateAudioFilesList();
     }
 
@@ -1746,18 +2465,15 @@ public class MainActivity extends AppCompatActivity {
         // Toggle the mixer mode
         mixerModeActive = !mixerModeActive;
         
-        // Toggle the text color with backward compatibility
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mixerToggleButton.setTextColor(
-                mixerModeActive ? 
-                getResources().getColor(android.R.color.holo_blue_dark, null) : 
-                getResources().getColor(android.R.color.darker_gray, null));
+        // Toggle the text color with a more attractive design
+        if (mixerModeActive) {
+            mixerToggleButton.setTextColor(getResources().getColor(R.color.player_primary_button_bg));
+            mixerToggleButton.setBackgroundResource(R.drawable.rounded_button_background);
+            mixerToggleButton.setPadding(16, 8, 16, 8);
         } else {
-            // For older Android versions
-            mixerToggleButton.setTextColor(
-                mixerModeActive ? 
-                getResources().getColor(android.R.color.holo_blue_dark) : 
-                getResources().getColor(android.R.color.darker_gray));
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+            mixerToggleButton.setBackground(null);
+            mixerToggleButton.setPadding(8, 8, 8, 8);
         }
         
         // Show a toast to indicate the current mode
@@ -1801,6 +2517,7 @@ public class MainActivity extends AppCompatActivity {
                 int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+                int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
                 
                 Log.d(TAG, "Found " + cursor.getCount() + " music files in query");
                 
@@ -1809,6 +2526,7 @@ public class MainActivity extends AppCompatActivity {
                     String title = cursor.getString(titleColumn);
                     long duration = cursor.getLong(durationColumn);
                     long size = cursor.getLong(sizeColumn);
+                    long dateAdded = cursor.getLong(dateAddedColumn);
                     
                     // Track the largest file for debugging
                     if (size > largestSize) {
@@ -1839,7 +2557,7 @@ public class MainActivity extends AppCompatActivity {
                     Uri contentUri = Uri.withAppendedPath(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size);
+                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size, dateAdded);
                     sizeInfoList.add(new AudioFileSizePair(audioFile, size));
                 }
                 cursor.close();
@@ -1917,27 +2635,29 @@ public class MainActivity extends AppCompatActivity {
                     MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.DURATION,
                     MediaStore.Audio.Media.SIZE,
-                    MediaStore.Audio.Media.DATE_ADDED,
-                    MediaStore.Audio.Media.DISPLAY_NAME  // Add DISPLAY_NAME
+                    MediaStore.Audio.Media.DATE_ADDED,  // Include DATE_ADDED in projection
+                    MediaStore.Audio.Media.DISPLAY_NAME
             };
 
             String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
             
-            // No sorting in the query - we'll sort in memory
             List<AudioFileDurationPair> durationInfoList = new ArrayList<>();
+            List<AudioFile> sortedFiles = new ArrayList<>();  // Add this line
             
             Cursor cursor = getContentResolver().query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     projection,
                     selection,
                     null,
-                    null);  // No sort order - to avoid MediaStore limitations
+                    null);
             
             if (cursor != null) {
                 int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
                 int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+                int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
+                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
                 
                 Log.d(TAG, "Found " + cursor.getCount() + " music files in query");
                 
@@ -1946,10 +2666,9 @@ public class MainActivity extends AppCompatActivity {
                     String title = cursor.getString(titleColumn);
                     long duration = cursor.getLong(durationColumn);
                     long size = cursor.getLong(sizeColumn);
+                    long dateAdded = cursor.getLong(dateAddedColumn);  // Get dateAdded from cursor
                     
-                    // Get the display name with extension
                     String displayName = title;
-                    int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
                     if (displayNameColumn != -1) {
                         String fullName = cursor.getString(displayNameColumn);
                         if (fullName != null && !fullName.isEmpty()) {
@@ -1964,7 +2683,6 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         durationFormatted = formatTime((int)duration);
                     } catch (Exception e) {
-                        // Handle extremely long durations that might cause integer overflow
                         if (duration > Integer.MAX_VALUE) {
                             long hours = duration / 3600000;
                             long minutes = (duration % 3600000) / 60000;
@@ -1976,15 +2694,8 @@ public class MainActivity extends AppCompatActivity {
                         Log.e(TAG, "Error formatting long duration: " + duration, e);
                     }
                     
-                    // Updated constructor with size parameter
-                    AudioFile audioFile = new AudioFile(displayName, durationFormatted, contentUri, id, size);
+                    AudioFile audioFile = new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded);
                     durationInfoList.add(new AudioFileDurationPair(audioFile, duration));
-                    
-                    // Log very long durations for debugging
-                    if (duration > 10800000) { // > 3 hours
-                        Log.d(TAG, "Long duration file found: " + title + 
-                               " - Duration: " + duration + "ms (" + durationFormatted + ")");
-                    }
                 }
                 cursor.close();
                 
@@ -1998,7 +2709,6 @@ public class MainActivity extends AppCompatActivity {
                 });
                 
                 // Extract sorted AudioFile objects
-                List<AudioFile> sortedFiles = new ArrayList<>();
                 for (AudioFileDurationPair pair : durationInfoList) {
                     sortedFiles.add(pair.audioFile);
                     
@@ -2060,6 +2770,845 @@ public class MainActivity extends AppCompatActivity {
         // If we're in a search, make sure to reapply the filter
         if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
             filterAudioFiles(searchEditText.getText().toString());
+        }
+    }
+
+    private void startPlayback() {
+        if (mediaPlayer != null) {
+            // Check for notification permission on Android 13+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) 
+                        != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+                    return;
+                }
+            }
+
+            // Start the service for background playback
+            Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+            
+            // ... existing playback code ...
+        }
+    }
+
+    private void updateUIForPlaybackStopped() {
+        runOnUiThread(() -> {
+            safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+            isPlaying = false;
+            seekBar.setProgress(0);
+            currentTimeText.setText("0:00");
+
+            // Reset MediaPlayer states
+            if (mediaPlayer != null) {
+                try {
+                    mediaPlayer.reset();
+                    prepareMediaPlayer();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error resetting media player", e);
+                }
+            }
+
+            // Reset second MediaPlayer if active
+            if (secondMediaPlayer != null) {
+                try {
+                    secondMediaPlayer.reset();
+                    if (secondAudioUri != null) {
+                        secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+                        secondMediaPlayer.prepareAsync();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error resetting second media player", e);
+                }
+            }
+        });
+    }
+
+    // Add this method to handle seeking in both primary and secondary tracks
+    private void seekRelative(int offsetMs) {
+        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+            return;
+        }
+        
+        try {
+            // Get current position of primary track
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            int duration = mediaPlayer.getDuration();
+            
+            // Calculate new position with bounds checking
+            int newPosition = Math.max(0, Math.min(duration, currentPosition + offsetMs));
+            
+            // Seek primary track
+            mediaPlayer.seekTo(newPosition);
+            
+            // Update seek bar and time display
+            seekBar.setProgress(newPosition);
+            updateTimeText(newPosition, duration);
+            
+            // If second track is active, synchronize it
+            if (secondMediaPlayer != null && secondAudioActive) {
+                syncSecondPlayerPosition();
+                
+                // Show toast with track info
+                String primaryFile = getFileNameFromUri(selectedAudioUri);
+                String secondaryFile = getFileNameFromUri(secondAudioUri);
+                if (primaryFile.length() > 20) primaryFile = primaryFile.substring(0, 17) + "...";
+                if (secondaryFile.length() > 20) secondaryFile = secondaryFile.substring(0, 17) + "...";
+                
+                String direction = offsetMs > 0 ? "forward" : "backward";
+                int seconds = Math.abs(offsetMs) / 1000;
+                
+                Toast.makeText(this, String.format("Seeking %s %ds\n▶ %s\n▶ %s", 
+                    direction, seconds, primaryFile, secondaryFile), 
+                    Toast.LENGTH_SHORT).show();
+            }
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Error during seek operation", e);
+        }
+    }
+
+    // Add this method after showBalanceDialog() to create a position sync dialog
+    private void showPositionSyncDialog() {
+        if (secondAudioUri == null || secondMediaPlayer == null) {
+            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_position_sync, null);
+        
+        // Find views in the dialog
+        TextView primaryTitleText = dialogView.findViewById(R.id.primaryTrackTitle);
+        TextView secondaryTitleText = dialogView.findViewById(R.id.secondaryTrackTitle);
+        SeekBar primarySeekBar = dialogView.findViewById(R.id.primaryPositionSeekBar);
+        SeekBar secondarySeekBar = dialogView.findViewById(R.id.secondaryPositionSeekBar);
+        TextView primaryTimeText = dialogView.findViewById(R.id.primaryPositionText);
+        TextView secondaryTimeText = dialogView.findViewById(R.id.secondaryPositionText);
+        
+        // Set track titles
+        String primaryTitle = getFileNameFromUri(selectedAudioUri);
+        String secondaryTitle = getFileNameFromUri(secondAudioUri);
+        
+        if (primaryTitle.length() > 30) primaryTitle = primaryTitle.substring(0, 27) + "...";
+        if (secondaryTitle.length() > 30) secondaryTitle = secondaryTitle.substring(0, 27) + "...";
+        
+        primaryTitleText.setText(primaryTitle);
+        secondaryTitleText.setText(secondaryTitle);
+        
+        // Get current positions and durations
+        int primaryPos = mediaPlayer.getCurrentPosition();
+        int primaryDur = mediaPlayer.getDuration();
+        int secondaryPos = secondMediaPlayer.getCurrentPosition();
+        int secondaryDur = secondMediaPlayer.getDuration();
+        
+        // Set up the SeekBars
+        primarySeekBar.setMax(primaryDur);
+        primarySeekBar.setProgress(primaryPos);
+        
+        secondarySeekBar.setMax(secondaryDur);
+        secondarySeekBar.setProgress(secondaryPos);
+        
+        // Update time displays initially
+        primaryTimeText.setText(formatTime(primaryPos) + " / " + formatTime(primaryDur));
+        secondaryTimeText.setText(formatTime(secondaryPos) + " / " + formatTime(secondaryDur));
+        
+        // Set up listeners for real-time updates
+        primarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    primaryTimeText.setText(formatTime(progress) + " / " + formatTime(primaryDur));
+                    // Optional preview: mediaPlayer.seekTo(progress);
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        secondarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    secondaryTimeText.setText(formatTime(progress) + " / " + formatTime(secondaryDur));
+                    // Optional preview: secondMediaPlayer.seekTo(progress);
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        // Create and show the dialog
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.position_sync_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.apply, (dialogInterface, i) -> {
+                // Apply the positions when user clicks Apply
+                int newPrimaryPos = primarySeekBar.getProgress();
+                int newSecondaryPos = secondarySeekBar.getProgress();
+                
+                // Apply new positions
+                mediaPlayer.seekTo(newPrimaryPos);
+                secondMediaPlayer.seekTo(newSecondaryPos);
+                
+                // Update UI
+                seekBar.setProgress(newPrimaryPos);
+                updateTimeText(newPrimaryPos, primaryDur);
+                
+                // Show confirmation toast
+                Toast.makeText(this, R.string.positions_synced, Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(R.string.cancel, null)
+            .create();
+        
+        dialog.show();
+    }
+
+    // Add a method to show settings dialog
+    private void showOtherSettingsDialog() {
+        // Create submenu for settings
+        PopupMenu popup = new PopupMenu(this, menuButton);
+        popup.getMenuInflater().inflate(R.menu.settings_menu, popup.getMenu());
+        
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            if (itemId == R.id.settings_seek_time) {
+                showSeekTimeSettingsDialog();
+                return true;
+            }
+            return false;
+        });
+        
+        popup.show();
+    }
+
+    private void showSeekTimeSettingsDialog() {
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_seek_settings, null);
+        
+        // Get references to the EditText fields
+        EditText forwardSeekEdit = dialogView.findViewById(R.id.forward_seek_seconds);
+        EditText backwardSeekEdit = dialogView.findViewById(R.id.backward_seek_seconds);
+        
+        // Set current values
+        forwardSeekEdit.setText(String.valueOf(seekForwardMs / 1000));
+        backwardSeekEdit.setText(String.valueOf(seekBackwardMs / 1000));
+        
+        // Create and show the dialog
+        new AlertDialog.Builder(this)
+            .setTitle("Seek Time Settings")
+            .setView(dialogView)
+            .setPositiveButton("Save", (dialog, which) -> {
+                // Get and validate input values
+                try {
+                    int forwardSeconds = Integer.parseInt(forwardSeekEdit.getText().toString().trim());
+                    int backwardSeconds = Integer.parseInt(backwardSeekEdit.getText().toString().trim());
+                    
+                    // Validate range (1-300 seconds is reasonable)
+                    if (forwardSeconds < 1 || forwardSeconds > 300 || 
+                        backwardSeconds < 1 || backwardSeconds > 300) {
+                        Toast.makeText(this, "Please enter values between 1 and 300 seconds", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    
+                    // Save the values
+                    seekForwardMs = forwardSeconds * 1000;
+                    seekBackwardMs = backwardSeconds * 1000;
+                    
+                    // Save to SharedPreferences
+                    getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                        .edit()
+                        .putInt("seek_forward_seconds", forwardSeconds)
+                        .putInt("seek_backward_seconds", backwardSeconds)
+                        .apply();
+                    
+                    Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show();
+                    
+                } catch (NumberFormatException e) {
+                    Toast.makeText(this, "Please enter valid numbers", Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    // Add this method to your MainActivity
+    private void animateButtonPress(View button) {
+        button.animate()
+            .scaleX(0.9f)
+            .scaleY(0.9f)
+            .setDuration(100)
+            .withEndAction(() -> 
+                button.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(100)
+                    .start())
+            .start();
+    }
+
+    // Add this helper method
+    private void safeSetImageResource(ImageButton button, int resId) {
+        if (button != null) {
+            try {
+                button.setImageResource(resId);
+            } catch (Exception e) {
+                Log.e(TAG, "Error setting image resource", e);
+            }
+        }
+    }
+
+    private void showSortMenu(View v) {
+        PopupMenu popup = new PopupMenu(this, v);
+        Menu menu = popup.getMenu();
+        
+        menu.add(0, 1, 0, "Name (A-Z)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_NAME_ASC);
+        menu.add(0, 2, 0, "Name (Z-A)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_NAME_DESC);
+        menu.add(0, 3, 0, "Duration (Shortest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DURATION_ASC);
+        menu.add(0, 4, 0, "Duration (Longest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DURATION_DESC);
+        menu.add(0, 5, 0, "Date (Oldest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DATE_ASC);
+        menu.add(0, 6, 0, "Date (Newest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DATE_DESC);
+        menu.add(0, 7, 0, "Size (Smallest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_SIZE_ASC);
+        menu.add(0, 8, 0, "Size (Largest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_SIZE_DESC);
+
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            
+            if (itemId == 1) {
+                currentSortOrder = SORT_BY_NAME_ASC;
+            } else if (itemId == 2) {
+                currentSortOrder = SORT_BY_NAME_DESC;
+            } else if (itemId == 3) {
+                currentSortOrder = SORT_BY_DURATION_ASC;
+            } else if (itemId == 4) {
+                currentSortOrder = SORT_BY_DURATION_DESC;
+            } else if (itemId == 5) {
+                currentSortOrder = SORT_BY_DATE_ASC;
+            } else if (itemId == 6) {
+                currentSortOrder = SORT_BY_DATE_DESC;
+            } else if (itemId == 7) {
+                currentSortOrder = SORT_BY_SIZE_ASC;
+            } else if (itemId == 8) {
+                currentSortOrder = SORT_BY_SIZE_DESC;
+            }
+            
+            sortAudioFiles();
+            audioAdapter.notifyDataSetChanged();
+            return true;
+        });
+
+        popup.show();
+    }
+
+    private void showABRepeatMenu(View v) {
+        PopupMenu popup = new PopupMenu(this, v);
+        Menu menu = popup.getMenu();
+        
+        menu.add(0, 1, 0, "Set Point A");
+        menu.add(0, 2, 0, "Set Point B");
+        menu.add(0, 3, 0, "Clear A-B Points");
+        menu.add(0, 4, 0, abRepeatActive ? "Disable A-B Repeat" : "Enable A-B Repeat");
+
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            
+            if (itemId == 1) {
+                setPointA();
+                return true;
+            } else if (itemId == 2) {
+                setPointB();
+                return true;
+            } else if (itemId == 3) {
+                clearABPoints();
+                return true;
+            } else if (itemId == 4) {
+                if (abRepeatActive) {
+                    abRepeatActive = false;
+                    updateABRepeatIndicator();
+                } else {
+                    enableABRepeat();
+                }
+                return true;
+            }
+            
+            return false;
+        });
+
+        popup.show();
+    }
+
+    // Method implementations to fix unresolved references
+    
+    private void selectSecondAudio() {
+        if (isPermissionGranted) {
+            // Create intent to browse for audio file
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("audio/*");
+            
+            try {
+                // Use the second launcher explicitly for the second file
+                secondAudioPickerLauncher.launch(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Error launching second audio picker", e);
+                Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            checkPermissions();
+            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void showBalanceDialog() {
+        if (secondAudioUri == null || secondMediaPlayer == null) {
+            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_audio_balance, null);
+        
+        SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
+        SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
+        
+        // Set initial values based on current volume
+        firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
+        secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
+        
+        // Create method to apply volume immediately
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("Audio Balance")
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok, (dialogInterface, i) -> {
+                // Save the new volumes and apply them
+                applyAudioVolumes(
+                    firstAudioSeekBar.getProgress() / 100f,
+                    secondAudioSeekBar.getProgress() / 100f
+                );
+                Toast.makeText(this, "Balance saved", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(android.R.string.cancel, (dialogInterface, i) -> {
+                // Restore original volumes on cancel
+                applyAudioVolumes(firstAudioVolume, secondAudioVolume);
+            })
+            .create();
+        
+        // Set real-time volume adjustment as user moves the seekbars
+        firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null) {
+                    float volume = progress / 100f;
+                    mediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && secondMediaPlayer != null) {
+                    float volume = progress / 100f;
+                    secondMediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        dialog.show();
+    }
+    
+    private void clearSecondAudio() {
+        if (secondMediaPlayer != null) {
+            try {
+                if (secondMediaPlayer.isPlaying()) {
+                    secondMediaPlayer.stop();
+                }
+                secondMediaPlayer.release();
+                secondMediaPlayer = null;
+            } catch (Exception e) {
+                Log.e(TAG, "Error clearing second audio", e);
+            }
+        }
+        
+        secondAudioUri = null;
+        secondAudioActive = false;
+        
+        // Turn off mixer mode when second audio is cleared
+        mixerModeActive = false;
+        
+        // Reset color to gray
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
+        } else {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+        }
+        
+        // Hide the mixer indicator
+        if (mixerIndicator != null) {
+            mixerIndicator.setVisibility(View.GONE);
+        }
+        
+        Toast.makeText(this, "Second audio cleared", Toast.LENGTH_SHORT).show();
+
+        if (syncPositionButton != null) {
+            syncPositionButton.setVisibility(View.GONE);
+        }
+    }
+    
+    private void setPointA() {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        try {
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            pointA = currentPosition;
+            String pointATime = formatTime(pointA);
+            
+            // Log point setting
+            Log.d(TAG, "Set A-B repeat point A: " + pointATime + " (" + pointA + "ms)");
+            
+            // Update UI
+            Toast.makeText(this, "Point A set: " + pointATime, Toast.LENGTH_SHORT).show();
+            updateABRepeatIndicator();
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting point A", e);
+            Toast.makeText(this, "Error setting point A", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void setPointB() {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        try {
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            
+            // Ensure point B is after point A
+            if (pointA != -1 && currentPosition <= pointA) {
+                Toast.makeText(this, "Point B must be after Point A", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            pointB = currentPosition;
+            String pointBTime = formatTime(pointB);
+            
+            // Log point setting
+            Log.d(TAG, "Set A-B repeat point B: " + pointBTime + " (" + pointB + "ms)");
+            
+            // Update UI
+            Toast.makeText(this, "Point B set: " + pointBTime, Toast.LENGTH_SHORT).show();
+            updateABRepeatIndicator();
+            
+            // If both points are set, enable A-B repeat
+            if (pointA != -1 && pointB != -1) {
+                enableABRepeat();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting point B", e);
+            Toast.makeText(this, "Error setting point B", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void clearABPoints() {
+        pointA = -1;
+        pointB = -1;
+        abRepeatActive = false;
+        
+        updateABRepeatIndicator();
+        
+        Toast.makeText(this, "A-B repeat cleared", Toast.LENGTH_SHORT).show();
+    }
+    
+    private void updateABRepeatIndicator() {
+        if (abRepeatIndicator != null) {
+            if (pointA != -1 || pointB != -1 || abRepeatActive) {
+                String indicatorText = "A-B: ";
+                indicatorText += (pointA != -1) ? formatTime(pointA) : "--:--";
+                indicatorText += " to ";
+                indicatorText += (pointB != -1) ? formatTime(pointB) : "--:--";
+                
+                abRepeatIndicator.setText(indicatorText);
+                abRepeatIndicator.setVisibility(View.VISIBLE);
+            } else {
+                abRepeatIndicator.setVisibility(View.GONE);
+            }
+        }
+    }
+    
+    private void enableABRepeat() {
+        if (pointA != -1 && pointB != -1) {
+            abRepeatActive = true;
+            updateABRepeatIndicator();
+            Toast.makeText(this, "A-B repeat active", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    // Method to apply volumes to both audio players
+    private void applyAudioVolumes(float firstVolume, float secondVolume) {
+        // Store the values
+        firstAudioVolume = firstVolume;
+        secondAudioVolume = secondVolume;
+        
+        // Apply to players
+        try {
+            if (mediaPlayer != null) {
+                mediaPlayer.setVolume(firstAudioVolume, firstAudioVolume);
+            }
+            
+            if (secondMediaPlayer != null && secondAudioActive) {
+                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+            }
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Error setting audio volumes", e);
+        }
+    }
+
+    /**
+     * Show dialog to add current song to a playlist
+     */
+    private void showAddToPlaylistDialog() {
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Get all playlists
+        List<Playlist> playlists = playlistDbHelper.getAllPlaylists();
+        
+        if (playlists.isEmpty()) {
+            // No playlists exist, show create playlist dialog
+            showCreatePlaylistDialog();
+            return;
+        }
+        
+        // Create list of playlist names
+        String[] playlistNames = new String[playlists.size() + 1]; // +1 for "Create new playlist" option
+        for (int i = 0; i < playlists.size(); i++) {
+            playlistNames[i] = playlists.get(i).getName();
+        }
+        playlistNames[playlists.size()] = "Create new playlist";
+        
+        // Show playlist selection dialog
+        new AlertDialog.Builder(this)
+            .setTitle("Add to Playlist")
+            .setItems(playlistNames, (dialog, which) -> {
+                if (which == playlists.size()) {
+                    // Create new playlist option selected
+                    showCreatePlaylistDialog();
+                } else {
+                    // Add to selected playlist
+                    Playlist selectedPlaylist = playlists.get(which);
+                    addCurrentSongToPlaylist(selectedPlaylist);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    /**
+     * Show dialog to create a new playlist and add the current song
+     */
+    private void showCreatePlaylistDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Create Playlist");
+        
+        // Set up the input
+        final EditText input = new EditText(this);
+        input.setHint("Playlist Name");
+        builder.setView(input);
+        
+        // Set up the buttons
+        builder.setPositiveButton("Create", (dialog, which) -> {
+            String playlistName = input.getText().toString().trim();
+            if (!TextUtils.isEmpty(playlistName)) {
+                Playlist newPlaylist = new Playlist(playlistName);
+                playlistDbHelper.createPlaylist(newPlaylist);
+                
+                // If a song is selected, add it to the new playlist
+                if (selectedAudioUri != null) {
+                    addCurrentSongToPlaylist(newPlaylist);
+                }
+                
+                Toast.makeText(this, "Playlist created", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Playlist name cannot be empty", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+        
+        builder.show();
+    }
+    
+    /**
+     * Add the currently playing song to a playlist
+     */
+    private void addCurrentSongToPlaylist(Playlist playlist) {
+        if (selectedAudioUri == null) {
+            return;
+        }
+        
+        // Get audio file info from the currently playing song
+        String title = fileNameText.getText().toString();
+        String duration = totalTimeText.getText().toString();
+        long fileSize = 0;
+        long dateAdded = System.currentTimeMillis();
+        
+        // Create audio file object
+        AudioFile audioFile = new AudioFile(title, duration, selectedAudioUri, 0, fileSize, dateAdded);
+        
+        // Add to playlist
+        long result = playlistDbHelper.addSongToPlaylist(playlist.getId(), audioFile);
+        
+        if (result != -1) {
+            Toast.makeText(this, "Added to " + playlist.getName(), Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Song already in playlist", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleIntent(intent);
+    }
+    
+    /**
+     * Handle incoming intents, including playlist playback
+     */
+    private void handleIntent(Intent intent) {
+        if (intent != null) {
+            // Check if we should play a playlist
+            currentPlaylistId = intent.getStringExtra("PLAYLIST_ID");
+            
+            if (currentPlaylistId != null) {
+                // Load the playlist songs
+                currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
+                
+                // Get the URI to play from the intent data or the first song if PLAY_ENTIRE_PLAYLIST is true
+                Uri uriToPlay = intent.getData();
+                
+                if (uriToPlay != null) {
+                    // Find the index of this song in the playlist
+                    for (int i = 0; i < currentPlaylistSongs.size(); i++) {
+                        if (currentPlaylistSongs.get(i).getUri().equals(uriToPlay)) {
+                            currentPlaylistIndex = i;
+                            break;
+                        }
+                    }
+                } else if (intent.getBooleanExtra("PLAY_ENTIRE_PLAYLIST", false) && !currentPlaylistSongs.isEmpty()) {
+                    // Start playing from the first song
+                    uriToPlay = currentPlaylistSongs.get(0).getUri();
+                    currentPlaylistIndex = 0;
+                }
+                
+                if (uriToPlay != null) {
+                    selectedAudioUri = uriToPlay;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Show only songs from this playlist
+                    showPlaylistSongs();
+                }
+            }
+        }
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        
+        // If we're returning from another activity and in playlist view,
+        // reload the playlist in case songs were added/removed
+        if (inPlaylistView && currentPlaylistId != null) {
+            currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
+            showPlaylistSongs();
+        }
+    }
+    
+    /**
+     * Toggle to view all songs from playlist view
+     */
+    private void toggleToAllSongsView() {
+        inPlaylistView = false;
+        playlistInfoContainer.setVisibility(View.GONE);
+        
+        // Switch back to showing all songs
+        filteredAudioFiles.clear();
+        filteredAudioFiles.addAll(allAudioFiles);
+        
+        // Apply current sort order
+        sortAudioFiles();
+        
+        // Apply any active search filter
+        if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+            filterAudioFiles(searchEditText.getText().toString());
+        } else {
+            updateAudioFilesList();
+        }
+        
+        Toast.makeText(this, R.string.showing_all_songs, Toast.LENGTH_SHORT).show();
+    }
+    
+    /**
+     * Show only songs from the current playlist
+     */
+    private void showPlaylistSongs() {
+        if (currentPlaylistId == null || currentPlaylistSongs == null || currentPlaylistSongs.isEmpty()) {
+            return;
+        }
+        
+        inPlaylistView = true;
+        
+        // Get playlist details
+        currentPlaylist = playlistDbHelper.getPlaylist(currentPlaylistId);
+        
+        if (currentPlaylist != null) {
+            // Show playlist info
+            playlistNameText.setText(currentPlaylist.getName());
+            playlistInfoContainer.setVisibility(View.VISIBLE);
+            showAllSongsButton.setText(R.string.all_songs);
+            
+            // Update the list to show only playlist songs
+            filteredAudioFiles.clear();
+            filteredAudioFiles.addAll(currentPlaylistSongs);
+            updateAudioFilesList();
+            
+            // Show a toast with the playlist name
+            Toast.makeText(this, 
+                getString(R.string.showing_playlist, currentPlaylist.getName()), 
+                Toast.LENGTH_SHORT).show();
         }
     }
 }

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Primary Track -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/primary_track"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp" />
+        
+    <TextView
+        android:id="@+id/primaryTrackTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textStyle="italic"
+        android:layout_marginBottom="8dp" />
+        
+    <SeekBar
+        android:id="@+id/primaryPositionSeekBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp" />
+        
+    <TextView
+        android:id="@+id/primaryPositionText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0:00 / 0:00"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="16dp" />
+        
+    <!-- Secondary Track -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/secondary_track"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp" />
+        
+    <TextView
+        android:id="@+id/secondaryTrackTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textStyle="italic"
+        android:layout_marginBottom="8dp" />
+        
+    <SeekBar
+        android:id="@+id/secondaryPositionSeekBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp" />
+        
+    <TextView
+        android:id="@+id/secondaryPositionText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0:00 / 0:00"
+        android:layout_gravity="center_horizontal" />
+
+</LinearLayout> 

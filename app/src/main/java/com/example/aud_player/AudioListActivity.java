@@ -50,7 +50,8 @@ public class AudioListActivity extends AppCompatActivity {
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.SIZE,
-                MediaStore.Audio.Media.DISPLAY_NAME
+                MediaStore.Audio.Media.DISPLAY_NAME,
+                MediaStore.Audio.Media.DATE_ADDED
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -69,12 +70,14 @@ public class AudioListActivity extends AppCompatActivity {
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
             int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
+            int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
                 String title = cursor.getString(titleColumn);
                 long duration = cursor.getLong(durationColumn);
                 long size = cursor.getLong(sizeColumn);
+                long dateAdded = cursor.getLong(dateAddedColumn);
                 
                 // Try to get display name with extension
                 String displayName = title;
@@ -92,7 +95,7 @@ public class AudioListActivity extends AppCompatActivity {
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
                 // Use display name instead of title
-                audioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size));
+                audioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded));
             }
             cursor.close();
         }

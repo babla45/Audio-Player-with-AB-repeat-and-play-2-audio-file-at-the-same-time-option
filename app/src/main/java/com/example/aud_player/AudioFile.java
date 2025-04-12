@@ -9,14 +9,16 @@ public class AudioFile {
     private long id;
     private long fileSize;
     private String formattedSize;
+    private long dateAdded;
 
-    public AudioFile(String title, String duration, Uri uri, long id, long fileSize) {
+    public AudioFile(String title, String duration, Uri uri, long id, long fileSize, long dateAdded) {
         this.title = title;
         this.duration = duration;
         this.uri = uri;
         this.id = id;
         this.fileSize = fileSize;
         this.formattedSize = formatFileSize(fileSize);
+        this.dateAdded = dateAdded;
     }
 
     public String getTitle() {
@@ -41,6 +43,10 @@ public class AudioFile {
     
     public String getFormattedSize() {
         return formattedSize;
+    }
+    
+    public long getDateAdded() {
+        return dateAdded;
     }
     
     private String formatFileSize(long sizeInBytes) {
