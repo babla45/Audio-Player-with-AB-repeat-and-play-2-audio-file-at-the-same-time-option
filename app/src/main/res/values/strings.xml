@@ -78,4 +78,10 @@
     <string name="error_deleting_file">Error deleting file</string>
     <string name="error_renaming_file">Error renaming file</string>
     <string name="file_renamed">File renamed</string>
+    <string name="timer_action_title">When timer ends:</string>
+    <string name="timer_action_pause">Pause playback</string>
+    <string name="timer_action_close">Close app</string>
+    <string name="timer_will_pause">pause playback</string>
+    <string name="timer_will_close">close app</string>
+    <string name="timer_set_custom_with_action">Timer set for %1$d minutes to %2$s</string>
 </resources>

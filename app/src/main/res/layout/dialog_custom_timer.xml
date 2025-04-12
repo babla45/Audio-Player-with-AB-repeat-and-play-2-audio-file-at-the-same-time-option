@@ -13,4 +13,37 @@
         android:inputType="number"
         android:maxLength="3" />
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="16dp">
+        
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/timer_action_title"
+            android:textStyle="bold" />
+            
+        <RadioGroup
+            android:id="@+id/timer_action_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            
+            <RadioButton
+                android:id="@+id/radio_pause"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/timer_action_pause"
+                android:checked="true"/>
+                
+            <RadioButton
+                android:id="@+id/radio_close"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/timer_action_close"/>
+        </RadioGroup>
+    </LinearLayout>
+
 </LinearLayout> 

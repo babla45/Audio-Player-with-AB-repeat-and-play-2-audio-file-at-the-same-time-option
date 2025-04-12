@@ -30,6 +30,7 @@ import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.RadioGroup;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -70,6 +71,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int SORT_BY_DATE_DESC = 5;
     private static final int SORT_BY_SIZE_ASC = 6;
     private static final int SORT_BY_SIZE_DESC = 7;
+    
+    private static final int TIMER_ACTION_PAUSE = 0;
+    private static final int TIMER_ACTION_CLOSE_APP = 1;
+    private int timerAction = TIMER_ACTION_PAUSE; // Default is pause
     
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -888,6 +893,16 @@ public class MainActivity extends AppCompatActivity {
         View dialogView = inflater.inflate(R.layout.dialog_custom_timer, null);
         EditText minutesInput = dialogView.findViewById(R.id.timer_minutes);
         
+        // Add radio buttons for timer action
+        RadioGroup actionGroup = dialogView.findViewById(R.id.timer_action_group);
+        
+        // Set the previously selected option (if dialog is reopened)
+        if (timerAction == TIMER_ACTION_PAUSE) {
+            actionGroup.check(R.id.radio_pause);
+        } else {
+            actionGroup.check(R.id.radio_close);
+        }
+        
         // Create and show the dialog
         new AlertDialog.Builder(this)
             .setTitle(R.string.timer_custom_title)
@@ -895,6 +910,13 @@ public class MainActivity extends AppCompatActivity {
             .setPositiveButton(R.string.ok, (dialog, which) -> {
                 // Get the user input
                 String minutesStr = minutesInput.getText().toString();
+                
+                // Get the selected action
+                if (actionGroup.getCheckedRadioButtonId() == R.id.radio_pause) {
+                    timerAction = TIMER_ACTION_PAUSE;
+                } else {
+                    timerAction = TIMER_ACTION_CLOSE_APP;
+                }
                 
                 if (!TextUtils.isEmpty(minutesStr)) {
                     try {
@@ -925,7 +947,7 @@ public class MainActivity extends AppCompatActivity {
         
         // Set the timer in the service to ensure it works in background
         if (serviceBound && audioService != null) {
-            audioService.setTimer(endTimeMillis);
+            audioService.setTimer(endTimeMillis, timerAction);
             
             // Register a broadcast receiver for timer updates
             if (timerUpdateReceiver == null) {
@@ -937,11 +959,28 @@ public class MainActivity extends AppCompatActivity {
                             updateTimerDisplay(timeLeft);
                         } else if ("TIMER_FINISHED".equals(intent.getAction())) {
                             timerActive = false;
-                            runOnUiThread(() -> {
-                                timerIndicator.setVisibility(View.GONE);
-                                playPauseButton.setIconResource(R.drawable.ic_play);
-                                isPlaying = false;
-                            });
+                            int action = intent.getIntExtra("TIMER_ACTION", TIMER_ACTION_PAUSE);
+                            
+                            if (action == TIMER_ACTION_CLOSE_APP) {
+                                // Make sure service is fully stopped before finishing
+                                if (serviceBound && audioService != null) {
+                                    try {
+                                        unbindService(serviceConnection);
+                                        serviceBound = false;
+                                    } catch (Exception e) {
+                                        Log.e(TAG, "Error unbinding service before app close", e);
+                                    }
+                                }
+                                // Close the app
+                                finishAndRemoveTask();
+                            } else {
+                                // Pause the playback (default behavior)
+                                runOnUiThread(() -> {
+                                    timerIndicator.setVisibility(View.GONE);
+                                    playPauseButton.setIconResource(R.drawable.ic_play);
+                                    isPlaying = false;
+                                });
+                            }
                         }
                     }
                 };
@@ -959,7 +998,12 @@ public class MainActivity extends AppCompatActivity {
         timerActive = true;
         // Show initial timer display
         updateTimerDisplay(milliseconds);
-        Toast.makeText(this, getString(R.string.timer_set_custom, minutes), Toast.LENGTH_SHORT).show();
+        
+        // Show toast with the selected action
+        String actionMsg = timerAction == TIMER_ACTION_PAUSE ? 
+            getString(R.string.timer_will_pause) : getString(R.string.timer_will_close);
+        Toast.makeText(this, getString(R.string.timer_set_custom_with_action, minutes, actionMsg), 
+            Toast.LENGTH_SHORT).show();
     }
 
     private void updateTimerDisplay(long millisUntilFinished) {
@@ -993,22 +1037,28 @@ public class MainActivity extends AppCompatActivity {
             
             @Override
             public void onFinish() {
-                // Stop playback when timer ends
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    mediaPlayer.pause();
-                    playPauseButton.setIconResource(R.drawable.ic_play);
-                    isPlaying = false;
-                }
                 timerActive = false;
                 
-                // Show a toast that the timer has finished
-                Toast.makeText(MainActivity.this, 
-                    "Sleep timer ended", Toast.LENGTH_SHORT).show();
-                
-                // Hide the timer indicator
-                runOnUiThread(() -> {
-                    timerIndicator.setVisibility(View.GONE);
-                });
+                if (timerAction == TIMER_ACTION_CLOSE_APP) {
+                    // Close the app
+                    finishAndRemoveTask();
+                } else {
+                    // Pause playback (default behavior)
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        mediaPlayer.pause();
+                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        isPlaying = false;
+                    }
+                    
+                    // Show a toast that the timer has finished
+                    Toast.makeText(MainActivity.this, 
+                        "Sleep timer ended", Toast.LENGTH_SHORT).show();
+                    
+                    // Hide the timer indicator
+                    runOnUiThread(() -> {
+                        timerIndicator.setVisibility(View.GONE);
+                    });
+                }
             }
         }.start();
     }

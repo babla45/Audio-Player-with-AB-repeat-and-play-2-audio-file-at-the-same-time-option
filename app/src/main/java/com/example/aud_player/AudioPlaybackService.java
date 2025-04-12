@@ -36,6 +36,11 @@ public class AudioPlaybackService extends Service {
     private long timerEndTime = 0;
     private static final long TIMER_UPDATE_INTERVAL = 1000; // Update every second
 
+    public static final int TIMER_ACTION_PAUSE = 0;
+    public static final int TIMER_ACTION_CLOSE_APP = 1;
+
+    private int timerAction = TIMER_ACTION_PAUSE;
+
     public class LocalBinder extends Binder {
         AudioPlaybackService getService() {
             return AudioPlaybackService.this;
@@ -220,8 +225,9 @@ public class AudioPlaybackService extends Service {
         }
     }
 
-    public void setTimer(long endTimeMillis) {
+    public void setTimer(long endTimeMillis, int action) {
         timerEndTime = endTimeMillis;
+        timerAction = action;
         
         // Cancel any existing timer
         if (timerRunnable != null) {
@@ -239,21 +245,49 @@ public class AudioPlaybackService extends Service {
                     // Timer finished
                     timerEndTime = 0;
                     
-                    // Stop playback
-                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                        mediaPlayer.pause();
+                    // Handle different timer actions
+                    if (timerAction == TIMER_ACTION_CLOSE_APP) {
+                        // For close app action, we need to fully stop the service
+                        try {
+                            // Stop playback
+                            if (mediaPlayer != null) {
+                                if (mediaPlayer.isPlaying()) {
+                                    mediaPlayer.stop();
+                                }
+                            }
+                            if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
+                                secondMediaPlayer.stop();
+                            }
+                            
+                            // Send broadcast to update UI with action
+                            Intent finishedIntent = new Intent("TIMER_FINISHED");
+                            finishedIntent.putExtra("TIMER_ACTION", timerAction);
+                            sendBroadcast(finishedIntent);
+                            
+                            // Stop service and remove notification
+                            stopForeground(true);
+                            stopSelf();
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error shutting down service on timer end", e);
+                        }
+                    } else {
+                        // For pause action (default)
+                        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                            mediaPlayer.pause();
+                        }
+                        if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
+                            secondMediaPlayer.pause();
+                        }
+                        
+                        // Send broadcast to update UI
+                        Intent finishedIntent = new Intent("TIMER_FINISHED");
+                        finishedIntent.putExtra("TIMER_ACTION", timerAction);
+                        sendBroadcast(finishedIntent);
+                        
+                        // Update notification to show paused state
+                        isPlaying = false;
+                        updateNotification();
                     }
-                    if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
-                        secondMediaPlayer.pause();
-                    }
-                    
-                    // Send broadcast to update UI
-                    Intent finishedIntent = new Intent("TIMER_FINISHED");
-                    sendBroadcast(finishedIntent);
-                    
-                    // Update notification to show paused state
-                    isPlaying = false;
-                    updateNotification();
                 } else {
                     // Timer still running, send update broadcast
                     Intent updateIntent = new Intent("TIMER_UPDATE");
