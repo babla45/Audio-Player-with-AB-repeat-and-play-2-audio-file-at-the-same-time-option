@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
         android:id="@+id/menu_browse_files"
         android:title="@string/browse_files"
@@ -62,6 +63,11 @@
             <item
                 android:id="@+id/mixer_balance"
                 android:title="@string/adjust_balance" />
+            <item
+                android:id="@+id/mixer_position_sync"
+                android:title="@string/mixer_position_sync"
+                android:orderInCategory="104"
+                app:showAsAction="never" />
         </menu>
     </item>
     
@@ -103,4 +109,8 @@
                 android:checkable="true"/>
         </menu>
     </item>
+    
+    <item
+        android:id="@+id/menu_other_settings"
+        android:title="@string/other_settings" />
 </menu> 

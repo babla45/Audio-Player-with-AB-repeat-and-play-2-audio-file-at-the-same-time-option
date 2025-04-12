@@ -32,6 +32,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.RadioGroup;
 import android.text.InputType;
+import android.widget.ImageButton;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -56,6 +57,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.content.ComponentName;
 import android.content.ServiceConnection;
 import android.os.IBinder;
+import android.content.SharedPreferences;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -80,16 +82,8 @@ public class MainActivity extends AppCompatActivity {
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
     private SeekBar seekBar;
-    private MaterialButton playPauseButton, stopButton, menuButton;
-    
-    private MediaPlayer mediaPlayer = null;
-    private Handler handler = new Handler(Looper.getMainLooper());
-    private Runnable runnable;
-    private Uri selectedAudioUri = null;
-    private boolean isPermissionGranted = false;
-    private boolean isPlaying = false;
-    private CountDownTimer sleepTimer;
-    private boolean timerActive = false;
+    private ImageButton playPauseButton;
+    private MaterialButton menuButton;
     private TextView timerIndicator;
     private int pointA = -1;
     private int pointB = -1;
@@ -123,6 +117,37 @@ public class MainActivity extends AppCompatActivity {
 
     private AudioPlaybackService audioService;
     private boolean serviceBound = false;
+
+    // Add these constants near the top of your MainActivity class
+    private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
+    private static final int SEEK_BACKWARD_MS = 10000; // 10 seconds
+
+    // Add these UI elements as class members
+    private ImageButton seekBackwardButton;
+    private ImageButton seekForwardButton;
+
+    // Add this as a class member at the top of your class with other UI elements
+    private ImageButton syncPositionButton;
+
+    // Change these from constants to instance variables
+    private int seekForwardMs = 10000; // Default 10 seconds
+    private int seekBackwardMs = 10000; // Default 10 seconds
+
+    // Add this variable declaration with your other media player variables
+    private MediaPlayer mediaPlayer = null;
+
+    // Add these missing variables
+    private Uri selectedAudioUri = null;
+    private boolean isPermissionGranted = false;
+    private boolean isPlaying = false;
+
+    // Make sure these are properly declared in your class
+    private Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable runnable;
+
+    // Add these declarations with your other class variables
+    private CountDownTimer sleepTimer;
+    private boolean timerActive = false;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -232,6 +257,13 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
+        // Load seek settings from SharedPreferences
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        int forwardSeconds = prefs.getInt("seek_forward_seconds", 10); // Default 10 sec
+        int backwardSeconds = prefs.getInt("seek_backward_seconds", 10); // Default 10 sec
+        seekForwardMs = forwardSeconds * 1000;
+        seekBackwardMs = backwardSeconds * 1000;
+        
         // Initialize views
         initializeViews();
         
@@ -286,38 +318,51 @@ public class MainActivity extends AppCompatActivity {
     
     private void initializeViews() {
         try {
+            // Core player elements
             selectButton = findViewById(R.id.selectButton);
             fileNameText = findViewById(R.id.fileNameText);
             seekBar = findViewById(R.id.seekBar);
             currentTimeText = findViewById(R.id.currentTimeText);
             totalTimeText = findViewById(R.id.totalTimeText);
             playPauseButton = findViewById(R.id.playPauseButton);
-            stopButton = findViewById(R.id.stopButton);
             menuButton = findViewById(R.id.menuButton);
+            
+            // Indicators
             timerIndicator = findViewById(R.id.timerIndicator);
             abRepeatIndicator = findViewById(R.id.abRepeatIndicator);
             mixerIndicator = findViewById(R.id.mixerIndicator);
             
-            // New view initializations for audio files list
+            // Seek buttons
+            seekBackwardButton = findViewById(R.id.seekBackwardButton);
+            seekForwardButton = findViewById(R.id.seekForwardButton);
+            
+            // RecyclerView elements
             audioRecyclerView = findViewById(R.id.audioRecyclerView);
             emptyView = findViewById(R.id.emptyView);
             
             // Setup RecyclerView
             audioRecyclerView.setLayoutManager(new LinearLayoutManager(this));
             
-            // Initialize search EditText and clear button
+            // Search elements
             searchEditText = findViewById(R.id.searchEditText);
             clearSearchButton = findViewById(R.id.clearSearchButton);
             
-            // Initialize mixer toggle button
+            // Mixer toggle
             mixerToggleButton = findViewById(R.id.mixerToggleButton);
             
-            // Set default color to gray
+            // Set default color for mixer toggle
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
             } else {
                 mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
             }
+            
+            // Sync position button
+            syncPositionButton = findViewById(R.id.syncPositionButton);
+            
+            // Log successful initialization
+            Log.d(TAG, "Views initialized successfully");
+            
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -336,6 +381,7 @@ public class MainActivity extends AppCompatActivity {
         });
         
         playPauseButton.setOnClickListener(v -> {
+            animateButtonPress(v);
             if (mediaPlayer != null && selectedAudioUri != null) {
                 try {
                     Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
@@ -347,7 +393,8 @@ public class MainActivity extends AppCompatActivity {
                             secondMediaPlayer.pause();
                         }
                         
-                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        // Use the new improved icons
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                         serviceIntent.setAction("ACTION_PAUSE");
                     } else {
@@ -358,7 +405,8 @@ public class MainActivity extends AppCompatActivity {
                             secondMediaPlayer.start();
                         }
                         
-                        playPauseButton.setIconResource(R.drawable.ic_pause);
+                        // Use the new improved icons
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                         isPlaying = true;
                         updateSeekBar();
                         serviceIntent.setAction("ACTION_PLAY");
@@ -382,84 +430,6 @@ public class MainActivity extends AppCompatActivity {
                     prepareMediaPlayer();
                 }
             }
-        });
-        
-        stopButton.setOnClickListener(v -> {
-            if (mediaPlayer != null) {
-                try {
-                    if (mediaPlayer.isPlaying()) {
-                        mediaPlayer.stop();
-                        
-                        // Also stop the second audio if it's active
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            try {
-                                if (secondMediaPlayer.isPlaying()) {
-                                    secondMediaPlayer.stop();
-                                }
-                                // Prepare it again properly
-                                secondMediaPlayer.reset();
-                                secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
-                                secondMediaPlayer.prepareAsync();
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error stopping/resetting second player", e);
-                            }
-                        }
-                        
-                        playPauseButton.setIconResource(R.drawable.ic_play);
-                        isPlaying = false;
-                        
-                        // Stop the service
-                        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
-                        serviceIntent.setAction("ACTION_STOP");
-                        startService(serviceIntent);
-                    }
-                    mediaPlayer.reset();
-                    seekBar.setProgress(0);
-                    currentTimeText.setText("0:00");
-                    
-                    prepareMediaPlayer();
-                } catch (IllegalStateException e) {
-                    Log.e(TAG, "Error stopping media player", e);
-                    releaseMediaPlayer();
-                    if (selectedAudioUri != null) {
-                        initMediaPlayer();
-                        prepareMediaPlayer();
-                    }
-                }
-            }
-        });
-        
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && mediaPlayer != null) {
-                    try {
-                        mediaPlayer.seekTo(progress);
-                        
-                        // Synchronize the second player position when user seeks
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            // Calculate relative position in second audio
-                            float mainDuration = mediaPlayer.getDuration();
-                            float secondDuration = secondMediaPlayer.getDuration();
-                            float positionPercentage = progress / mainDuration;
-                            int secondPosition = (int) (positionPercentage * secondDuration);
-                            
-                            // Seek second player to the relative position
-                            secondMediaPlayer.seekTo(secondPosition);
-                        }
-                        
-                        updateTimeText(progress, mediaPlayer.getDuration());
-                    } catch (IllegalStateException e) {
-                        Log.e(TAG, "Error seeking media player", e);
-                    }
-                }
-            }
-            
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-            
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
         });
         
         // Add the menu button listener
@@ -510,6 +480,21 @@ public class MainActivity extends AppCompatActivity {
 
         // Add mixer toggle button listener
         mixerToggleButton.setOnClickListener(v -> toggleMixerMode());
+        
+        // Add seek backward button listener
+        seekBackwardButton.setOnClickListener(v -> {
+            animateButtonPress(v);
+            seekRelative(-seekBackwardMs);
+        });
+        
+        // Add seek forward button listener
+        seekForwardButton.setOnClickListener(v -> {
+            animateButtonPress(v);
+            seekRelative(seekForwardMs);
+        });
+
+        // Set click listener for sync position button
+        syncPositionButton.setOnClickListener(v -> showPositionSyncDialog());
     }
     
     private void checkPermissions() {
@@ -612,7 +597,7 @@ public class MainActivity extends AppCompatActivity {
                     if (shouldAutoPlay) {
                         // Start playing automatically
                         mediaPlayer.start();
-                        playPauseButton.setIconResource(R.drawable.ic_pause);
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                         isPlaying = true;
                         updateSeekBar();
                         
@@ -635,7 +620,7 @@ public class MainActivity extends AppCompatActivity {
                         shouldAutoPlay = false;
                     } else {
                         // Standard behavior - don't auto-play
-                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                     }
                 } catch (Exception e) {
@@ -649,7 +634,7 @@ public class MainActivity extends AppCompatActivity {
                     "Error playing this file", Toast.LENGTH_SHORT).show();
                 releaseMediaPlayer();
                 initMediaPlayer();
-                playPauseButton.setIconResource(R.drawable.ic_play);
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                 isPlaying = false;
                 shouldAutoPlay = false; // Reset flag on error
                 return true; // Error handled
@@ -663,7 +648,7 @@ public class MainActivity extends AppCompatActivity {
                         seekBar.setProgress(0);
                         currentTimeText.setText("0:00");
                         handler.removeCallbacks(runnable);
-                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                     }
                 } catch (Exception e) {
@@ -897,6 +882,18 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             
+            // Add this new option
+            else if (itemId == R.id.mixer_position_sync) {
+                showPositionSyncDialog();
+                return true;
+            }
+            
+            // Add handler for other settings
+            else if (itemId == R.id.menu_other_settings) {
+                showOtherSettingsDialog();
+                return true;
+            }
+            
             return false;
         });
         
@@ -997,7 +994,7 @@ public class MainActivity extends AppCompatActivity {
                                 // Pause the playback (default behavior)
                                 runOnUiThread(() -> {
                                     timerIndicator.setVisibility(View.GONE);
-                                    playPauseButton.setIconResource(R.drawable.ic_play);
+                                    safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                                     isPlaying = false;
                                 });
                             }
@@ -1075,7 +1072,7 @@ public class MainActivity extends AppCompatActivity {
                     // Pause playback (default behavior)
                     if (mediaPlayer != null && mediaPlayer.isPlaying()) {
                         mediaPlayer.pause();
-                        playPauseButton.setIconResource(R.drawable.ic_play);
+                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                     }
                     
@@ -1246,6 +1243,10 @@ public class MainActivity extends AppCompatActivity {
         }
         
         Toast.makeText(this, R.string.second_file_cleared, Toast.LENGTH_SHORT).show();
+
+        if (syncPositionButton != null) {
+            syncPositionButton.setVisibility(View.GONE);
+        }
     }
     
     private void showBalanceDialog() {
@@ -1389,6 +1390,10 @@ public class MainActivity extends AppCompatActivity {
                     } catch (Exception e) {
                         Log.e(TAG, "Error starting second audio", e);
                     }
+                }
+
+                if (syncPositionButton != null) {
+                    syncPositionButton.setVisibility(View.VISIBLE);
                 }
             });
             
@@ -1744,7 +1749,7 @@ public class MainActivity extends AppCompatActivity {
         // If primary audio is not playing, start it with the second audio
         if (mediaPlayer != null && !mediaPlayer.isPlaying() && shouldAutoPlay) {
             mediaPlayer.start();
-            playPauseButton.setIconResource(R.drawable.ic_pause);
+            safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
             isPlaying = true;
             updateSeekBar();
             shouldAutoPlay = false;
@@ -2127,18 +2132,15 @@ public class MainActivity extends AppCompatActivity {
         // Toggle the mixer mode
         mixerModeActive = !mixerModeActive;
         
-        // Toggle the text color with backward compatibility
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mixerToggleButton.setTextColor(
-                mixerModeActive ? 
-                getResources().getColor(android.R.color.holo_blue_dark, null) : 
-                getResources().getColor(android.R.color.darker_gray, null));
+        // Toggle the text color with a more attractive design
+        if (mixerModeActive) {
+            mixerToggleButton.setTextColor(getResources().getColor(R.color.player_primary_button_bg));
+            mixerToggleButton.setBackgroundResource(R.drawable.rounded_button_background);
+            mixerToggleButton.setPadding(16, 8, 16, 8);
         } else {
-            // For older Android versions
-            mixerToggleButton.setTextColor(
-                mixerModeActive ? 
-                getResources().getColor(android.R.color.holo_blue_dark) : 
-                getResources().getColor(android.R.color.darker_gray));
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+            mixerToggleButton.setBackground(null);
+            mixerToggleButton.setPadding(8, 8, 8, 8);
         }
         
         // Show a toast to indicate the current mode
@@ -2463,7 +2465,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateUIForPlaybackStopped() {
         runOnUiThread(() -> {
-            playPauseButton.setIconResource(R.drawable.ic_play);
+            safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
             isPlaying = false;
             seekBar.setProgress(0);
             currentTimeText.setText("0:00");
@@ -2491,5 +2493,248 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+    }
+
+    // Add this method to handle seeking in both primary and secondary tracks
+    private void seekRelative(int offsetMs) {
+        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+            return;
+        }
+        
+        try {
+            // Get current position of primary track
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            int duration = mediaPlayer.getDuration();
+            
+            // Calculate new position with bounds checking
+            int newPosition = Math.max(0, Math.min(duration, currentPosition + offsetMs));
+            
+            // Seek primary track
+            mediaPlayer.seekTo(newPosition);
+            
+            // Update seek bar and time display
+            seekBar.setProgress(newPosition);
+            updateTimeText(newPosition, duration);
+            
+            // If second track is active, synchronize it
+            if (secondMediaPlayer != null && secondAudioActive) {
+                syncSecondPlayerPosition();
+                
+                // Show toast with track info
+                String primaryFile = getFileNameFromUri(selectedAudioUri);
+                String secondaryFile = getFileNameFromUri(secondAudioUri);
+                if (primaryFile.length() > 20) primaryFile = primaryFile.substring(0, 17) + "...";
+                if (secondaryFile.length() > 20) secondaryFile = secondaryFile.substring(0, 17) + "...";
+                
+                String direction = offsetMs > 0 ? "forward" : "backward";
+                int seconds = Math.abs(offsetMs) / 1000;
+                
+                Toast.makeText(this, String.format("Seeking %s %ds\n▶ %s\n▶ %s", 
+                    direction, seconds, primaryFile, secondaryFile), 
+                    Toast.LENGTH_SHORT).show();
+            }
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Error during seek operation", e);
+        }
+    }
+
+    // Add this method after showBalanceDialog() to create a position sync dialog
+    private void showPositionSyncDialog() {
+        if (secondAudioUri == null || secondMediaPlayer == null) {
+            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_position_sync, null);
+        
+        // Find views in the dialog
+        TextView primaryTitleText = dialogView.findViewById(R.id.primaryTrackTitle);
+        TextView secondaryTitleText = dialogView.findViewById(R.id.secondaryTrackTitle);
+        SeekBar primarySeekBar = dialogView.findViewById(R.id.primaryPositionSeekBar);
+        SeekBar secondarySeekBar = dialogView.findViewById(R.id.secondaryPositionSeekBar);
+        TextView primaryTimeText = dialogView.findViewById(R.id.primaryPositionText);
+        TextView secondaryTimeText = dialogView.findViewById(R.id.secondaryPositionText);
+        
+        // Set track titles
+        String primaryTitle = getFileNameFromUri(selectedAudioUri);
+        String secondaryTitle = getFileNameFromUri(secondAudioUri);
+        
+        if (primaryTitle.length() > 30) primaryTitle = primaryTitle.substring(0, 27) + "...";
+        if (secondaryTitle.length() > 30) secondaryTitle = secondaryTitle.substring(0, 27) + "...";
+        
+        primaryTitleText.setText(primaryTitle);
+        secondaryTitleText.setText(secondaryTitle);
+        
+        // Get current positions and durations
+        int primaryPos = mediaPlayer.getCurrentPosition();
+        int primaryDur = mediaPlayer.getDuration();
+        int secondaryPos = secondMediaPlayer.getCurrentPosition();
+        int secondaryDur = secondMediaPlayer.getDuration();
+        
+        // Set up the SeekBars
+        primarySeekBar.setMax(primaryDur);
+        primarySeekBar.setProgress(primaryPos);
+        
+        secondarySeekBar.setMax(secondaryDur);
+        secondarySeekBar.setProgress(secondaryPos);
+        
+        // Update time displays initially
+        primaryTimeText.setText(formatTime(primaryPos) + " / " + formatTime(primaryDur));
+        secondaryTimeText.setText(formatTime(secondaryPos) + " / " + formatTime(secondaryDur));
+        
+        // Set up listeners for real-time updates
+        primarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    primaryTimeText.setText(formatTime(progress) + " / " + formatTime(primaryDur));
+                    // Optional preview: mediaPlayer.seekTo(progress);
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        secondarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    secondaryTimeText.setText(formatTime(progress) + " / " + formatTime(secondaryDur));
+                    // Optional preview: secondMediaPlayer.seekTo(progress);
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        // Create and show the dialog
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.position_sync_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.apply, (dialogInterface, i) -> {
+                // Apply the positions when user clicks Apply
+                int newPrimaryPos = primarySeekBar.getProgress();
+                int newSecondaryPos = secondarySeekBar.getProgress();
+                
+                // Apply new positions
+                mediaPlayer.seekTo(newPrimaryPos);
+                secondMediaPlayer.seekTo(newSecondaryPos);
+                
+                // Update UI
+                seekBar.setProgress(newPrimaryPos);
+                updateTimeText(newPrimaryPos, primaryDur);
+                
+                // Show confirmation toast
+                Toast.makeText(this, R.string.positions_synced, Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(R.string.cancel, null)
+            .create();
+        
+        dialog.show();
+    }
+
+    // Add a method to show settings dialog
+    private void showOtherSettingsDialog() {
+        // Create submenu for settings
+        PopupMenu popup = new PopupMenu(this, menuButton);
+        popup.getMenuInflater().inflate(R.menu.settings_menu, popup.getMenu());
+        
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            if (itemId == R.id.settings_seek_time) {
+                showSeekTimeSettingsDialog();
+                return true;
+            }
+            return false;
+        });
+        
+        popup.show();
+    }
+
+    private void showSeekTimeSettingsDialog() {
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_seek_settings, null);
+        
+        // Get references to the EditText fields
+        EditText forwardSeekEdit = dialogView.findViewById(R.id.forward_seek_seconds);
+        EditText backwardSeekEdit = dialogView.findViewById(R.id.backward_seek_seconds);
+        
+        // Set current values
+        forwardSeekEdit.setText(String.valueOf(seekForwardMs / 1000));
+        backwardSeekEdit.setText(String.valueOf(seekBackwardMs / 1000));
+        
+        // Create and show the dialog
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.seek_settings_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.save, (dialog, which) -> {
+                // Get and validate input values
+                try {
+                    int forwardSeconds = Integer.parseInt(forwardSeekEdit.getText().toString().trim());
+                    int backwardSeconds = Integer.parseInt(backwardSeekEdit.getText().toString().trim());
+                    
+                    // Validate range (1-300 seconds is reasonable)
+                    if (forwardSeconds < 1 || forwardSeconds > 300 || 
+                        backwardSeconds < 1 || backwardSeconds > 300) {
+                        Toast.makeText(this, R.string.seek_time_range_error, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    
+                    // Save the values
+                    seekForwardMs = forwardSeconds * 1000;
+                    seekBackwardMs = backwardSeconds * 1000;
+                    
+                    // Save to SharedPreferences
+                    getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                        .edit()
+                        .putInt("seek_forward_seconds", forwardSeconds)
+                        .putInt("seek_backward_seconds", backwardSeconds)
+                        .apply();
+                    
+                    Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+                    
+                } catch (NumberFormatException e) {
+                    Toast.makeText(this, R.string.invalid_number, Toast.LENGTH_SHORT).show();
+                }
+            })
+            .setNegativeButton(R.string.cancel, null)
+            .show();
+    }
+
+    // Add this method to your MainActivity
+    private void animateButtonPress(View button) {
+        button.animate()
+            .scaleX(0.9f)
+            .scaleY(0.9f)
+            .setDuration(100)
+            .withEndAction(() -> 
+                button.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(100)
+                    .start())
+            .start();
+    }
+
+    // Add this helper method
+    private void safeSetImageResource(ImageButton button, int resId) {
+        if (button != null) {
+            try {
+                button.setImageResource(resId);
+            } catch (Exception e) {
+                Log.e(TAG, "Error setting image resource", e);
+            }
+        }
     }
 }
