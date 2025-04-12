@@ -31,6 +31,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.RadioGroup;
+import android.text.InputType;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -908,6 +909,9 @@ public class MainActivity extends AppCompatActivity {
         View dialogView = inflater.inflate(R.layout.dialog_custom_timer, null);
         EditText minutesInput = dialogView.findViewById(R.id.timer_minutes);
         
+        // Configure input to accept decimal values
+        minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        
         // Add radio buttons for timer action
         RadioGroup actionGroup = dialogView.findViewById(R.id.timer_action_group);
         
@@ -935,10 +939,11 @@ public class MainActivity extends AppCompatActivity {
                 
                 if (!TextUtils.isEmpty(minutesStr)) {
                     try {
-                        int minutes = Integer.parseInt(minutesStr);
+                        // Parse as float instead of int to support decimal values
+                        float minutes = Float.parseFloat(minutesStr);
                         
-                        // Validate the input (1-180 minutes is a reasonable range)
-                        if (minutes > 0 && minutes <= 180) {
+                        // Validate the input (0.1-180 minutes is a reasonable range)
+                        if (minutes >= 0.1f && minutes <= 180f) {
                             setSleepTimer(minutes);
                         } else {
                             Toast.makeText(MainActivity.this, 
@@ -955,9 +960,9 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
     
-    private void setSleepTimer(int minutes) {
+    private void setSleepTimer(float minutes) {
         // Convert minutes to milliseconds
-        long milliseconds = minutes * 60 * 1000L;
+        long milliseconds = (long)(minutes * 60 * 1000L);
         long endTimeMillis = System.currentTimeMillis() + milliseconds;
         
         // Set the timer in the service to ensure it works in background
@@ -1017,8 +1022,17 @@ public class MainActivity extends AppCompatActivity {
         // Show toast with the selected action
         String actionMsg = timerAction == TIMER_ACTION_PAUSE ? 
             getString(R.string.timer_will_pause) : getString(R.string.timer_will_close);
-        Toast.makeText(this, getString(R.string.timer_set_custom_with_action, minutes, actionMsg), 
-            Toast.LENGTH_SHORT).show();
+        
+        // Pass the minutes value directly instead of converting to string
+        if (minutes == Math.floor(minutes)) {
+            // For whole numbers, use the integer version of the string resource
+            Toast.makeText(this, getString(R.string.timer_set_custom_with_action_int, 
+                (int)minutes, actionMsg), Toast.LENGTH_SHORT).show();
+        } else {
+            // For decimal values, use the float version of the string resource
+            Toast.makeText(this, getString(R.string.timer_set_custom_with_action_float, 
+                minutes, actionMsg), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void updateTimerDisplay(long millisUntilFinished) {
@@ -1036,9 +1050,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Fallback method for legacy timer behavior
-    private void startLegacyTimer(int minutes) {
+    private void startLegacyTimer(float minutes) {
         // Convert minutes to milliseconds
-        long milliseconds = minutes * 60 * 1000L;
+        long milliseconds = (long)(minutes * 60 * 1000L);
         
         if (sleepTimer != null) {
             sleepTimer.cancel();

@@ -84,4 +84,6 @@
     <string name="timer_will_pause">pause playback</string>
     <string name="timer_will_close">close app</string>
     <string name="timer_set_custom_with_action">Timer set for %1$d minutes to %2$s</string>
+    <string name="timer_set_custom_with_action_int">Timer set for %d minutes. %s</string>
+    <string name="timer_set_custom_with_action_float">Timer set for %.1f minutes. %s</string>
 </resources>
