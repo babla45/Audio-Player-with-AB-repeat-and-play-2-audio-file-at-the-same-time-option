@@ -22,6 +22,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.SubMenu;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -78,6 +79,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int TIMER_ACTION_PAUSE = 0;
     private static final int TIMER_ACTION_CLOSE_APP = 1;
     private int timerAction = TIMER_ACTION_PAUSE; // Default is pause
+    
+    private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
+    private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
+    private static final int PLAYBACK_MODE_RANDOM = 2;
+    
+    private int currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST; // Default is list play
     
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -363,6 +370,17 @@ public class MainActivity extends AppCompatActivity {
             // Log successful initialization
             Log.d(TAG, "Views initialized successfully");
             
+            // In your initializeViews() method, add this line after initializing the seekBackwardButton:
+            if (seekBackwardButton != null) {
+                try {
+                    seekBackwardButton.setImageResource(R.drawable.ic_backward_simple);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting backward button image", e);
+                    // Fallback to a simpler icon if available
+                    seekBackwardButton.setImageResource(android.R.drawable.ic_media_previous);
+                }
+            }
+            
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
@@ -495,6 +513,55 @@ public class MainActivity extends AppCompatActivity {
 
         // Set click listener for sync position button
         syncPositionButton.setOnClickListener(v -> showPositionSyncDialog());
+
+        // Inside setupListeners() method, add this code to properly handle seekbar interactions:
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null) {
+                    try {
+                        // Log user interaction for debugging
+                        Log.d(TAG, "User seeking to position: " + progress);
+                        
+                        // Apply the seek position to the media player
+                        mediaPlayer.seekTo(progress);
+                        
+                        // Update time display
+                        updateTimeText(progress, mediaPlayer.getDuration());
+                        
+                        // If we have a second player active, sync its position too
+                        if (secondMediaPlayer != null && secondAudioActive) {
+                            syncSecondPlayerPosition();
+                        }
+                    } catch (IllegalStateException e) {
+                        Log.e(TAG, "Error seeking media player", e);
+                    }
+                }
+            }
+            
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+                // Optionally pause the player while seeking
+                // If you want to pause while seeking, uncomment these lines:
+                /*
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    mediaPlayer.pause();
+                    // Don't change the play/pause button here as we'll resume playback after seeking
+                }
+                */
+            }
+            
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                // Optionally resume playback after seeking
+                // If you paused during onStartTrackingTouch, resume here:
+                /*
+                if (mediaPlayer != null && isPlaying) {
+                    mediaPlayer.start();
+                }
+                */
+            }
+        });
     }
     
     private void checkPermissions() {
@@ -589,8 +656,14 @@ public class MainActivity extends AppCompatActivity {
             // Set listeners before preparing
             mediaPlayer.setOnPreparedListener(mp -> {
                 try {
-                    seekBar.setMax(mp.getDuration());
-                    totalTimeText.setText(formatTime(mp.getDuration()));
+                    // Set the seekbar maximum to the total duration
+                    int duration = mp.getDuration();
+                    seekBar.setMax(duration);
+                    
+                    // Log for debugging
+                    Log.d(TAG, "Media duration: " + duration + "ms, seekbar max set");
+                    
+                    totalTimeText.setText(formatTime(duration));
                     currentTimeText.setText("0:00");
                     
                     // Check if we should auto-play
@@ -641,19 +714,7 @@ public class MainActivity extends AppCompatActivity {
             });
             
             mediaPlayer.setOnCompletionListener(mp -> {
-                try {
-                    if (abRepeatActive) {
-                        // Do nothing, as we'll handle this in the position checking
-                    } else {
-                        seekBar.setProgress(0);
-                        currentTimeText.setText("0:00");
-                        handler.removeCallbacks(runnable);
-                        safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
-                        isPlaying = false;
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error in onCompletion", e);
-                }
+                handleSongCompletion();
             });
             
             mediaPlayer.prepareAsync();
@@ -667,6 +728,50 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
             shouldAutoPlay = false; // Reset flag on error
         }
+    }
+    
+    private void handleSongCompletion() {
+        switch (currentPlaybackMode) {
+            case PLAYBACK_MODE_REPEAT_CURRENT:
+                // Restart the current song
+                if (mediaPlayer != null) {
+                    mediaPlayer.seekTo(0);
+                    mediaPlayer.start();
+                }
+                break;
+                
+            case PLAYBACK_MODE_NEXT_IN_LIST:
+                // Play the next song in the list
+                int currentIndex = getCurrentSongIndex();
+                if (currentIndex != -1 && currentIndex + 1 < audioFiles.size()) {
+                    onAudioFileSelected(audioFiles.get(currentIndex + 1));
+                } else if (!audioFiles.isEmpty()) {
+                    // Loop back to the first song if at the end
+                    onAudioFileSelected(audioFiles.get(0));
+                }
+                break;
+                
+            case PLAYBACK_MODE_RANDOM:
+                // Play a random song from the list
+                if (!audioFiles.isEmpty()) {
+                    int randomIndex = new java.util.Random().nextInt(audioFiles.size());
+                    onAudioFileSelected(audioFiles.get(randomIndex));
+                }
+                break;
+        }
+    }
+
+    private int getCurrentSongIndex() {
+        if (selectedAudioUri == null || audioFiles.isEmpty()) {
+            return -1;
+        }
+        
+        for (int i = 0; i < audioFiles.size(); i++) {
+            if (selectedAudioUri.toString().equals(audioFiles.get(i).getUri().toString())) {
+                return i;
+            }
+        }
+        return -1;
     }
     
     private void updateSeekBar() {
@@ -741,159 +846,57 @@ public class MainActivity extends AppCompatActivity {
     
     private void showPopupMenu(View v) {
         PopupMenu popup = new PopupMenu(this, v);
-        popup.getMenuInflater().inflate(R.menu.audio_player_menu, popup.getMenu());
         
-        // Since we now show audio files directly, we can remove Browse Files options from menu
-        MenuItem browseItem = popup.getMenu().findItem(R.id.menu_browse_files);
-        if (browseItem != null) {
-            browseItem.setVisible(false);
-        }
+        // Create menu items programmatically
+        Menu menu = popup.getMenu();
         
-        MenuItem browseSecondItem = popup.getMenu().findItem(R.id.mixer_browse_second);
-        if (browseSecondItem != null) {
-            browseSecondItem.setVisible(false);
-        }
+        // Add your existing menu items
+        menu.add(0, 1, 0, "Sort Audio Files");
+        menu.add(0, 2, 0, "Sleep Timer");
+        menu.add(0, 3, 0, "A-B Repeat");
+        menu.add(0, 4, 0, "Mix with Second Audio");
+        menu.add(0, 5, 0, "Settings");
+        menu.add(0, 6, 0, "Refresh List");
         
-        // Check the current sort method
-        Menu sortMenu = popup.getMenu().findItem(R.id.menu_sort).getSubMenu();
-        if (sortMenu != null) {
-            MenuItem itemToCheck = null;
-            switch (currentSortOrder) {
-                case SORT_BY_NAME_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_name_asc);
-                    break;
-                case SORT_BY_NAME_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_name_desc);
-                    break;
-                case SORT_BY_DURATION_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_duration_asc);
-                    break;
-                case SORT_BY_DURATION_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_duration_desc);
-                    break;
-                case SORT_BY_DATE_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_date_asc);
-                    break;
-                case SORT_BY_DATE_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_date_desc);
-                    break;
-                case SORT_BY_SIZE_ASC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_size_asc);
-                    break;
-                case SORT_BY_SIZE_DESC:
-                    itemToCheck = sortMenu.findItem(R.id.sort_size_desc);
-                    break;
-            }
-            if (itemToCheck != null) {
-                itemToCheck.setChecked(true);
-            }
-        }
+        // Add playback mode submenu
+        SubMenu playbackModeMenu = menu.addSubMenu("Playback Mode");
+        playbackModeMenu.add(0, 100, 0, "Repeat Current Song").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT);
+        playbackModeMenu.add(0, 101, 0, "Play Next in List").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST);
+        playbackModeMenu.add(0, 102, 0, "Random Play").setCheckable(true)
+                .setChecked(currentPlaybackMode == PLAYBACK_MODE_RANDOM);
         
         popup.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
-            
-            // Handle sort menu items
-            if (itemId == R.id.sort_name_asc) {
-                currentSortOrder = SORT_BY_NAME_ASC;
-                sortAudioFiles();
+            if (itemId == 1) {
+                showSortMenu(v);
                 return true;
-            } else if (itemId == R.id.sort_name_desc) {
-                currentSortOrder = SORT_BY_NAME_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_duration_asc) {
-                currentSortOrder = SORT_BY_DURATION_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_duration_desc) {
-                currentSortOrder = SORT_BY_DURATION_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_date_asc) {
-                currentSortOrder = SORT_BY_DATE_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_date_desc) {
-                currentSortOrder = SORT_BY_DATE_DESC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_size_asc) {
-                currentSortOrder = SORT_BY_SIZE_ASC;
-                sortAudioFiles();
-                return true;
-            } else if (itemId == R.id.sort_size_desc) {
-                currentSortOrder = SORT_BY_SIZE_DESC;
-                sortAudioFiles();
-                return true;
-            }
-            
-            // Handle existing menu items
-            // Cancel any existing timer
-            if (sleepTimer != null) {
-                sleepTimer.cancel();
-                timerActive = false;
-            }
-            
-            // Handle timer menu items
-            if (itemId == R.id.timer_15) {
-                setSleepTimer(15);
-                return true;
-            } else if (itemId == R.id.timer_30) {
-                setSleepTimer(30);
-                return true;
-            } else if (itemId == R.id.timer_45) {
-                setSleepTimer(45);
-                return true;
-            } else if (itemId == R.id.timer_60) {
-                setSleepTimer(60);
-                return true;
-            } else if (itemId == R.id.timer_off) {
-                Toast.makeText(MainActivity.this, R.string.timer_canceled, Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId == R.id.timer_custom) {
+            } else if (itemId == 2) {
                 showCustomTimerDialog();
                 return true;
-            }
-            
-            // Handle A-B Repeat menu items
-            else if (itemId == R.id.ab_set_point_a) {
-                setPointA();
+            } else if (itemId == 3) {
+                showABRepeatMenu(v);
                 return true;
-            } else if (itemId == R.id.ab_set_point_b) {
-                setPointB();
-                return true;
-            } else if (itemId == R.id.ab_clear_points) {
-                clearABPoints();
-                return true;
-            }
-            
-            // Handle Mixer menu items with new browse option
-            else if (itemId == R.id.mixer_select_second) {
+            } else if (itemId == 4) {
                 selectSecondAudio();
                 return true;
-            } else if (itemId == R.id.mixer_browse_second) {
-                browseAudioFiles(true);
-                return true;
-            } else if (itemId == R.id.mixer_clear_second) {
-                clearSecondAudio();
-                return true;
-            } else if (itemId == R.id.mixer_balance) {
-                showBalanceDialog();
-                return true;
-            }
-            
-            // Add this new option
-            else if (itemId == R.id.mixer_position_sync) {
-                showPositionSyncDialog();
-                return true;
-            }
-            
-            // Add handler for other settings
-            else if (itemId == R.id.menu_other_settings) {
+            } else if (itemId == 5) {
                 showOtherSettingsDialog();
                 return true;
+            } else if (itemId == 6) {
+                refreshAudioFiles();
+                return true;
+            } else if (itemId == 100) {
+                currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
+                return true;
+            } else if (itemId == 101) {
+                currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
+                return true;
+            } else if (itemId == 102) {
+                currentPlaybackMode = PLAYBACK_MODE_RANDOM;
+                return true;
             }
-            
             return false;
         });
         
@@ -969,7 +972,7 @@ public class MainActivity extends AppCompatActivity {
             // Register a broadcast receiver for timer updates
             if (timerUpdateReceiver == null) {
                 timerUpdateReceiver = new BroadcastReceiver() {
-                    @Override
+            @Override
                     public void onReceive(Context context, Intent intent) {
                         if ("TIMER_UPDATE".equals(intent.getAction())) {
                             long timeLeft = intent.getLongExtra("TIME_LEFT", 0);
@@ -1033,17 +1036,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateTimerDisplay(long millisUntilFinished) {
-        // Calculate remaining time
-        int minutesRemaining = (int) (millisUntilFinished / 60000);
-        int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
-        
-        // Format and display the time
-        String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
-        
-        runOnUiThread(() -> {
-            timerIndicator.setText(timeString);
-            timerIndicator.setVisibility(View.VISIBLE);
-        });
+                // Calculate remaining time
+                int minutesRemaining = (int) (millisUntilFinished / 60000);
+                int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
+                
+                // Format and display the time
+                String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
+                
+                runOnUiThread(() -> {
+                    timerIndicator.setText(timeString);
+                    timerIndicator.setVisibility(View.VISIBLE);
+                });
     }
 
     // Fallback method for legacy timer behavior
@@ -1070,20 +1073,20 @@ public class MainActivity extends AppCompatActivity {
                     finishAndRemoveTask();
                 } else {
                     // Pause playback (default behavior)
-                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                        mediaPlayer.pause();
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    mediaPlayer.pause();
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
-                        isPlaying = false;
-                    }
-                    
-                    // Show a toast that the timer has finished
-                    Toast.makeText(MainActivity.this, 
-                        "Sleep timer ended", Toast.LENGTH_SHORT).show();
-                    
-                    // Hide the timer indicator
-                    runOnUiThread(() -> {
-                        timerIndicator.setVisibility(View.GONE);
-                    });
+                    isPlaying = false;
+                }
+                
+                // Show a toast that the timer has finished
+                Toast.makeText(MainActivity.this, 
+                    "Sleep timer ended", Toast.LENGTH_SHORT).show();
+                
+                // Hide the timer indicator
+                runOnUiThread(() -> {
+                    timerIndicator.setVisibility(View.GONE);
+                });
                 }
             }
         }.start();
@@ -2736,5 +2739,92 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "Error setting image resource", e);
             }
         }
+    }
+
+    private void showSortMenu(View v) {
+        PopupMenu popup = new PopupMenu(this, v);
+        Menu menu = popup.getMenu();
+        
+        menu.add(0, 1, 0, "Name (A-Z)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_NAME_ASC);
+        menu.add(0, 2, 0, "Name (Z-A)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_NAME_DESC);
+        menu.add(0, 3, 0, "Duration (Shortest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DURATION_ASC);
+        menu.add(0, 4, 0, "Duration (Longest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DURATION_DESC);
+        menu.add(0, 5, 0, "Date (Oldest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DATE_ASC);
+        menu.add(0, 6, 0, "Date (Newest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_DATE_DESC);
+        menu.add(0, 7, 0, "Size (Smallest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_SIZE_ASC);
+        menu.add(0, 8, 0, "Size (Largest First)").setCheckable(true)
+            .setChecked(currentSortOrder == SORT_BY_SIZE_DESC);
+
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            
+            if (itemId == 1) {
+                currentSortOrder = SORT_BY_NAME_ASC;
+            } else if (itemId == 2) {
+                currentSortOrder = SORT_BY_NAME_DESC;
+            } else if (itemId == 3) {
+                currentSortOrder = SORT_BY_DURATION_ASC;
+            } else if (itemId == 4) {
+                currentSortOrder = SORT_BY_DURATION_DESC;
+            } else if (itemId == 5) {
+                currentSortOrder = SORT_BY_DATE_ASC;
+            } else if (itemId == 6) {
+                currentSortOrder = SORT_BY_DATE_DESC;
+            } else if (itemId == 7) {
+                currentSortOrder = SORT_BY_SIZE_ASC;
+            } else if (itemId == 8) {
+                currentSortOrder = SORT_BY_SIZE_DESC;
+            }
+            
+            sortAudioFiles();
+            audioAdapter.notifyDataSetChanged();
+            return true;
+        });
+
+        popup.show();
+    }
+
+    private void showABRepeatMenu(View v) {
+        PopupMenu popup = new PopupMenu(this, v);
+        Menu menu = popup.getMenu();
+        
+        menu.add(0, 1, 0, "Set Point A");
+        menu.add(0, 2, 0, "Set Point B");
+        menu.add(0, 3, 0, "Clear A-B Points");
+        menu.add(0, 4, 0, abRepeatActive ? "Disable A-B Repeat" : "Enable A-B Repeat");
+
+        popup.setOnMenuItemClickListener(item -> {
+            int itemId = item.getItemId();
+            
+            if (itemId == 1) {
+                setPointA();
+                return true;
+            } else if (itemId == 2) {
+                setPointB();
+                return true;
+            } else if (itemId == 3) {
+                clearABPoints();
+                return true;
+            } else if (itemId == 4) {
+                if (abRepeatActive) {
+                    abRepeatActive = false;
+                    updateABRepeatIndicator();
+                } else {
+                    enableABRepeat();
+                }
+                return true;
+            }
+            
+            return false;
+        });
+
+        popup.show();
     }
 }
