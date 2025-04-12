@@ -3,6 +3,7 @@ package com.example.aud_player;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
@@ -15,6 +16,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.cardview.widget.CardView;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
@@ -25,6 +28,11 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     private List<AudioFile> audioFiles;
     private OnItemClickListener listener;
     private OnOptionsItemClickListener optionsListener;
+    
+    // Add variables to track currently playing song
+    private Uri currentlyPlayingUri = null;
+    private int highlightColor;
+    private int defaultColor;
 
     public AudioAdapter(List<AudioFile> audioFiles) {
         this.audioFiles = audioFiles;
@@ -48,12 +56,27 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     public void setOnOptionsItemClickListener(OnOptionsItemClickListener listener) {
         this.optionsListener = listener;
     }
+    
+    /**
+     * Set the currently playing audio URI to highlight it in the list
+     * @param uri URI of the currently playing audio
+     */
+    public void setCurrentlyPlayingUri(Uri uri) {
+        this.currentlyPlayingUri = uri;
+        notifyDataSetChanged(); // Refresh all items to update highlight
+    }
 
     @NonNull
     @Override
     public AudioViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View view = LayoutInflater.from(parent.getContext())
                 .inflate(R.layout.item_audio_file, parent, false);
+        
+        // Initialize colors
+        Context context = parent.getContext();
+        highlightColor = ContextCompat.getColor(context, R.color.colorPlayingHighlight);
+        defaultColor = ContextCompat.getColor(context, R.color.colorCardBackground);
+                
         return new AudioViewHolder(view);
     }
 
@@ -65,6 +88,21 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         // Combine duration and file size with a separator
         String durationAndSize = audioFile.getDuration() + " • " + audioFile.getFormattedSize();
         holder.durationTextView.setText(durationAndSize);
+        
+        // Highlight if this is the currently playing track
+        if (currentlyPlayingUri != null && currentlyPlayingUri.equals(audioFile.getUri())) {
+            // This is the currently playing track - use default color (white)
+            holder.cardView.setCardBackgroundColor(Color.parseColor("#680190"));
+            // holder.nowPlayingIcon.setVisibility(View.VISIBLE);
+            holder.titleTextView.setTextColor(Color.parseColor("#E0F9F7"));
+            holder.durationTextView.setTextColor(Color.parseColor("#00ff00"));
+        } else {
+            // This is not the currently playing track - use highlight color (blue)
+            holder.cardView.setCardBackgroundColor(highlightColor);
+            holder.nowPlayingIcon.setVisibility(View.GONE);
+            holder.titleTextView.setTextColor(Color.WHITE);
+            holder.durationTextView.setTextColor(Color.parseColor("#E0E0E0"));
+        }
         
         holder.itemView.setOnClickListener(v -> {
             if (listener != null) {
@@ -114,12 +152,16 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         TextView titleTextView;
         TextView durationTextView;
         ImageView optionsMenu;
+        CardView cardView;
+        ImageView nowPlayingIcon;
 
         AudioViewHolder(View itemView) {
             super(itemView);
             titleTextView = itemView.findViewById(R.id.audioTitle);
             durationTextView = itemView.findViewById(R.id.audioDuration);
             optionsMenu = itemView.findViewById(R.id.fileOptionsMenu);
+            cardView = (CardView) itemView;
+            nowPlayingIcon = itemView.findViewById(R.id.nowPlayingIcon);
         }
     }
 } 

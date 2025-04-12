@@ -662,13 +662,23 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void prepareMediaPlayer() {
-        if (selectedAudioUri == null) return;
-        
-        // Initialize media player if null
-        initMediaPlayer();
-        
+        if (selectedAudioUri == null) {
+            return;
+        }
+
         try {
-            mediaPlayer.reset();
+            if (mediaPlayer != null) {
+                mediaPlayer.reset();
+            } else {
+                mediaPlayer = new MediaPlayer();
+            }
+
+            // Update the adapter to highlight the current track
+            if (audioAdapter != null) {
+                audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+            }
+            
+            // Set data source from URI
             mediaPlayer.setDataSource(getApplicationContext(), selectedAudioUri);
             
             // Set listeners before preparing
@@ -1903,9 +1913,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void highlightSelectedAudio(AudioFile audioFile) {
-        // This would require additional code in your adapter to track the selected item
-        // For a simple approach, you can just show a toast
-//        Toast.makeText(this, "Now playing: " + audioFile.getTitle(), Toast.LENGTH_SHORT).show();
+        // Update the highlight in the adapter
+        if (audioAdapter != null && audioFile != null) {
+            audioAdapter.setCurrentlyPlayingUri(audioFile.getUri());
+        }
     }
 
     public void onSecondAudioSelected(AudioFile audioFile) {
