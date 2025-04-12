@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">aud_player</string>
     <string name="app_title">Audio Player</string>
-    <string name="select_audio">Select Audio</string>
+    <string name="select_audio">BROWSE</string>
     <string name="play">Play</string>
     <string name="pause">Pause</string>
     <string name="play_pause">Play/Pause</string>
@@ -18,11 +18,11 @@
     <string name="timer_canceled">Timer canceled</string>
     <string name="timer_custom">Custom Timer</string>
     <string name="timer_custom_title">Set Custom Sleep Timer</string>
-    <string name="timer_custom_hint">Enter minutes (1-180)</string>
+    <string name="timer_custom_hint">Enter minutes (0.1-180.0)</string>
     <string name="timer_set_custom">Timer set: %1$d minutes</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
-    <string name="error_invalid_time">Please enter a valid time (1-180 minutes)</string>
+    <string name="error_invalid_time">Please enter a valid time (0.1-180.0 minutes)</string>
     <string name="ab_repeat">A-B Repeat</string>
     <string name="set_point_a">Set Point A</string>
     <string name="set_point_b">Set Point B</string>

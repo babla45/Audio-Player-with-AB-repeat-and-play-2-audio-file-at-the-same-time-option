@@ -12,6 +12,19 @@
         android:hint="@string/timer_custom_hint"
         android:inputType="number"
         android:maxLength="3" />
+        
+    <!-- Quick options for common timer durations -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp">
+        
+        <LinearLayout
+            android:id="@+id/timer_quick_options"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+    </HorizontalScrollView>
 
     <LinearLayout
         android:layout_width="match_parent"

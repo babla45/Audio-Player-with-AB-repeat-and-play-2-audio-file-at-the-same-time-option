@@ -62,6 +62,9 @@ import android.content.ComponentName;
 import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.content.SharedPreferences;
+import java.util.Locale;
+import android.widget.RadioButton;
+import android.content.DialogInterface;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -81,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
     
     private static final int TIMER_ACTION_PAUSE = 0;
     private static final int TIMER_ACTION_CLOSE_APP = 1;
+    private static final int TIMER_ACTION_END_OF_SONG = 2; // New action for end of song
     private int timerAction = TIMER_ACTION_PAUSE; // Default is pause
     
     private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
@@ -1247,13 +1251,54 @@ public class MainActivity extends AppCompatActivity {
         // Configure input to accept decimal values
         minutesInput.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
         
+        // Create common timer options
+        LinearLayout optionsLayout = dialogView.findViewById(R.id.timer_quick_options);
+        int[] standardMinutes = {5, 15, 30, 45, 60};
+        
+        for (int mins : standardMinutes) {
+            Button optionButton = new Button(this);
+            optionButton.setText(mins + " min");
+            optionButton.setOnClickListener(v -> {
+                minutesInput.setText(String.valueOf(mins));
+            });
+            
+            // Add some margin between buttons
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.setMargins(0, 0, 8, 0);
+            optionButton.setLayoutParams(params);
+            
+            optionsLayout.addView(optionButton);
+        }
+        
+        // Add "end of song" button
+        Button endOfSongButton = new Button(this);
+        endOfSongButton.setText("End of song");
+        endOfSongButton.setOnClickListener(v -> {
+            // Dismiss the dialog and set up end of song timer
+            setupEndOfSongTimer();
+            if (dialogView.getParent() instanceof DialogInterface) {
+                ((DialogInterface) dialogView.getParent()).dismiss();
+            }
+        });
+        
+        // Add some margin between buttons
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, 0, 8, 0);
+        endOfSongButton.setLayoutParams(params);
+        
+        optionsLayout.addView(endOfSongButton);
+        
         // Add radio buttons for timer action
         RadioGroup actionGroup = dialogView.findViewById(R.id.timer_action_group);
         
         // Set the previously selected option (if dialog is reopened)
         if (timerAction == TIMER_ACTION_PAUSE) {
             actionGroup.check(R.id.radio_pause);
-        } else {
+        } else if (timerAction == TIMER_ACTION_CLOSE_APP) {
             actionGroup.check(R.id.radio_close);
         }
         
@@ -1266,9 +1311,10 @@ public class MainActivity extends AppCompatActivity {
                 String minutesStr = minutesInput.getText().toString();
                 
                 // Get the selected action
-                if (actionGroup.getCheckedRadioButtonId() == R.id.radio_pause) {
+                int selectedId = actionGroup.getCheckedRadioButtonId();
+                if (selectedId == R.id.radio_pause) {
                     timerAction = TIMER_ACTION_PAUSE;
-                } else {
+                } else if (selectedId == R.id.radio_close) {
                     timerAction = TIMER_ACTION_CLOSE_APP;
                 }
                 
@@ -1293,6 +1339,52 @@ public class MainActivity extends AppCompatActivity {
             .setNegativeButton(android.R.string.cancel, null)
             .create()
             .show();
+    }
+    
+    /**
+     * Sets up a timer that will stop playback at the end of the current song
+     */
+    private void setupEndOfSongTimer() {
+        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+            Toast.makeText(this, "No audio is currently playing", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        timerActive = true;
+        
+        // Save a reference to the standard completion handler
+        MediaPlayer.OnCompletionListener originalCompletionListener = mp -> handleSongCompletion();
+        
+        // Create a one-time completion listener
+        mediaPlayer.setOnCompletionListener(mp -> {
+            // Pause playback instead of continuing to next song
+            if (mediaPlayer != null) {
+                mediaPlayer.pause();
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                isPlaying = false;
+            }
+            
+            // If there's a second player, pause it too
+            if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.pause();
+            }
+            
+            timerActive = false;
+            timerIndicator.setVisibility(View.GONE);
+            Toast.makeText(this, "Sleep timer: end of song reached", Toast.LENGTH_SHORT).show();
+            
+            // Reset to original completion behavior
+            if (mediaPlayer != null) {
+                mediaPlayer.setOnCompletionListener(originalCompletionListener);
+            }
+        });
+        
+        // Display a message
+        String timeText = "Until end of song";
+        timerIndicator.setText(timeText);
+        timerIndicator.setVisibility(View.VISIBLE);
+        
+        Toast.makeText(this, "Timer will stop at end of current song", Toast.LENGTH_SHORT).show();
     }
     
     /**
@@ -1409,7 +1501,19 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void updateTimerDisplay(long millisUntilFinished) {
-        // ... existing code ...
+        // Make the timer indicator visible and update the time display
+        if (millisUntilFinished > 0) {
+            // Format time as mm:ss
+            int minutes = (int) (millisUntilFinished / 1000) / 60;
+            int seconds = (int) (millisUntilFinished / 1000) % 60;
+            String timeText = String.format(Locale.getDefault(), "%02d:%02d remaining", minutes, seconds);
+            
+            timerIndicator.setText(timeText);
+            timerIndicator.setVisibility(View.VISIBLE);
+        } else {
+            // Hide the timer indicator when timer is not active
+            timerIndicator.setVisibility(View.GONE);
+        }
     }
 
     private void prepareSecondMediaPlayer() {
