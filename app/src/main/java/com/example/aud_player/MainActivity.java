@@ -223,6 +223,9 @@ public class MainActivity extends AppCompatActivity {
     private BroadcastReceiver playbackStoppedReceiver;
     private BroadcastReceiver timerUpdateReceiver;
 
+    // Add a new class variable for the receiver
+    private BroadcastReceiver closeAppReceiver;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -266,6 +269,18 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"));
+
+        // Register broadcast receiver for app close command
+        closeAppReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("CLOSE_APP_COMMAND".equals(intent.getAction())) {
+                    // Close the app completely
+                    finishAndRemoveTask();
+                }
+            }
+        };
+        registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
     }
     
     private void initializeViews() {
@@ -1482,6 +1497,15 @@ public class MainActivity extends AppCompatActivity {
                 unregisterReceiver(timerUpdateReceiver);
             } catch (Exception e) {
                 Log.e(TAG, "Error unregistering timer receiver", e);
+            }
+        }
+        
+        // Unregister the close app receiver
+        if (closeAppReceiver != null) {
+            try {
+                unregisterReceiver(closeAppReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering close app receiver", e);
             }
         }
         

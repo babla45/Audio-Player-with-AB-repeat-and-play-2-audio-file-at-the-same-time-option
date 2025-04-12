@@ -96,40 +96,57 @@ public class AudioPlaybackService extends Service {
                     break;
                 case ACTION_STOP:
                     try {
-                        // Stop first media player
+                        // First, immediately change state to not playing
+                        isPlaying = false;
+                        
+                        // Send broadcast to close the app immediately
+                        Intent closeAppIntent = new Intent("CLOSE_APP_COMMAND");
+                        sendBroadcast(closeAppIntent);
+                        
+                        // Stop the service from foreground state
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_REMOVE);
+                        } else {
+                            stopForeground(true);
+                        }
+                        
+                        // Cancel any pending timers
+                        if (timerRunnable != null) {
+                            timerHandler.removeCallbacks(timerRunnable);
+                        }
+                        
+                        // Stop the players immediately on the main thread to avoid delays
                         if (mediaPlayer != null) {
                             if (mediaPlayer.isPlaying()) {
                                 mediaPlayer.stop();
                             }
-                            mediaPlayer.reset();
                         }
                         
-                        // Stop second media player if active
                         if (secondMediaPlayer != null && secondAudioActive) {
                             if (secondMediaPlayer.isPlaying()) {
                                 secondMediaPlayer.stop();
                             }
-                            secondMediaPlayer.reset();
                         }
                         
-                        isPlaying = false;
-                        // Stop the service and remove notification
-                        stopForeground(true);
+                        // Stop the service directly - don't use handler delay
                         stopSelf();
                         
-                        // Send broadcast to activity to update UI
-                        Intent updateIntent = new Intent("PLAYBACK_STOPPED");
-                        sendBroadcast(updateIntent);
+                        // Return immediately - don't show notification again
+                        return START_NOT_STICKY;
                         
-                    } catch (IllegalStateException e) {
+                    } catch (Exception e) {
                         Log.e(TAG, "Error stopping playback in service", e);
                     }
                     break;
             }
         }
         
-        startForeground(NOTIFICATION_ID, createNotification());
-        return START_STICKY;
+        if (isPlaying) {
+            startForeground(NOTIFICATION_ID, createNotification());
+        }
+        
+        // Change this to NOT_STICKY for the stop case
+        return START_NOT_STICKY;
     }
 
     private void createNotificationChannel() {
