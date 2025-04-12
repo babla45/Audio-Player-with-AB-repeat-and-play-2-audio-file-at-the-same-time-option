@@ -35,6 +35,8 @@ import android.widget.Toast;
 import android.widget.RadioGroup;
 import android.text.InputType;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.view.Gravity;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -162,6 +164,11 @@ public class MainActivity extends AppCompatActivity {
     private static final float MIN_PLAYBACK_SPEED = 0.25f;
     private static final float MAX_PLAYBACK_SPEED = 4.0f;
     private static final float PLAYBACK_SPEED_STEP = 0.25f;
+
+    // Add variables to track individual playback speeds
+    private float primaryPlaybackSpeed = 1.0f;
+    private float secondaryPlaybackSpeed = 1.0f;
+    private boolean useIndividualPlaybackSpeeds = false;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -873,7 +880,21 @@ public class MainActivity extends AppCompatActivity {
         menu.add(0, 1, 0, "Sort Audio Files");
         menu.add(0, 2, 0, "Sleep Timer");
         menu.add(0, 3, 0, "A-B Repeat");
-        menu.add(0, 4, 0, "Mix with Second Audio");
+        
+        // Create Audio Mixer submenu
+        SubMenu mixerMenu = menu.addSubMenu("Audio Mixer");
+        mixerMenu.add(0, 41, 0, "Mix with Second Audio");
+        if (secondAudioActive) {
+            mixerMenu.add(0, 42, 0, "Adjust Audio Balance");
+            mixerMenu.add(0, 43, 0, "Clear Second Audio");
+            mixerMenu.add(0, 44, 0, useIndividualPlaybackSpeeds ? 
+                "Use Global Playback Speed" : "Use Individual Playback Speeds");
+            if (useIndividualPlaybackSpeeds) {
+                mixerMenu.add(0, 45, 0, "Set Primary Audio Speed (" + String.format("%.2fx", primaryPlaybackSpeed) + ")");
+                mixerMenu.add(0, 46, 0, "Set Secondary Audio Speed (" + String.format("%.2fx", secondaryPlaybackSpeed) + ")");
+            }
+        }
+        
         menu.add(0, 5, 0, "Settings");
         menu.add(0, 6, 0, "Refresh List");
         
@@ -912,8 +933,23 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == 3) {
                 showABRepeatMenu(v);
                 return true;
-            } else if (itemId == 4) {
+            } else if (itemId == 41) {
                 selectSecondAudio();
+                return true;
+            } else if (itemId == 42) {
+                showBalanceDialog();
+                return true;
+            } else if (itemId == 43) {
+                clearSecondAudio();
+                return true;
+            } else if (itemId == 44) {
+                toggleIndividualPlaybackSpeeds();
+                return true;
+            } else if (itemId == 45) {
+                showIndividualSpeedDialog(true);  // For primary audio
+                return true;
+            } else if (itemId == 46) {
+                showIndividualSpeedDialog(false);  // For secondary audio
                 return true;
             } else if (itemId == 5) {
                 showOtherSettingsDialog();
@@ -949,8 +985,15 @@ public class MainActivity extends AppCompatActivity {
         if (speed < MIN_PLAYBACK_SPEED) speed = MIN_PLAYBACK_SPEED;
         if (speed > MAX_PLAYBACK_SPEED) speed = MAX_PLAYBACK_SPEED;
         
-        // Update the stored speed
+        // Update the stored global speed
         currentPlaybackSpeed = speed;
+        
+        // If using individual speeds in mix mode, don't apply to both players
+        if (secondAudioActive && useIndividualPlaybackSpeeds) {
+            Toast.makeText(this, "Using individual playback speeds - global speed stored for future use", 
+                Toast.LENGTH_SHORT).show();
+            return;
+        }
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             // Use the PlaybackParams API if available (Android 6.0+)
@@ -964,19 +1007,29 @@ public class MainActivity extends AppCompatActivity {
                     mediaPlayer.setPlaybackParams(params);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to primary audio");
+                    
+                    // Update individual speed if active
+                    if (useIndividualPlaybackSpeeds) {
+                        primaryPlaybackSpeed = speed;
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error setting playback speed on primary audio", e);
                 }
             }
             
-            // Apply to secondary player if active
-            if (secondMediaPlayer != null && secondAudioActive) {
+            // Apply to secondary player if active (and not using individual speeds)
+            if (secondMediaPlayer != null && secondAudioActive && !useIndividualPlaybackSpeeds) {
                 try {
                     PlaybackParams params = new PlaybackParams();
                     params.setSpeed(speed);
                     secondMediaPlayer.setPlaybackParams(params);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to secondary audio");
+                    
+                    // Update individual speed if active
+                    if (useIndividualPlaybackSpeeds) {
+                        secondaryPlaybackSpeed = speed;
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error setting playback speed on secondary audio", e);
                 }
@@ -999,6 +1052,192 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     
+    private void toggleIndividualPlaybackSpeeds() {
+        useIndividualPlaybackSpeeds = !useIndividualPlaybackSpeeds;
+        
+        if (useIndividualPlaybackSpeeds) {
+            // Initialize individual speeds to the current global speed
+            primaryPlaybackSpeed = currentPlaybackSpeed;
+            secondaryPlaybackSpeed = currentPlaybackSpeed;
+            
+            // Show toast and immediately open the primary speed dialog
+            Toast.makeText(this, "Individual playback speeds enabled", Toast.LENGTH_SHORT).show();
+            
+            // Apply current speeds to respective players
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (mediaPlayer != null) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(primaryPlaybackSpeed);
+                        mediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied initial primary speed: " + primaryPlaybackSpeed);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error setting primary playback speed", e);
+                    }
+                }
+                
+                if (secondMediaPlayer != null && secondAudioActive) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(secondaryPlaybackSpeed);
+                        secondMediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied initial secondary speed: " + secondaryPlaybackSpeed);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error setting secondary playback speed", e);
+                    }
+                }
+            }
+            
+            // Immediately show the primary speed dialog
+            showIndividualSpeedDialog(true);
+        } else {
+            // Switch back to global speed mode
+            Toast.makeText(this, "Global playback speed restored", Toast.LENGTH_SHORT).show();
+            
+            // Apply the global speed to both players
+            setPlaybackSpeed(currentPlaybackSpeed);
+        }
+    }
+
+    private void showIndividualSpeedDialog(boolean isPrimary) {
+        final String title = isPrimary ? "Primary Audio Speed" : "Secondary Audio Speed";
+        final float currentSpeed = isPrimary ? primaryPlaybackSpeed : secondaryPlaybackSpeed;
+        
+        // Create a dialog with a slider for adjusting speed
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(title);
+        
+        // Create a simple layout with a seekbar and text display
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(50, 30, 50, 30);
+        
+        TextView speedLabel = new TextView(this);
+        speedLabel.setText(String.format("Current: %.2fx", currentSpeed));
+        speedLabel.setGravity(Gravity.CENTER);
+        speedLabel.setTextSize(18);
+        layout.addView(speedLabel);
+        
+        SeekBar speedSeekBar = new SeekBar(this);
+        // Map 0.25x-4.0x to progress values (0-375)
+        speedSeekBar.setMax(375);
+        int initialProgress = (int)((currentSpeed - 0.25f) * 100);
+        speedSeekBar.setProgress(initialProgress);
+        layout.addView(speedSeekBar);
+        
+        speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                float speed = 0.25f + (progress / 100.0f);
+                if (speed > 4.0f) speed = 4.0f;
+                speedLabel.setText(String.format("Current: %.2fx", speed));
+                
+                // Preview the speed change if possible
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && fromUser) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(speed);
+                        
+                        if (isPrimary && mediaPlayer != null) {
+                            mediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Previewing primary speed: " + speed);
+                        } else if (!isPrimary && secondMediaPlayer != null && secondAudioActive) {
+                            secondMediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Previewing secondary speed: " + speed);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error previewing playback speed", e);
+                    }
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        builder.setView(layout);
+        
+        // Option to open the other dialog
+        if (secondMediaPlayer != null && secondAudioActive) {
+            builder.setNeutralButton(isPrimary ? "Set Secondary Speed" : "Set Primary Speed", 
+                (dialog, which) -> {
+                    // First apply the current setting
+                    float speed = 0.25f + (speedSeekBar.getProgress() / 100.0f);
+                    if (speed > 4.0f) speed = 4.0f;
+                    
+                    if (isPrimary) {
+                        primaryPlaybackSpeed = speed;
+                        applyPrimarySpeed(speed);
+                        // Then open the other dialog
+                        showIndividualSpeedDialog(false);
+                    } else {
+                        secondaryPlaybackSpeed = speed;
+                        applySecondarySpeed(speed);
+                        // Then open the other dialog
+                        showIndividualSpeedDialog(true);
+                    }
+                });
+        }
+        
+        builder.setPositiveButton("Set", (dialog, which) -> {
+            float speed = 0.25f + (speedSeekBar.getProgress() / 100.0f);
+            if (speed > 4.0f) speed = 4.0f;
+            
+            if (isPrimary) {
+                primaryPlaybackSpeed = speed;
+                applyPrimarySpeed(speed);
+            } else {
+                secondaryPlaybackSpeed = speed;
+                applySecondarySpeed(speed);
+            }
+        });
+        
+        builder.setNegativeButton("Cancel", (dialog, which) -> {
+            // Restore original speed
+            if (isPrimary) {
+                applyPrimarySpeed(primaryPlaybackSpeed);
+            } else {
+                applySecondarySpeed(secondaryPlaybackSpeed);
+            }
+        });
+        
+        builder.show();
+    }
+
+    // Helper methods to apply speeds with proper error handling
+    private void applyPrimarySpeed(float speed) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
+            try {
+                PlaybackParams params = new PlaybackParams();
+                params.setSpeed(speed);
+                mediaPlayer.setPlaybackParams(params);
+                Log.d(TAG, "Applied primary speed: " + speed);
+                Toast.makeText(this, "Primary audio speed set to " + String.format("%.2fx", speed), 
+                    Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Log.e(TAG, "Error applying primary playback speed", e);
+                Toast.makeText(this, "Error setting primary speed", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void applySecondarySpeed(float speed) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && 
+            secondMediaPlayer != null && secondAudioActive) {
+            try {
+                PlaybackParams params = new PlaybackParams();
+                params.setSpeed(speed);
+                secondMediaPlayer.setPlaybackParams(params);
+                Log.d(TAG, "Applied secondary speed: " + speed);
+                Toast.makeText(this, "Secondary audio speed set to " + String.format("%.2fx", speed), 
+                    Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Log.e(TAG, "Error applying secondary playback speed", e);
+                Toast.makeText(this, "Error setting secondary speed", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
     private void showCustomTimerDialog() {
         // Inflate the custom layout
         LayoutInflater inflater = LayoutInflater.from(this);
@@ -1020,9 +1259,9 @@ public class MainActivity extends AppCompatActivity {
         
         // Create and show the dialog
         new AlertDialog.Builder(this)
-            .setTitle(R.string.timer_custom_title)
+            .setTitle("Set Sleep Timer")
             .setView(dialogView)
-            .setPositiveButton(R.string.ok, (dialog, which) -> {
+            .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                 // Get the user input
                 String minutesStr = minutesInput.getText().toString();
                 
@@ -1043,19 +1282,23 @@ public class MainActivity extends AppCompatActivity {
                             setSleepTimer(minutes);
                         } else {
                             Toast.makeText(MainActivity.this, 
-                                R.string.error_invalid_time, Toast.LENGTH_SHORT).show();
+                                "Invalid time value. Please enter a value between 0.1 and 180 minutes.", Toast.LENGTH_SHORT).show();
                         }
                     } catch (NumberFormatException e) {
                         Toast.makeText(MainActivity.this, 
-                            R.string.error_invalid_time, Toast.LENGTH_SHORT).show();
+                            "Invalid time format. Please enter a valid number.", Toast.LENGTH_SHORT).show();
                     }
                 }
             })
-            .setNegativeButton(R.string.cancel, null)
+            .setNegativeButton(android.R.string.cancel, null)
             .create()
             .show();
     }
     
+    /**
+     * Sets a sleep timer for the specified number of minutes
+     * @param minutes The duration of the timer in minutes
+     */
     private void setSleepTimer(float minutes) {
         // Convert minutes to milliseconds
         long milliseconds = (long)(minutes * 60 * 1000L);
@@ -1068,7 +1311,7 @@ public class MainActivity extends AppCompatActivity {
             // Register a broadcast receiver for timer updates
             if (timerUpdateReceiver == null) {
                 timerUpdateReceiver = new BroadcastReceiver() {
-            @Override
+                    @Override
                     public void onReceive(Context context, Intent intent) {
                         if ("TIMER_UPDATE".equals(intent.getAction())) {
                             long timeLeft = intent.getLongExtra("TIME_LEFT", 0);
@@ -1117,42 +1360,19 @@ public class MainActivity extends AppCompatActivity {
         
         // Show toast with the selected action
         String actionMsg = timerAction == TIMER_ACTION_PAUSE ? 
-            getString(R.string.timer_will_pause) : getString(R.string.timer_will_close);
+            "Timer will pause playback" : "Timer will close app";
         
-        // Pass the minutes value directly instead of converting to string
-        if (minutes == Math.floor(minutes)) {
-            // For whole numbers, use the integer version of the string resource
-            Toast.makeText(this, getString(R.string.timer_set_custom_with_action_int, 
-                (int)minutes, actionMsg), Toast.LENGTH_SHORT).show();
-        } else {
-            // For decimal values, use the float version of the string resource
-            Toast.makeText(this, getString(R.string.timer_set_custom_with_action_float, 
-                minutes, actionMsg), Toast.LENGTH_SHORT).show();
-        }
+        Toast.makeText(this, "Timer set for " + 
+            (minutes == Math.floor(minutes) ? String.valueOf((int)minutes) : String.valueOf(minutes)) + 
+            " minutes: " + actionMsg, Toast.LENGTH_SHORT).show();
     }
-
-    private void updateTimerDisplay(long millisUntilFinished) {
-                // Calculate remaining time
-                int minutesRemaining = (int) (millisUntilFinished / 60000);
-                int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
-                
-                // Format and display the time
-                String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
-                
-                runOnUiThread(() -> {
-                    timerIndicator.setText(timeString);
-                    timerIndicator.setVisibility(View.VISIBLE);
-                });
-    }
-
-    // Fallback method for legacy timer behavior
+    
     private void startLegacyTimer(float minutes) {
-        // Convert minutes to milliseconds
-        long milliseconds = (long)(minutes * 60 * 1000L);
-        
         if (sleepTimer != null) {
             sleepTimer.cancel();
         }
+        
+        long milliseconds = (long)(minutes * 60 * 1000L);
         
         sleepTimer = new CountDownTimer(milliseconds, 1000) {
             @Override
@@ -1164,274 +1384,34 @@ public class MainActivity extends AppCompatActivity {
             public void onFinish() {
                 timerActive = false;
                 
+                // Perform action based on timer setting
                 if (timerAction == TIMER_ACTION_CLOSE_APP) {
                     // Close the app
                     finishAndRemoveTask();
                 } else {
-                    // Pause playback (default behavior)
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                    mediaPlayer.pause();
+                    // Pause playback (default)
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        mediaPlayer.pause();
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
-                    isPlaying = false;
-                }
-                
-                // Show a toast that the timer has finished
-                Toast.makeText(MainActivity.this, 
-                    "Sleep timer ended", Toast.LENGTH_SHORT).show();
-                
-                // Hide the timer indicator
-                runOnUiThread(() -> {
+                        isPlaying = false;
+                    }
+                    
+                    if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.pause();
+                    }
+                    
                     timerIndicator.setVisibility(View.GONE);
-                });
                 }
             }
-        }.start();
+        };
+        
+        sleepTimer.start();
     }
     
-    private void setPointA() {
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                pointA = mediaPlayer.getCurrentPosition();
-                String pointATime = formatTime(pointA);
-                Toast.makeText(this, getString(R.string.point_a_set, pointATime), Toast.LENGTH_SHORT).show();
-                
-                // If point B is set and is before point A, clear point B
-                if (pointB != -1 && pointB <= pointA) {
-                    pointB = -1;
-                    abRepeatActive = false;
-                }
-                
-                // If both points are set, enable A-B repeat
-                if (pointB != -1) {
-                    enableABRepeat();
-                }
-                
-                // Update indicator
-                updateABRepeatIndicator();
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error setting point A", e);
-            }
-        }
+    private void updateTimerDisplay(long millisUntilFinished) {
+        // ... existing code ...
     }
-    
-    private void setPointB() {
-        if (mediaPlayer != null && selectedAudioUri != null) {
-            try {
-                int currentPosition = mediaPlayer.getCurrentPosition();
-                
-                // Make sure point A is set and point B is after point A
-                if (pointA == -1) {
-                    Toast.makeText(this, "Set point A first", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                if (currentPosition <= pointA) {
-                    Toast.makeText(this, R.string.point_b_before_a, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                pointB = currentPosition;
-                String pointBTime = formatTime(pointB);
-                Toast.makeText(this, getString(R.string.point_b_set, pointBTime), Toast.LENGTH_SHORT).show();
-                
-                // Enable A-B repeat
-                enableABRepeat();
-                
-                // Update indicator
-                updateABRepeatIndicator();
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Error setting point B", e);
-            }
-        }
-    }
-    
-    private void clearABPoints() {
-        pointA = -1;
-        pointB = -1;
-        abRepeatActive = false;
-        
-        // Hide the indicator
-        if (abRepeatIndicator != null) {
-            abRepeatIndicator.setVisibility(View.GONE);
-        }
-        
-        Toast.makeText(this, R.string.ab_repeat_cleared, Toast.LENGTH_SHORT).show();
-    }
-    
-    private void enableABRepeat() {
-        if (pointA != -1 && pointB != -1 && pointB > pointA) {
-            abRepeatActive = true;
-            Toast.makeText(this, R.string.ab_repeat_active, Toast.LENGTH_SHORT).show();
-        }
-    }
-    
-    private void updateABRepeatIndicator() {
-        if (abRepeatIndicator != null) {
-            if (pointA != -1) {
-                String text = "A: " + formatTime(pointA);
-                if (pointB != -1) {
-                    text += " - B: " + formatTime(pointB);
-                }
-                abRepeatIndicator.setText(text);
-                abRepeatIndicator.setVisibility(View.VISIBLE);
-            } else {
-                abRepeatIndicator.setVisibility(View.GONE);
-            }
-        }
-    }
-    
-    private void selectSecondAudio() {
-        if (isPermissionGranted) {
-            // First check if we have a valid first audio file
-            if (selectedAudioUri == null) {
-                Toast.makeText(this, "Please select a primary audio file first", 
-                    Toast.LENGTH_SHORT).show();
-                return;
-            }
-            
-            // Save current states before selection
-            checkMediaPlayersState();
-            
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("audio/*");
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            
-            try {
-                // Use the second launcher explicitly for the second file
-                secondAudioPickerLauncher.launch(intent);
-            } catch (Exception e) {
-                Log.e(TAG, "Error launching second audio picker", e);
-                Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
-            }
-        } else {
-            checkPermissions();
-            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
-        }
-    }
-    
-    private void clearSecondAudio() {
-        if (secondMediaPlayer != null) {
-            try {
-                if (secondMediaPlayer.isPlaying()) {
-                    secondMediaPlayer.stop();
-                }
-                secondMediaPlayer.release();
-                secondMediaPlayer = null;
-            } catch (Exception e) {
-                Log.e(TAG, "Error clearing second audio", e);
-            }
-        }
-        
-        secondAudioUri = null;
-        secondAudioActive = false;
-        
-        // Turn off mixer mode when second audio is cleared
-        mixerModeActive = false;
-        
-        // Reset color to gray
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
-        } else {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
-        }
-        
-        // Hide the mixer indicator
-        if (mixerIndicator != null) {
-            mixerIndicator.setVisibility(View.GONE);
-        }
-        
-        Toast.makeText(this, R.string.second_file_cleared, Toast.LENGTH_SHORT).show();
 
-        if (syncPositionButton != null) {
-            syncPositionButton.setVisibility(View.GONE);
-        }
-    }
-    
-    private void showBalanceDialog() {
-        if (secondAudioUri == null || secondMediaPlayer == null) {
-            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        
-        // Inflate the custom layout
-        LayoutInflater inflater = LayoutInflater.from(this);
-        View dialogView = inflater.inflate(R.layout.dialog_audio_balance, null);
-        
-        SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
-        SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
-        
-        // Set initial values based on current volume
-        firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
-        secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
-        
-        // Create method to apply volume immediately
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle(R.string.balance_dialog_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.ok, (dialogInterface, i) -> {
-                // Save the new volumes and apply them
-                applyAudioVolumes(
-                    firstAudioSeekBar.getProgress() / 100f,
-                    secondAudioSeekBar.getProgress() / 100f
-                );
-                Toast.makeText(this, R.string.balance_saved, Toast.LENGTH_SHORT).show();
-            })
-            .setNegativeButton(R.string.cancel, (dialogInterface, i) -> {
-                // Restore original volumes on cancel
-                applyAudioVolumes(firstAudioVolume, secondAudioVolume);
-            })
-            .create();
-        
-        // Set real-time volume adjustment as user moves the seekbars
-        firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && mediaPlayer != null) {
-                    float volume = progress / 100f;
-                    mediaPlayer.setVolume(volume, volume);
-                }
-            }
-            
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser && secondMediaPlayer != null) {
-                    float volume = progress / 100f;
-                    secondMediaPlayer.setVolume(volume, volume);
-                }
-            }
-            
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        
-        dialog.show();
-    }
-    
-    private void applyAudioVolumes(float firstVolume, float secondVolume) {
-        // Store the values
-        firstAudioVolume = firstVolume;
-        secondAudioVolume = secondVolume;
-        
-        // Apply to players
-        try {
-            if (mediaPlayer != null) {
-                mediaPlayer.setVolume(firstAudioVolume, firstAudioVolume);
-            }
-            
-            if (secondMediaPlayer != null && secondAudioActive) {
-                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
-            }
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Error setting audio volumes", e);
-        }
-    }
-    
     private void prepareSecondMediaPlayer() {
         if (secondAudioUri == null) return;
         
@@ -2787,9 +2767,9 @@ public class MainActivity extends AppCompatActivity {
         
         // Create and show the dialog
         new AlertDialog.Builder(this)
-            .setTitle(R.string.seek_settings_title)
+            .setTitle("Seek Time Settings")
             .setView(dialogView)
-            .setPositiveButton(R.string.save, (dialog, which) -> {
+            .setPositiveButton("Save", (dialog, which) -> {
                 // Get and validate input values
                 try {
                     int forwardSeconds = Integer.parseInt(forwardSeekEdit.getText().toString().trim());
@@ -2798,7 +2778,7 @@ public class MainActivity extends AppCompatActivity {
                     // Validate range (1-300 seconds is reasonable)
                     if (forwardSeconds < 1 || forwardSeconds > 300 || 
                         backwardSeconds < 1 || backwardSeconds > 300) {
-                        Toast.makeText(this, R.string.seek_time_range_error, Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "Please enter values between 1 and 300 seconds", Toast.LENGTH_SHORT).show();
                         return;
                     }
                     
@@ -2813,13 +2793,13 @@ public class MainActivity extends AppCompatActivity {
                         .putInt("seek_backward_seconds", backwardSeconds)
                         .apply();
                     
-                    Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show();
                     
                 } catch (NumberFormatException e) {
-                    Toast.makeText(this, R.string.invalid_number, Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Please enter valid numbers", Toast.LENGTH_SHORT).show();
                 }
             })
-            .setNegativeButton(R.string.cancel, null)
+            .setNegativeButton("Cancel", null)
             .show();
     }
 
@@ -2934,5 +2914,242 @@ public class MainActivity extends AppCompatActivity {
         });
 
         popup.show();
+    }
+
+    // Method implementations to fix unresolved references
+    
+    private void selectSecondAudio() {
+        if (isPermissionGranted) {
+            // Create intent to browse for audio file
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("audio/*");
+            
+            try {
+                // Use the second launcher explicitly for the second file
+                secondAudioPickerLauncher.launch(intent);
+            } catch (Exception e) {
+                Log.e(TAG, "Error launching second audio picker", e);
+                Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            checkPermissions();
+            Toast.makeText(this, "Permission required to access files", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void showBalanceDialog() {
+        if (secondAudioUri == null || secondMediaPlayer == null) {
+            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Inflate the custom layout
+        LayoutInflater inflater = LayoutInflater.from(this);
+        View dialogView = inflater.inflate(R.layout.dialog_audio_balance, null);
+        
+        SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
+        SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
+        
+        // Set initial values based on current volume
+        firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
+        secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
+        
+        // Create method to apply volume immediately
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle("Audio Balance")
+            .setView(dialogView)
+            .setPositiveButton(android.R.string.ok, (dialogInterface, i) -> {
+                // Save the new volumes and apply them
+                applyAudioVolumes(
+                    firstAudioSeekBar.getProgress() / 100f,
+                    secondAudioSeekBar.getProgress() / 100f
+                );
+                Toast.makeText(this, "Balance saved", Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton(android.R.string.cancel, (dialogInterface, i) -> {
+                // Restore original volumes on cancel
+                applyAudioVolumes(firstAudioVolume, secondAudioVolume);
+            })
+            .create();
+        
+        // Set real-time volume adjustment as user moves the seekbars
+        firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && mediaPlayer != null) {
+                    float volume = progress / 100f;
+                    mediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser && secondMediaPlayer != null) {
+                    float volume = progress / 100f;
+                    secondMediaPlayer.setVolume(volume, volume);
+                }
+            }
+            
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        
+        dialog.show();
+    }
+    
+    private void clearSecondAudio() {
+        if (secondMediaPlayer != null) {
+            try {
+                if (secondMediaPlayer.isPlaying()) {
+                    secondMediaPlayer.stop();
+                }
+                secondMediaPlayer.release();
+                secondMediaPlayer = null;
+            } catch (Exception e) {
+                Log.e(TAG, "Error clearing second audio", e);
+            }
+        }
+        
+        secondAudioUri = null;
+        secondAudioActive = false;
+        
+        // Turn off mixer mode when second audio is cleared
+        mixerModeActive = false;
+        
+        // Reset color to gray
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
+        } else {
+            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
+        }
+        
+        // Hide the mixer indicator
+        if (mixerIndicator != null) {
+            mixerIndicator.setVisibility(View.GONE);
+        }
+        
+        Toast.makeText(this, "Second audio cleared", Toast.LENGTH_SHORT).show();
+
+        if (syncPositionButton != null) {
+            syncPositionButton.setVisibility(View.GONE);
+        }
+    }
+    
+    private void setPointA() {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        try {
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            pointA = currentPosition;
+            String pointATime = formatTime(pointA);
+            
+            // Log point setting
+            Log.d(TAG, "Set A-B repeat point A: " + pointATime + " (" + pointA + "ms)");
+            
+            // Update UI
+            Toast.makeText(this, "Point A set: " + pointATime, Toast.LENGTH_SHORT).show();
+            updateABRepeatIndicator();
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting point A", e);
+            Toast.makeText(this, "Error setting point A", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void setPointB() {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        try {
+            int currentPosition = mediaPlayer.getCurrentPosition();
+            
+            // Ensure point B is after point A
+            if (pointA != -1 && currentPosition <= pointA) {
+                Toast.makeText(this, "Point B must be after Point A", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            pointB = currentPosition;
+            String pointBTime = formatTime(pointB);
+            
+            // Log point setting
+            Log.d(TAG, "Set A-B repeat point B: " + pointBTime + " (" + pointB + "ms)");
+            
+            // Update UI
+            Toast.makeText(this, "Point B set: " + pointBTime, Toast.LENGTH_SHORT).show();
+            updateABRepeatIndicator();
+            
+            // If both points are set, enable A-B repeat
+            if (pointA != -1 && pointB != -1) {
+                enableABRepeat();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting point B", e);
+            Toast.makeText(this, "Error setting point B", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void clearABPoints() {
+        pointA = -1;
+        pointB = -1;
+        abRepeatActive = false;
+        
+        updateABRepeatIndicator();
+        
+        Toast.makeText(this, "A-B repeat cleared", Toast.LENGTH_SHORT).show();
+    }
+    
+    private void updateABRepeatIndicator() {
+        if (abRepeatIndicator != null) {
+            if (pointA != -1 || pointB != -1 || abRepeatActive) {
+                String indicatorText = "A-B: ";
+                indicatorText += (pointA != -1) ? formatTime(pointA) : "--:--";
+                indicatorText += " to ";
+                indicatorText += (pointB != -1) ? formatTime(pointB) : "--:--";
+                
+                abRepeatIndicator.setText(indicatorText);
+                abRepeatIndicator.setVisibility(View.VISIBLE);
+            } else {
+                abRepeatIndicator.setVisibility(View.GONE);
+            }
+        }
+    }
+    
+    private void enableABRepeat() {
+        if (pointA != -1 && pointB != -1) {
+            abRepeatActive = true;
+            updateABRepeatIndicator();
+            Toast.makeText(this, "A-B repeat active", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    // Method to apply volumes to both audio players
+    private void applyAudioVolumes(float firstVolume, float secondVolume) {
+        // Store the values
+        firstAudioVolume = firstVolume;
+        secondAudioVolume = secondVolume;
+        
+        // Apply to players
+        try {
+            if (mediaPlayer != null) {
+                mediaPlayer.setVolume(firstAudioVolume, firstAudioVolume);
+            }
+            
+            if (secondMediaPlayer != null && secondAudioActive) {
+                secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+            }
+        } catch (IllegalStateException e) {
+            Log.e(TAG, "Error setting audio volumes", e);
+        }
     }
 }
