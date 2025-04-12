@@ -9,6 +9,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.media.MediaPlayer;
+import android.media.PlaybackParams;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -155,6 +156,12 @@ public class MainActivity extends AppCompatActivity {
     // Add these declarations with your other class variables
     private CountDownTimer sleepTimer;
     private boolean timerActive = false;
+
+    // Add a field to track the current playback speed
+    private float currentPlaybackSpeed = 1.0f;
+    private static final float MIN_PLAYBACK_SPEED = 0.25f;
+    private static final float MAX_PLAYBACK_SPEED = 4.0f;
+    private static final float PLAYBACK_SPEED_STEP = 0.25f;
 
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -696,6 +703,18 @@ public class MainActivity extends AppCompatActivity {
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                     }
+                    
+                    // Apply playback speed if not default
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) {
+                        try {
+                            PlaybackParams params = new PlaybackParams();
+                            params.setSpeed(currentPlaybackSpeed);
+                            mediaPlayer.setPlaybackParams(params);
+                            Log.d(TAG, "Applied saved playback speed to primary audio: " + currentPlaybackSpeed);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error applying saved playback speed to primary audio", e);
+                        }
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error in onPrepared", e);
                 }
@@ -867,6 +886,21 @@ public class MainActivity extends AppCompatActivity {
         playbackModeMenu.add(0, 102, 0, "Random Play").setCheckable(true)
                 .setChecked(currentPlaybackMode == PLAYBACK_MODE_RANDOM);
         
+        // Add playback speed submenu
+        SubMenu playbackSpeedMenu = menu.addSubMenu("Playback Speed");
+        
+        // Add speed options from 0.25x to 4.0x with 0.25 intervals
+        for (float speed = MIN_PLAYBACK_SPEED; speed <= MAX_PLAYBACK_SPEED; speed += PLAYBACK_SPEED_STEP) {
+            // Format speed with 2 decimal places if needed
+            String speedText = speed == (int)speed ? String.format("%.0fx", speed) : String.format("%.2fx", speed);
+            
+            // Add menu item and mark current speed as checked
+            // Use a different approach for menu item IDs to accommodate the wider range
+            int menuItemId = 200 + Math.round(speed * 100);
+            playbackSpeedMenu.add(0, menuItemId, 0, speedText).setCheckable(true)
+                .setChecked(Math.abs(currentPlaybackSpeed - speed) < 0.01f);
+        }
+        
         popup.setOnMenuItemClickListener(item -> {
             int itemId = item.getItemId();
             if (itemId == 1) {
@@ -889,18 +923,80 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             } else if (itemId == 100) {
                 currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
+                Toast.makeText(this, "Mode: Repeat Current Song", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (itemId == 101) {
                 currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
+                Toast.makeText(this, "Mode: Play Next in List", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (itemId == 102) {
                 currentPlaybackMode = PLAYBACK_MODE_RANDOM;
+                Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
+                return true;
+            } else if (itemId >= 225 && itemId <= 600) {
+                // Handle playback speed change (ID range covers 0.25x to 4.0x)
+                float selectedSpeed = (itemId - 200) / 100.0f;
+                setPlaybackSpeed(selectedSpeed);
                 return true;
             }
             return false;
         });
         
         popup.show();
+    }
+    
+    private void setPlaybackSpeed(float speed) {
+        if (speed < MIN_PLAYBACK_SPEED) speed = MIN_PLAYBACK_SPEED;
+        if (speed > MAX_PLAYBACK_SPEED) speed = MAX_PLAYBACK_SPEED;
+        
+        // Update the stored speed
+        currentPlaybackSpeed = speed;
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Use the PlaybackParams API if available (Android 6.0+)
+            boolean speedApplied = false;
+            
+            // Apply to primary player if active
+            if (mediaPlayer != null) {
+                try {
+                    PlaybackParams params = new PlaybackParams();
+                    params.setSpeed(speed);
+                    mediaPlayer.setPlaybackParams(params);
+                    speedApplied = true;
+                    Log.d(TAG, "Applied speed " + speed + "x to primary audio");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting playback speed on primary audio", e);
+                }
+            }
+            
+            // Apply to secondary player if active
+            if (secondMediaPlayer != null && secondAudioActive) {
+                try {
+                    PlaybackParams params = new PlaybackParams();
+                    params.setSpeed(speed);
+                    secondMediaPlayer.setPlaybackParams(params);
+                    speedApplied = true;
+                    Log.d(TAG, "Applied speed " + speed + "x to secondary audio");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error setting playback speed on secondary audio", e);
+                }
+            }
+            
+            // Show feedback if at least one player was updated
+            if (speedApplied) {
+                // Display toast with the new speed
+                Toast.makeText(this, "Playback speed: " + String.format("%.2fx", speed), Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "Playback speed set to " + speed);
+            } else {
+                // Still update the preference even if no player is active
+                Toast.makeText(this, "Playback speed will be " + String.format("%.2fx", speed) + 
+                    " when audio starts", Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            // Show message that this feature requires Android 6.0+
+            Toast.makeText(this, "Playback speed control requires Android 6.0 or higher", 
+                Toast.LENGTH_LONG).show();
+        }
     }
     
     private void showCustomTimerDialog() {
@@ -1379,6 +1475,18 @@ public class MainActivity extends AppCompatActivity {
                 
                 // Set volume based on saved balance
                 secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
+                
+                // Apply the current playback speed to the second player to match the first
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) {
+                    try {
+                        PlaybackParams params = new PlaybackParams();
+                        params.setSpeed(currentPlaybackSpeed);
+                        secondMediaPlayer.setPlaybackParams(params);
+                        Log.d(TAG, "Applied playback speed " + currentPlaybackSpeed + "x to second audio");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error applying playback speed to second audio", e);
+                    }
+                }
                 
                 // Log the state after second player is prepared
                 Log.d(TAG, "Second player prepared:");
