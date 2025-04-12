@@ -216,6 +216,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean shouldAutoPlay = false;
 
     private BroadcastReceiver playbackStoppedReceiver;
+    private BroadcastReceiver timerUpdateReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -920,21 +921,74 @@ public class MainActivity extends AppCompatActivity {
     private void setSleepTimer(int minutes) {
         // Convert minutes to milliseconds
         long milliseconds = minutes * 60 * 1000L;
+        long endTimeMillis = System.currentTimeMillis() + milliseconds;
         
-        sleepTimer = new CountDownTimer(milliseconds, 60000) { // Update every minute
+        // Set the timer in the service to ensure it works in background
+        if (serviceBound && audioService != null) {
+            audioService.setTimer(endTimeMillis);
+            
+            // Register a broadcast receiver for timer updates
+            if (timerUpdateReceiver == null) {
+                timerUpdateReceiver = new BroadcastReceiver() {
+                    @Override
+                    public void onReceive(Context context, Intent intent) {
+                        if ("TIMER_UPDATE".equals(intent.getAction())) {
+                            long timeLeft = intent.getLongExtra("TIME_LEFT", 0);
+                            updateTimerDisplay(timeLeft);
+                        } else if ("TIMER_FINISHED".equals(intent.getAction())) {
+                            timerActive = false;
+                            runOnUiThread(() -> {
+                                timerIndicator.setVisibility(View.GONE);
+                                playPauseButton.setIconResource(R.drawable.ic_play);
+                                isPlaying = false;
+                            });
+                        }
+                    }
+                };
+                
+                IntentFilter filter = new IntentFilter();
+                filter.addAction("TIMER_UPDATE");
+                filter.addAction("TIMER_FINISHED");
+                registerReceiver(timerUpdateReceiver, filter);
+            }
+        } else {
+            // Fallback to the old timer implementation if service not bound
+            startLegacyTimer(minutes);
+        }
+        
+        timerActive = true;
+        // Show initial timer display
+        updateTimerDisplay(milliseconds);
+        Toast.makeText(this, getString(R.string.timer_set_custom, minutes), Toast.LENGTH_SHORT).show();
+    }
+
+    private void updateTimerDisplay(long millisUntilFinished) {
+        // Calculate remaining time
+        int minutesRemaining = (int) (millisUntilFinished / 60000);
+        int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
+        
+        // Format and display the time
+        String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
+        
+        runOnUiThread(() -> {
+            timerIndicator.setText(timeString);
+            timerIndicator.setVisibility(View.VISIBLE);
+        });
+    }
+
+    // Fallback method for legacy timer behavior
+    private void startLegacyTimer(int minutes) {
+        // Convert minutes to milliseconds
+        long milliseconds = minutes * 60 * 1000L;
+        
+        if (sleepTimer != null) {
+            sleepTimer.cancel();
+        }
+        
+        sleepTimer = new CountDownTimer(milliseconds, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                // Calculate remaining time
-                int minutesRemaining = (int) (millisUntilFinished / 60000);
-                int secondsRemaining = (int) ((millisUntilFinished % 60000) / 1000);
-                
-                // Format and display the time
-                String timeString = String.format("⏱ Timer: %02d:%02d", minutesRemaining, secondsRemaining);
-                
-                runOnUiThread(() -> {
-                    timerIndicator.setText(timeString);
-                    timerIndicator.setVisibility(View.VISIBLE);
-                });
+                updateTimerDisplay(millisUntilFinished);
             }
             
             @Override
@@ -957,9 +1011,6 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         }.start();
-        
-        timerActive = true;
-        Toast.makeText(this, getString(R.string.timer_set_custom, minutes), Toast.LENGTH_SHORT).show();
     }
     
     private void setPointA() {
@@ -1370,9 +1421,18 @@ public class MainActivity extends AppCompatActivity {
             sleepTimer.cancel();
         }
         
-        // Unregister the broadcast receiver
+        // Unregister the broadcast receivers
         if (playbackStoppedReceiver != null) {
             unregisterReceiver(playbackStoppedReceiver);
+        }
+        
+        // Unregister the timer update receiver
+        if (timerUpdateReceiver != null) {
+            try {
+                unregisterReceiver(timerUpdateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering timer receiver", e);
+            }
         }
         
         super.onDestroy();

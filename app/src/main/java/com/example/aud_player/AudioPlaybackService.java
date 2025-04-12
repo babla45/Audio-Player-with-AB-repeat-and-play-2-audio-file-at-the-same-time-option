@@ -11,7 +11,9 @@ import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
 
@@ -29,6 +31,10 @@ public class AudioPlaybackService extends Service {
     private String currentTitle = "Audio Player";
     private boolean isPlaying = false;
     private boolean secondAudioActive = false;
+    private Handler timerHandler = new Handler(Looper.getMainLooper());
+    private Runnable timerRunnable;
+    private long timerEndTime = 0;
+    private static final long TIMER_UPDATE_INTERVAL = 1000; // Update every second
 
     public class LocalBinder extends Binder {
         AudioPlaybackService getService() {
@@ -212,5 +218,66 @@ public class AudioPlaybackService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
         }
+    }
+
+    public void setTimer(long endTimeMillis) {
+        timerEndTime = endTimeMillis;
+        
+        // Cancel any existing timer
+        if (timerRunnable != null) {
+            timerHandler.removeCallbacks(timerRunnable);
+        }
+        
+        // Create new timer runnable
+        timerRunnable = new Runnable() {
+            @Override
+            public void run() {
+                long currentTime = System.currentTimeMillis();
+                long timeLeft = timerEndTime - currentTime;
+                
+                if (timeLeft <= 0) {
+                    // Timer finished
+                    timerEndTime = 0;
+                    
+                    // Stop playback
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        mediaPlayer.pause();
+                    }
+                    if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.pause();
+                    }
+                    
+                    // Send broadcast to update UI
+                    Intent finishedIntent = new Intent("TIMER_FINISHED");
+                    sendBroadcast(finishedIntent);
+                    
+                    // Update notification to show paused state
+                    isPlaying = false;
+                    updateNotification();
+                } else {
+                    // Timer still running, send update broadcast
+                    Intent updateIntent = new Intent("TIMER_UPDATE");
+                    updateIntent.putExtra("TIME_LEFT", timeLeft);
+                    sendBroadcast(updateIntent);
+                    
+                    // Schedule next update
+                    timerHandler.postDelayed(this, TIMER_UPDATE_INTERVAL);
+                }
+            }
+        };
+        
+        // Start the timer
+        timerHandler.post(timerRunnable);
+    }
+
+    public void cancelTimer() {
+        if (timerRunnable != null) {
+            timerHandler.removeCallbacks(timerRunnable);
+        }
+        timerEndTime = 0;
+        
+        // Send broadcast to update UI
+        Intent finishedIntent = new Intent("TIMER_FINISHED");
+        sendBroadcast(finishedIntent);
     }
 } 
