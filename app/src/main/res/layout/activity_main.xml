@@ -39,6 +39,36 @@
                 android:visibility="gone"
                 android:contentDescription="@string/clear_search"/>
         </LinearLayout>
+        
+        <!-- Playlist info and all songs button -->
+        <LinearLayout
+            android:id="@+id/playlistInfoContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="8dp"
+            android:background="@color/colorPlayingHighlight"
+            android:visibility="gone">
+            
+            <TextView
+                android:id="@+id/playlistNameText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@android:color/white"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:text="Playlist name"/>
+                
+            <Button
+                android:id="@+id/showAllSongsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ALL SONGS"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:textColor="@android:color/white"/>
+        </LinearLayout>
 
         <!-- RecyclerView for audio files -->
         <FrameLayout

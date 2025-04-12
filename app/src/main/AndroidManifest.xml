@@ -22,10 +22,16 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:configChanges="orientation|screenSize">
+            android:configChanges="orientation|screenSize"
+            android:launchMode="singleTask">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
         
@@ -33,6 +39,16 @@
             android:name=".AudioListActivity"
             android:label="@string/audio_files"
             android:parentActivityName=".MainActivity" />
+            
+        <activity
+            android:name=".PlaylistActivity"
+            android:label="Playlists"
+            android:parentActivityName=".MainActivity" />
+            
+        <activity
+            android:name=".PlaylistDetailActivity"
+            android:label="Playlist Details"
+            android:parentActivityName=".PlaylistActivity" />
 
         <service
             android:name=".AudioPlaybackService"

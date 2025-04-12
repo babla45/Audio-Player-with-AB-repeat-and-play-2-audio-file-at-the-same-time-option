@@ -35,7 +35,7 @@
     <string name="music_mixer">Music Mixer</string>
     <string name="select_second_audio">Select Second Audio</string>
     <string name="clear_second_audio">Clear Second Audio</string>
-    <string name="adjust_balance">Adjust Balance</string>
+    <string name="adjust_balance">Adjust Volume</string>
     <string name="second_file_selected">Second file: %1$s</string>
     <string name="mixer_active">Mixer active with 2 files</string>
     <string name="second_file_cleared">Second audio cleared</string>
@@ -104,4 +104,8 @@
     <string name="seek_time_range_error">Time must be between 1-300 seconds</string>
     <string name="settings_saved">Settings saved</string>
     <string name="invalid_number">Please enter valid numbers</string>
+    <string name="all_songs">ALL SONGS</string>
+    <string name="showing_all_songs">Showing all songs</string>
+    <string name="showing_playlist">Showing playlist: %s</string>
+    <string name="now_playing_from_playlist">Now playing from: %s</string>
 </resources>

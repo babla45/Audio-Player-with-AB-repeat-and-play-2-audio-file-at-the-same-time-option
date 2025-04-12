@@ -174,6 +174,19 @@ public class MainActivity extends AppCompatActivity {
     private float secondaryPlaybackSpeed = 1.0f;
     private boolean useIndividualPlaybackSpeeds = false;
 
+    // Add PlaylistDatabaseHelper as a class field
+    private PlaylistDatabaseHelper playlistDbHelper;
+    private String currentPlaylistId = null;
+    private List<AudioFile> currentPlaylistSongs = new ArrayList<>();
+    private int currentPlaylistIndex = -1;
+
+    // Add UI elements
+    private LinearLayout playlistInfoContainer;
+    private TextView playlistNameText;
+    private Button showAllSongsButton;
+    private boolean inPlaylistView = false;
+    private Playlist currentPlaylist = null;
+
     private ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
@@ -281,6 +294,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        
+        // Initialize database helper
+        playlistDbHelper = new PlaylistDatabaseHelper(this);
         
         // Load seek settings from SharedPreferences
         SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
@@ -398,6 +414,11 @@ public class MainActivity extends AppCompatActivity {
                     seekBackwardButton.setImageResource(android.R.drawable.ic_media_previous);
                 }
             }
+            
+            // Initialize playlist view elements
+            playlistInfoContainer = findViewById(R.id.playlistInfoContainer);
+            playlistNameText = findViewById(R.id.playlistNameText);
+            showAllSongsButton = findViewById(R.id.showAllSongsButton);
             
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
@@ -579,6 +600,11 @@ public class MainActivity extends AppCompatActivity {
                 }
                 */
             }
+        });
+        
+        // Setup show all songs button
+        showAllSongsButton.setOnClickListener(v -> {
+            toggleToAllSongsView();
         });
     }
     
@@ -771,33 +797,83 @@ public class MainActivity extends AppCompatActivity {
     }
     
     private void handleSongCompletion() {
-        switch (currentPlaybackMode) {
-            case PLAYBACK_MODE_REPEAT_CURRENT:
+        // If we're playing a playlist, handle playlist navigation
+        if (currentPlaylistId != null && !currentPlaylistSongs.isEmpty() && currentPlaylistIndex >= 0) {
+            if (currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT) {
                 // Restart the current song
                 if (mediaPlayer != null) {
                     mediaPlayer.seekTo(0);
                     mediaPlayer.start();
                 }
-                break;
-                
-            case PLAYBACK_MODE_NEXT_IN_LIST:
-                // Play the next song in the list
-                int currentIndex = getCurrentSongIndex();
-                if (currentIndex != -1 && currentIndex + 1 < audioFiles.size()) {
-                    onAudioFileSelected(audioFiles.get(currentIndex + 1));
-                } else if (!audioFiles.isEmpty()) {
-                    // Loop back to the first song if at the end
-                    onAudioFileSelected(audioFiles.get(0));
+            } else if (currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST) {
+                // Go to the next song in the playlist
+                int nextIndex = currentPlaylistIndex + 1;
+                if (nextIndex < currentPlaylistSongs.size()) {
+                    // Play the next song in the playlist
+                    selectedAudioUri = currentPlaylistSongs.get(nextIndex).getUri();
+                    currentPlaylistIndex = nextIndex;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Update adapter to highlight the current song
+                    if (audioAdapter != null) {
+                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    }
+                } else {
+                    // End of playlist, loop back to the beginning
+                    selectedAudioUri = currentPlaylistSongs.get(0).getUri();
+                    currentPlaylistIndex = 0;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Update adapter to highlight the current song
+                    if (audioAdapter != null) {
+                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    }
                 }
-                break;
+            } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
+                // Pick a random song from the playlist
+                int randomIndex = new java.util.Random().nextInt(currentPlaylistSongs.size());
+                selectedAudioUri = currentPlaylistSongs.get(randomIndex).getUri();
+                currentPlaylistIndex = randomIndex;
+                shouldAutoPlay = true;
+                prepareMediaPlayer();
                 
-            case PLAYBACK_MODE_RANDOM:
-                // Play a random song from the list
-                if (!audioFiles.isEmpty()) {
-                    int randomIndex = new java.util.Random().nextInt(audioFiles.size());
-                    onAudioFileSelected(audioFiles.get(randomIndex));
+                // Update adapter to highlight the current song
+                if (audioAdapter != null) {
+                    audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
                 }
-                break;
+            }
+        } else {
+            // Default handling for non-playlist playback
+            switch (currentPlaybackMode) {
+                case PLAYBACK_MODE_REPEAT_CURRENT:
+                    // Restart the current song
+                    if (mediaPlayer != null) {
+                        mediaPlayer.seekTo(0);
+                        mediaPlayer.start();
+                    }
+                    break;
+                    
+                case PLAYBACK_MODE_NEXT_IN_LIST:
+                    // Play the next song in the list
+                    int currentIndex = getCurrentSongIndex();
+                    if (currentIndex != -1 && currentIndex + 1 < audioFiles.size()) {
+                        onAudioFileSelected(audioFiles.get(currentIndex + 1));
+                    } else if (!audioFiles.isEmpty()) {
+                        // Loop back to the first song if at the end
+                        onAudioFileSelected(audioFiles.get(0));
+                    }
+                    break;
+                    
+                case PLAYBACK_MODE_RANDOM:
+                    // Play a random song from the list
+                    if (!audioFiles.isEmpty()) {
+                        int randomIndex = new java.util.Random().nextInt(audioFiles.size());
+                        onAudioFileSelected(audioFiles.get(randomIndex));
+                    }
+                    break;
+            }
         }
     }
 
@@ -912,6 +988,15 @@ public class MainActivity extends AppCompatActivity {
         menu.add(0, 5, 0, "Settings");
         menu.add(0, 6, 0, "Refresh List");
         
+        // Add Playlist submenu
+        SubMenu playlistMenu = menu.addSubMenu("Playlists");
+        playlistMenu.add(0, 70, 0, "View All Playlists");
+        
+        // Add "Add to Playlist" option only if a song is selected
+        if (selectedAudioUri != null) {
+            playlistMenu.add(0, 71, 0, "Add Current Song to Playlist");
+        }
+        
         // Add playback mode submenu
         SubMenu playbackModeMenu = menu.addSubMenu("Playback Mode");
         playbackModeMenu.add(0, 100, 0, "Repeat Current Song").setCheckable(true)
@@ -971,14 +1056,17 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == 6) {
                 refreshAudioFiles();
                 return true;
+            } else if (itemId == 70) {
+                // Open Playlists activity
+                Intent intent = new Intent(this, PlaylistActivity.class);
+                startActivity(intent);
+                return true;
+            } else if (itemId == 71) {
+                // Add current song to playlist
+                showAddToPlaylistDialog();
+                return true;
             } else if (itemId == 100) {
                 currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
-                Toast.makeText(this, "Mode: Repeat Current Song", Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId == 101) {
-                currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
-                Toast.makeText(this, "Mode: Play Next in List", Toast.LENGTH_SHORT).show();
-                return true;
             } else if (itemId == 102) {
                 currentPlaybackMode = PLAYBACK_MODE_RANDOM;
                 Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
@@ -2007,12 +2095,18 @@ public class MainActivity extends AppCompatActivity {
             if (mixerModeActive) {
                 onSecondAudioSelected(audioFile);
             } else {
-                // If not in mixer mode, either play directly or show dialog
-                if (secondAudioUri != null) {
-                    showAudioSelectionDialog(audioFile);
-                } else {
-                    onAudioFileSelected(audioFile);
+                // If in playlist view, we need to update current playlist index
+                if (inPlaylistView) {
+                    for (int i = 0; i < currentPlaylistSongs.size(); i++) {
+                        if (currentPlaylistSongs.get(i).getUri().equals(audioFile.getUri())) {
+                            currentPlaylistIndex = i;
+                            break;
+                        }
+                    }
                 }
+                
+                // Play the selected audio
+                onAudioFileSelected(audioFile);
             }
         });
         
@@ -2146,6 +2240,65 @@ public class MainActivity extends AppCompatActivity {
 
     // Add a new method to sort audio files
     private void sortAudioFiles() {
+        // First check if we're in playlist view mode
+        if (inPlaylistView && currentPlaylistSongs != null && !currentPlaylistSongs.isEmpty()) {
+            try {
+                // Apply sort to currentPlaylistSongs instead of allAudioFiles
+                Comparator<AudioFile> comparator = null;
+                
+                switch (currentSortOrder) {
+                    case SORT_BY_NAME_ASC:
+                        comparator = (a1, a2) -> a1.getTitle().compareToIgnoreCase(a2.getTitle());
+                        Toast.makeText(this, getString(R.string.sort_by_name_asc), Toast.LENGTH_SHORT).show();
+                        break;
+                    
+                    case SORT_BY_NAME_DESC:
+                        comparator = (a1, a2) -> a2.getTitle().compareToIgnoreCase(a1.getTitle());
+                        Toast.makeText(this, getString(R.string.sort_by_name_desc), Toast.LENGTH_SHORT).show();
+                        break;
+                    
+                    case SORT_BY_DURATION_ASC:
+                    case SORT_BY_DURATION_DESC:
+                        // Use our new method for duration sorting
+                        sortByDuration(currentSortOrder == SORT_BY_DURATION_DESC);
+                        return; // Exit early, as sortByDuration handles everything
+                
+                    case SORT_BY_DATE_ASC:
+                    case SORT_BY_DATE_DESC:
+                        // For date sorting, we need to query MediaStore again
+                        sortByDate(currentSortOrder == SORT_BY_DATE_DESC);
+                        return; // Exit early, as sortByDate handles the update
+                
+                    case SORT_BY_SIZE_ASC:
+                    case SORT_BY_SIZE_DESC:
+                        // For size sorting, query MediaStore again
+                        sortBySize(currentSortOrder == SORT_BY_SIZE_DESC);
+                        return; // Exit early, as sortBySize handles the update
+                }
+                
+                if (comparator != null) {
+                    currentPlaylistSongs.sort(comparator);
+                    
+                    // Update the filtered list
+                    filteredAudioFiles.clear();
+                    filteredAudioFiles.addAll(currentPlaylistSongs);
+                    
+                    // Apply search filter if active
+                    if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                        filterAudioFiles(searchEditText.getText().toString());
+                    } else {
+                        updateAudioFilesList();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error sorting playlist songs", e);
+                Toast.makeText(this, "Error sorting playlist files", Toast.LENGTH_SHORT).show();
+            }
+            
+            return; // Exit here, we've handled the playlist sort
+        }
+        
+        // Handle regular mode (not in playlist view)
         if (allAudioFiles == null || allAudioFiles.isEmpty()) {
             return;
         }
@@ -2305,24 +2458,28 @@ public class MainActivity extends AppCompatActivity {
 
     // Add the filterAudioFiles method
     private void filterAudioFiles(String query) {
+        if (query == null) query = "";
+        
+        // Clear the filtered list
         filteredAudioFiles.clear();
         
-        if (TextUtils.isEmpty(query)) {
-            // If query is empty, show all files
-            filteredAudioFiles.addAll(allAudioFiles);
-        } else {
-            // Convert query to lowercase for case-insensitive search
-            String lowerCaseQuery = query.toLowerCase();
-            
-            // Filter files that contain the query in their title
-            for (AudioFile file : allAudioFiles) {
-                if (file.getTitle().toLowerCase().contains(lowerCaseQuery)) {
-                    filteredAudioFiles.add(file);
-                }
+        // Only filter within the playlist songs if in playlist view
+        List<AudioFile> sourceList = inPlaylistView ? currentPlaylistSongs : allAudioFiles;
+        
+        if (sourceList == null || sourceList.isEmpty()) {
+            // Handle empty list case
+            updateAudioFilesList();
+            return;
+        }
+        
+        // Filter based on the query
+        for (AudioFile audioFile : sourceList) {
+            if (audioFile.getTitle().toLowerCase().contains(query.toLowerCase())) {
+                filteredAudioFiles.add(audioFile);
             }
         }
         
-        // Update the adapter with filtered results
+        // Update the UI
         updateAudioFilesList();
     }
 
@@ -3265,6 +3422,223 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (IllegalStateException e) {
             Log.e(TAG, "Error setting audio volumes", e);
+        }
+    }
+
+    /**
+     * Show dialog to add current song to a playlist
+     */
+    private void showAddToPlaylistDialog() {
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        // Get all playlists
+        List<Playlist> playlists = playlistDbHelper.getAllPlaylists();
+        
+        if (playlists.isEmpty()) {
+            // No playlists exist, show create playlist dialog
+            showCreatePlaylistDialog();
+            return;
+        }
+        
+        // Create list of playlist names
+        String[] playlistNames = new String[playlists.size() + 1]; // +1 for "Create new playlist" option
+        for (int i = 0; i < playlists.size(); i++) {
+            playlistNames[i] = playlists.get(i).getName();
+        }
+        playlistNames[playlists.size()] = "Create new playlist";
+        
+        // Show playlist selection dialog
+        new AlertDialog.Builder(this)
+            .setTitle("Add to Playlist")
+            .setItems(playlistNames, (dialog, which) -> {
+                if (which == playlists.size()) {
+                    // Create new playlist option selected
+                    showCreatePlaylistDialog();
+                } else {
+                    // Add to selected playlist
+                    Playlist selectedPlaylist = playlists.get(which);
+                    addCurrentSongToPlaylist(selectedPlaylist);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+    
+    /**
+     * Show dialog to create a new playlist and add the current song
+     */
+    private void showCreatePlaylistDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Create Playlist");
+        
+        // Set up the input
+        final EditText input = new EditText(this);
+        input.setHint("Playlist Name");
+        builder.setView(input);
+        
+        // Set up the buttons
+        builder.setPositiveButton("Create", (dialog, which) -> {
+            String playlistName = input.getText().toString().trim();
+            if (!TextUtils.isEmpty(playlistName)) {
+                Playlist newPlaylist = new Playlist(playlistName);
+                playlistDbHelper.createPlaylist(newPlaylist);
+                
+                // If a song is selected, add it to the new playlist
+                if (selectedAudioUri != null) {
+                    addCurrentSongToPlaylist(newPlaylist);
+                }
+                
+                Toast.makeText(this, "Playlist created", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Playlist name cannot be empty", Toast.LENGTH_SHORT).show();
+            }
+        });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+        
+        builder.show();
+    }
+    
+    /**
+     * Add the currently playing song to a playlist
+     */
+    private void addCurrentSongToPlaylist(Playlist playlist) {
+        if (selectedAudioUri == null) {
+            return;
+        }
+        
+        // Get audio file info from the currently playing song
+        String title = fileNameText.getText().toString();
+        String duration = totalTimeText.getText().toString();
+        long fileSize = 0;
+        long dateAdded = System.currentTimeMillis();
+        
+        // Create audio file object
+        AudioFile audioFile = new AudioFile(title, duration, selectedAudioUri, 0, fileSize, dateAdded);
+        
+        // Add to playlist
+        long result = playlistDbHelper.addSongToPlaylist(playlist.getId(), audioFile);
+        
+        if (result != -1) {
+            Toast.makeText(this, "Added to " + playlist.getName(), Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "Song already in playlist", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleIntent(intent);
+    }
+    
+    /**
+     * Handle incoming intents, including playlist playback
+     */
+    private void handleIntent(Intent intent) {
+        if (intent != null) {
+            // Check if we should play a playlist
+            currentPlaylistId = intent.getStringExtra("PLAYLIST_ID");
+            
+            if (currentPlaylistId != null) {
+                // Load the playlist songs
+                currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
+                
+                // Get the URI to play from the intent data or the first song if PLAY_ENTIRE_PLAYLIST is true
+                Uri uriToPlay = intent.getData();
+                
+                if (uriToPlay != null) {
+                    // Find the index of this song in the playlist
+                    for (int i = 0; i < currentPlaylistSongs.size(); i++) {
+                        if (currentPlaylistSongs.get(i).getUri().equals(uriToPlay)) {
+                            currentPlaylistIndex = i;
+                            break;
+                        }
+                    }
+                } else if (intent.getBooleanExtra("PLAY_ENTIRE_PLAYLIST", false) && !currentPlaylistSongs.isEmpty()) {
+                    // Start playing from the first song
+                    uriToPlay = currentPlaylistSongs.get(0).getUri();
+                    currentPlaylistIndex = 0;
+                }
+                
+                if (uriToPlay != null) {
+                    selectedAudioUri = uriToPlay;
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
+                    
+                    // Show only songs from this playlist
+                    showPlaylistSongs();
+                }
+            }
+        }
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        
+        // If we're returning from another activity and in playlist view,
+        // reload the playlist in case songs were added/removed
+        if (inPlaylistView && currentPlaylistId != null) {
+            currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
+            showPlaylistSongs();
+        }
+    }
+    
+    /**
+     * Toggle to view all songs from playlist view
+     */
+    private void toggleToAllSongsView() {
+        inPlaylistView = false;
+        playlistInfoContainer.setVisibility(View.GONE);
+        
+        // Switch back to showing all songs
+        filteredAudioFiles.clear();
+        filteredAudioFiles.addAll(allAudioFiles);
+        
+        // Apply current sort order
+        sortAudioFiles();
+        
+        // Apply any active search filter
+        if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+            filterAudioFiles(searchEditText.getText().toString());
+        } else {
+            updateAudioFilesList();
+        }
+        
+        Toast.makeText(this, R.string.showing_all_songs, Toast.LENGTH_SHORT).show();
+    }
+    
+    /**
+     * Show only songs from the current playlist
+     */
+    private void showPlaylistSongs() {
+        if (currentPlaylistId == null || currentPlaylistSongs == null || currentPlaylistSongs.isEmpty()) {
+            return;
+        }
+        
+        inPlaylistView = true;
+        
+        // Get playlist details
+        currentPlaylist = playlistDbHelper.getPlaylist(currentPlaylistId);
+        
+        if (currentPlaylist != null) {
+            // Show playlist info
+            playlistNameText.setText(currentPlaylist.getName());
+            playlistInfoContainer.setVisibility(View.VISIBLE);
+            showAllSongsButton.setText(R.string.all_songs);
+            
+            // Update the list to show only playlist songs
+            filteredAudioFiles.clear();
+            filteredAudioFiles.addAll(currentPlaylistSongs);
+            updateAudioFilesList();
+            
+            // Show a toast with the playlist name
+            Toast.makeText(this, 
+                getString(R.string.showing_playlist, currentPlaylist.getName()), 
+                Toast.LENGTH_SHORT).show();
         }
     }
 }
