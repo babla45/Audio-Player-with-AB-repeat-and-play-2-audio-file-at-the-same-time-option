@@ -24,11 +24,10 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:hint="@string/search_audio_files"
-                android:drawableStart="@drawable/ic_more"
                 android:drawablePadding="8dp"
-                android:inputType="text"
-                android:imeOptions="actionSearch"/>
+                android:hint="@string/search_audio_files"
+                android:imeOptions="actionSearch"
+                android:inputType="text" />
 
             <ImageView
                 android:id="@+id/clearSearchButton"
@@ -78,25 +77,25 @@
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/audioRecyclerView"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"/>
+                android:layout_height="match_parent" />
 
             <TextView
                 android:id="@+id/emptyView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:text="@string/no_audio_files"
                 android:gravity="center"
-                android:visibility="gone"/>
+                android:text="@string/no_audio_files"
+                android:visibility="gone" />
         </FrameLayout>
     </LinearLayout>
 
     <!-- Audio Player Controls -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="250dp"
+        android:background="@color/player_background"
         android:orientation="vertical"
-        android:padding="16dp"
-        android:background="@color/player_background">
+        android:padding="16dp">
 
         <!-- File name and time indicators -->
         <LinearLayout
@@ -109,9 +108,9 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textColor="@color/player_text"
                 android:ellipsize="end"
-                android:maxLines="1"/>
+                android:maxLines="1"
+                android:textColor="@color/player_text" />
 
             <TextView
                 android:id="@+id/timerIndicator"
@@ -119,7 +118,25 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/player_text"
                 android:textSize="12sp"
-                android:visibility="gone"/>
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- Second File Name (Only visible in mixer mode) -->
+        <LinearLayout
+            android:id="@+id/secondFileNameLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/secondFileNameText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/player_text" />
         </LinearLayout>
 
         <LinearLayout
@@ -133,16 +150,16 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/player_text"
                 android:textSize="12sp"
-                android:visibility="gone"/>
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/mixerIndicator"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:gravity="end"
                 android:textColor="@color/player_text"
                 android:textSize="12sp"
-                android:gravity="end"
-                android:visibility="gone"/>
+                android:visibility="gone" />
         </LinearLayout>
 
         <!-- SeekBar -->
@@ -150,121 +167,122 @@
             android:id="@+id/seekBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:progressTint="@color/player_seekbar_progress"
-            android:thumbTint="@color/player_seekbar_progress"
-            android:layout_marginTop="8dp"/>
+            android:thumbTint="@color/player_seekbar_progress" />
 
         <!-- Time display -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal">
 
             <TextView
                 android:id="@+id/currentTimeText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@color/player_text"
-                android:textSize="12sp"/>
+                android:textSize="12sp" />
 
             <View
                 android:layout_width="0dp"
                 android:layout_height="1dp"
-                android:layout_weight="1"/>
+                android:layout_weight="1" />
 
             <TextView
                 android:id="@+id/totalTimeText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@color/player_text"
-                android:textSize="12sp"/>
+                android:textSize="12sp" />
         </LinearLayout>
 
         <!-- Main Control Buttons -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginTop="16dp">
-
-            <ImageButton
-                android:id="@+id/seekBackwardButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@drawable/ic_seek_backward_improved"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_backward"
-                android:padding="12dp"/>
-
-            <ImageButton
-                android:id="@+id/playPauseButton"
-                android:layout_width="64dp"
-                android:layout_height="64dp"
-                android:src="@drawable/ic_play_improved"
-                android:background="@drawable/rounded_button_background"
-                android:backgroundTint="@color/player_primary_button_bg"
-                android:contentDescription="@string/play_pause"
-                android:padding="16dp"
-                android:layout_marginStart="16dp"
-                android:layout_marginEnd="16dp"/>
-
-            <ImageButton
-                android:id="@+id/seekForwardButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@drawable/ic_seek_forward_improved"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_forward"
-                android:padding="12dp"/>
-        </LinearLayout>
 
         <!-- Additional Controls -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:layout_marginTop="5dp"
             android:gravity="center"
-            android:layout_marginTop="16dp">
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/seekBackwardButton"
+                android:layout_width="43dp"
+                android:layout_height="44dp"
+                android:background="@drawable/rounded_button_background"
+                android:contentDescription="@string/seek_backward"
+                android:padding="12dp"
+                android:src="@drawable/ic_seek_backward_improved" />
+
+            <ImageButton
+                android:id="@+id/playPauseButton"
+                android:layout_width="54dp"
+                android:layout_height="54dp"
+                android:layout_marginStart="16dp"
+                android:layout_marginEnd="16dp"
+                android:background="@drawable/rounded_button_background"
+                android:backgroundTint="@color/player_primary_button_bg"
+                android:contentDescription="@string/play_pause"
+                android:padding="16dp"
+                android:src="@drawable/ic_play_improved" />
+
+            <ImageButton
+                android:id="@+id/seekForwardButton"
+                android:layout_width="43dp"
+                android:layout_height="44dp"
+                android:background="@drawable/rounded_button_background"
+                android:contentDescription="@string/seek_forward"
+                android:padding="12dp"
+                android:src="@drawable/ic_seek_forward_improved" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:gravity="center"
+            android:orientation="horizontal">
 
             <Button
                 android:id="@+id/selectButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/select_audio"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:textSize="12sp"/>
+                android:textSize="12sp" />
 
             <ImageButton
                 android:id="@+id/syncPositionButton"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
-                android:src="@drawable/ic_more"
-                android:visibility="gone"
-                android:contentDescription="@string/position_sync_title"
+                android:layout_marginStart="8dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:layout_marginStart="8dp"/>
+                android:contentDescription="@string/position_sync_title"
+                android:src="@drawable/ic_more"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/mixerToggleButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="MIX"
-                android:textSize="14sp"
-                android:padding="8dp"
+                android:layout_marginStart="8dp"
                 android:background="?attr/selectableItemBackground"
+                android:padding="8dp"
+                android:text="MIX"
                 android:textColor="@android:color/darker_gray"
-                android:layout_marginStart="8dp"/>
+                android:textSize="14sp" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/menuButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Menu"
-                android:textSize="12sp"
                 android:layout_marginStart="8dp"
-                style="@style/Widget.MaterialComponents.Button.TextButton"/>
+                android:text="Menu"
+                android:textSize="12sp" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

@@ -975,7 +975,7 @@ public class MainActivity extends AppCompatActivity {
         SubMenu mixerMenu = menu.addSubMenu("Audio Mixer");
         mixerMenu.add(0, 41, 0, "Mix with Second Audio");
         if (secondAudioActive) {
-            mixerMenu.add(0, 42, 0, "Adjust Audio Balance");
+            mixerMenu.add(0, 42, 0, "Adjust Volume");
             mixerMenu.add(0, 43, 0, "Clear Second Audio");
             mixerMenu.add(0, 44, 0, useIndividualPlaybackSpeeds ?
                     "Use Global Playback Speed" : "Use Individual Playback Speeds");
@@ -2007,52 +2007,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void onSecondAudioSelected(AudioFile audioFile) {
-        // Make sure primary audio is selected first
-        if (selectedAudioUri == null) {
-            Toast.makeText(this, "Please select a primary audio file first",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Check if trying to use the same file for both primary and secondary
-        if (selectedAudioUri.equals(audioFile.getUri())) {
-            Toast.makeText(this, "Cannot use the same file for both primary and secondary audio",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Handle second audio selection
+    private void onSecondAudioSelected(AudioFile audioFile) {
         secondAudioUri = audioFile.getUri();
-        String fileName = audioFile.getTitle();
-
-        // Take persistent permission
-        try {
-            getContentResolver().takePersistableUriPermission(secondAudioUri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } catch (SecurityException e) {
-            Log.e(TAG, "Failed to take persistable URI permission", e);
-        }
-
-        Toast.makeText(this, getString(R.string.second_file_selected, fileName),
-                Toast.LENGTH_SHORT).show();
-
-        // Prepare the second media player
+        
+        // Update the second file name text
+        TextView secondFileNameText = findViewById(R.id.secondFileNameText);
+        secondFileNameText.setText(audioFile.getTitle());
+        
+        // Rest of the method remains the same
         prepareSecondMediaPlayer();
-
-        // If primary audio is not playing, start it with the second audio
-        if (mediaPlayer != null && !mediaPlayer.isPlaying() && shouldAutoPlay) {
-            mediaPlayer.start();
-            safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
-            isPlaying = true;
-            updateSeekBar();
-            shouldAutoPlay = false;
-        }
-
-        // Show mixer indicator
-        if (mixerIndicator != null) {
-            mixerIndicator.setVisibility(View.VISIBLE);
-        }
+        
+        // Show sync button if both players are active
+        syncPositionButton.setVisibility(mixerModeActive ? View.VISIBLE : View.GONE);
+        
+        secondAudioActive = true;
+        updateMixerIndicator();
     }
 
     private void showAudioSelectionDialog(AudioFile audioFile) {
@@ -2485,31 +2454,26 @@ public class MainActivity extends AppCompatActivity {
 
     // Add the toggleMixerMode method
     private void toggleMixerMode() {
-        // Check if primary audio is selected before allowing mixer mode
-        if (!mixerModeActive && selectedAudioUri == null) {
-            Toast.makeText(this, "Please select a primary audio file first",
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // Toggle the mixer mode
         mixerModeActive = !mixerModeActive;
-
-        // Toggle the text color with a more attractive design
-        if (mixerModeActive) {
-            mixerToggleButton.setTextColor(getResources().getColor(R.color.player_primary_button_bg));
-            mixerToggleButton.setBackgroundResource(R.drawable.rounded_button_background);
-            mixerToggleButton.setPadding(16, 8, 16, 8);
-        } else {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
-            mixerToggleButton.setBackground(null);
-            mixerToggleButton.setPadding(8, 8, 8, 8);
+        
+        // Update UI elements
+        mixerToggleButton.setTextColor(mixerModeActive ? 
+                getResources().getColor(R.color.player_seekbar_progress) : 
+                getResources().getColor(android.R.color.darker_gray));
+        
+        // Show/hide second file name layout
+        findViewById(R.id.secondFileNameLayout).setVisibility(mixerModeActive ? View.VISIBLE : View.GONE);
+        
+        syncPositionButton.setVisibility(mixerModeActive && secondAudioActive ? View.VISIBLE : View.GONE);
+        
+        // Update the mixer indicator
+        updateMixerIndicator();
+        
+        // If mixer mode is deactivated, stop second audio playback
+        if (!mixerModeActive && secondMediaPlayer != null) {
+            secondMediaPlayer.pause();
+            secondAudioActive = false;
         }
-
-        // Show a toast to indicate the current mode
-        Toast.makeText(this,
-                getString(mixerModeActive ? R.string.mixer_mode_on : R.string.mixer_mode_off),
-                Toast.LENGTH_SHORT).show();
     }
 
     // Update the sortBySize method to ensure it shows all files
@@ -2903,107 +2867,80 @@ public class MainActivity extends AppCompatActivity {
 
     // Add this method after showBalanceDialog() to create a position sync dialog
     private void showPositionSyncDialog() {
-        if (secondAudioUri == null || secondMediaPlayer == null) {
-            Toast.makeText(this, "Please select a second audio file first", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        if (mediaPlayer == null || secondMediaPlayer == null) return;
 
-        // Inflate the custom layout
-        LayoutInflater inflater = LayoutInflater.from(this);
-        View dialogView = inflater.inflate(R.layout.dialog_position_sync, null);
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(R.string.position_sync_title);
 
-        // Find views in the dialog
-        TextView primaryTitleText = dialogView.findViewById(R.id.primaryTrackTitle);
-        TextView secondaryTitleText = dialogView.findViewById(R.id.secondaryTrackTitle);
+        View dialogView = getLayoutInflater().inflate(R.layout.dialog_position_sync, null);
+        
         SeekBar primarySeekBar = dialogView.findViewById(R.id.primaryPositionSeekBar);
         SeekBar secondarySeekBar = dialogView.findViewById(R.id.secondaryPositionSeekBar);
         TextView primaryTimeText = dialogView.findViewById(R.id.primaryPositionText);
         TextView secondaryTimeText = dialogView.findViewById(R.id.secondaryPositionText);
-
-        // Set track titles
-        String primaryTitle = getFileNameFromUri(selectedAudioUri);
-        String secondaryTitle = getFileNameFromUri(secondAudioUri);
-
-        if (primaryTitle.length() > 30) primaryTitle = primaryTitle.substring(0, 27) + "...";
-        if (secondaryTitle.length() > 30) secondaryTitle = secondaryTitle.substring(0, 27) + "...";
-
-        primaryTitleText.setText(primaryTitle);
-        secondaryTitleText.setText(secondaryTitle);
-
-        // Get current positions and durations
-        int primaryPos = mediaPlayer.getCurrentPosition();
-        int primaryDur = mediaPlayer.getDuration();
-        int secondaryPos = secondMediaPlayer.getCurrentPosition();
-        int secondaryDur = secondMediaPlayer.getDuration();
-
-        // Set up the SeekBars
-        primarySeekBar.setMax(primaryDur);
-        primarySeekBar.setProgress(primaryPos);
-
-        secondarySeekBar.setMax(secondaryDur);
-        secondarySeekBar.setProgress(secondaryPos);
-
-        // Update time displays initially
-        primaryTimeText.setText(formatTime(primaryPos) + " / " + formatTime(primaryDur));
-        secondaryTimeText.setText(formatTime(secondaryPos) + " / " + formatTime(secondaryDur));
-
-        // Set up listeners for real-time updates
+        
+        // Set max values based on duration
+        int primaryDuration = mediaPlayer.getDuration();
+        int secondaryDuration = secondMediaPlayer.getDuration();
+        
+        primarySeekBar.setMax(primaryDuration);
+        secondarySeekBar.setMax(secondaryDuration);
+        
+        // Set current positions
+        int primaryPosition = mediaPlayer.getCurrentPosition();
+        int secondaryPosition = secondMediaPlayer.getCurrentPosition();
+        primarySeekBar.setProgress(primaryPosition);
+        secondarySeekBar.setProgress(secondaryPosition);
+        
+        // Set initial time texts
+        primaryTimeText.setText(formatTime(primaryPosition));
+        secondaryTimeText.setText(formatTime(secondaryPosition));
+        
+        // Handle primary seekbar position changes - apply immediately
         primarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    primaryTimeText.setText(formatTime(progress) + " / " + formatTime(primaryDur));
-                    // Optional preview: mediaPlayer.seekTo(progress);
+                if (mediaPlayer != null) {
+                    // Update time text
+                    primaryTimeText.setText(formatTime(progress));
+                    if (fromUser) {
+                        // Apply change immediately while sliding
+                        mediaPlayer.seekTo(progress);
+                    }
                 }
             }
-
+            
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {}
-
+            
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-
+        
+        // Handle secondary seekbar position changes - apply immediately
         secondarySeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) {
-                    secondaryTimeText.setText(formatTime(progress) + " / " + formatTime(secondaryDur));
-                    // Optional preview: secondMediaPlayer.seekTo(progress);
+                if (secondMediaPlayer != null) {
+                    // Update time text
+                    secondaryTimeText.setText(formatTime(progress));
+                    if (fromUser) {
+                        // Apply change immediately while sliding
+                        secondMediaPlayer.seekTo(progress);
+                    }
                 }
             }
-
+            
             @Override
             public void onStartTrackingTouch(SeekBar seekBar) {}
-
+            
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-
-        // Create and show the dialog
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(R.string.position_sync_title)
-                .setView(dialogView)
-                .setPositiveButton(R.string.apply, (dialogInterface, i) -> {
-                    // Apply the positions when user clicks Apply
-                    int newPrimaryPos = primarySeekBar.getProgress();
-                    int newSecondaryPos = secondarySeekBar.getProgress();
-
-                    // Apply new positions
-                    mediaPlayer.seekTo(newPrimaryPos);
-                    secondMediaPlayer.seekTo(newSecondaryPos);
-
-                    // Update UI
-                    seekBar.setProgress(newPrimaryPos);
-                    updateTimeText(newPrimaryPos, primaryDur);
-
-                    // Show confirmation toast
-                    Toast.makeText(this, R.string.positions_synced, Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton(R.string.cancel, null)
-                .create();
-
-        dialog.show();
+        
+        builder.setView(dialogView);
+        builder.setPositiveButton(R.string.ok, null);
+        builder.show();
     }
 
     // Add a method to show settings dialog
@@ -3276,41 +3213,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearSecondAudio() {
+        // Release second media player
         if (secondMediaPlayer != null) {
-            try {
-                if (secondMediaPlayer.isPlaying()) {
-                    secondMediaPlayer.stop();
-                }
-                secondMediaPlayer.release();
-                secondMediaPlayer = null;
-            } catch (Exception e) {
-                Log.e(TAG, "Error clearing second audio", e);
-            }
+            secondMediaPlayer.release();
+            secondMediaPlayer = null;
         }
-
+        
+        // Reset secondary file name text
+        TextView secondFileNameText = findViewById(R.id.secondFileNameText);
+        secondFileNameText.setText("");
+        
+        // Clear URI and reset state
         secondAudioUri = null;
         secondAudioActive = false;
-
-        // Turn off mixer mode when second audio is cleared
-        mixerModeActive = false;
-
-        // Reset color to gray
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
-        } else {
-            mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
-        }
-
-        // Hide the mixer indicator
-        if (mixerIndicator != null) {
-            mixerIndicator.setVisibility(View.GONE);
-        }
-
-        Toast.makeText(this, "Second audio cleared", Toast.LENGTH_SHORT).show();
-
-        if (syncPositionButton != null) {
-            syncPositionButton.setVisibility(View.GONE);
-        }
+        
+        // Hide sync button
+        syncPositionButton.setVisibility(View.GONE);
+        
+        // Update mixer indicator
+        updateMixerIndicator();
+        
+        Toast.makeText(this, "Second_audio_cleared", Toast.LENGTH_SHORT).show();
     }
 
     private void setPointA() {
@@ -3640,5 +3563,17 @@ public class MainActivity extends AppCompatActivity {
                     getString(R.string.showing_playlist, currentPlaylist.getName()),
                     Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void updateMixerIndicator() {
+        if (!mixerModeActive || secondMediaPlayer == null) {
+            mixerIndicator.setVisibility(View.GONE);
+            return;
+        }
+        
+        mixerIndicator.setVisibility(View.VISIBLE);
+        String mixerText = String.format("Vol 1: %.0f%% | Vol 2: %.0f%%", 
+                firstAudioVolume * 100, secondAudioVolume * 100);
+        mixerIndicator.setText(mixerText);
     }
 }

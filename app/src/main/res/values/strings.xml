@@ -39,7 +39,7 @@
     <string name="second_file_selected">Second file: %1$s</string>
     <string name="mixer_active">Mixer active with 2 files</string>
     <string name="second_file_cleared">Second audio cleared</string>
-    <string name="balance_dialog_title">Adjust Audio Balance</string>
+    <string name="balance_dialog_title">Adjust Volume</string>
     <string name="first_audio">First Audio</string>
     <string name="balance_saved">Balance saved</string>
     <string name="audio_files">Audio Files</string>
@@ -55,7 +55,7 @@
     <string name="sort_by_date_asc">Date (oldest first)</string>
     <string name="sort_by_date_desc">Date (newest first)</string>
     <string name="search_icon">Search</string>
-    <string name="search_audio_files">Search audio files...</string>
+    <string name="search_audio_files"> Search audio files...</string>
     <string name="no_matching_files">No matching audio files found</string>
     <string name="clear_search">Clear search</string>
     <string name="toggle_mixer_mode">Toggle Mixer Mode</string>
