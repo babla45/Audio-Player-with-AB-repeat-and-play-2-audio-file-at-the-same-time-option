@@ -13,6 +13,9 @@ import android.content.pm.PackageManager;
 import android.telephony.TelephonyManager;
 import android.database.Cursor;
 import android.media.MediaPlayer;
+import android.media.AudioManager;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.PlaybackParams;
 import android.net.Uri;
 import android.os.Build;
@@ -163,6 +166,37 @@ public class MainActivity extends AppCompatActivity {
     // Call handling variables
     private boolean wasPlayingBeforeCall = false;
     private PhoneStateReceiver phoneStateReceiver;
+
+    // Audio focus handling
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean pausedByAudioFocusLoss = false;
+    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
+        switch (focusChange) {
+            case AudioManager.AUDIOFOCUS_LOSS:
+                // Permanent loss of audio focus: pause playback
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    pausedByAudioFocusLoss = true;
+                    pausePlayback();
+                }
+                break;
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+            case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                // Transient loss (e.g., call): pause
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    pausedByAudioFocusLoss = true;
+                    pausePlayback();
+                }
+                break;
+            case AudioManager.AUDIOFOCUS_GAIN:
+                // Regained focus: resume only if we paused due to focus
+                if (pausedByAudioFocusLoss) {
+                    pausedByAudioFocusLoss = false;
+                    resumePlayback();
+                }
+                break;
+        }
+    };
 
     // Make sure these are properly declared in your class
     private Handler handler = new Handler(Looper.getMainLooper());
@@ -320,6 +354,9 @@ public class MainActivity extends AppCompatActivity {
         // Initialize views
         initializeViews();
         
+        // Audio focus
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+
         // Initialize phone state receiver for call handling
         phoneStateReceiver = new PhoneStateReceiver();
         IntentFilter filter = new IntentFilter(ACTION_PHONE_STATE_CHANGED);
@@ -710,6 +747,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
+            // Request audio focus before preparing to play
+            requestAudioFocus();
+
             if (mediaPlayer != null) {
                 mediaPlayer.reset();
             } else {
@@ -850,12 +890,12 @@ public class MainActivity extends AppCompatActivity {
                              randomPlaylistContextList.get(randomIndex).getUri().equals(selectedAudioUri));
                     
                     selectedAudioUri = randomPlaylistContextList.get(randomIndex).getUri();
-                    shouldAutoPlay = true;
-                    prepareMediaPlayer();
+                shouldAutoPlay = true;
+                prepareMediaPlayer();
 
-                    // Update adapter to highlight the current song
-                    if (audioAdapter != null) {
-                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                // Update adapter to highlight the current song
+                if (audioAdapter != null) {
+                    audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
                     }
                 }
             }
@@ -1867,6 +1907,9 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         
+        // Release audio focus
+        abandonAudioFocus();
+
         // Unbind from the service
         if (serviceBound) {
             unbindService(serviceConnection);
@@ -3740,6 +3783,9 @@ public class MainActivity extends AppCompatActivity {
                 secondMediaPlayer.pause();
                 Log.d(TAG, "Second audio paused due to call");
             }
+
+            // Abandon audio focus when paused due to external interruption
+            abandonAudioFocus();
         } catch (Exception e) {
             Log.e(TAG, "Error pausing playback during call", e);
         }
@@ -3748,6 +3794,10 @@ public class MainActivity extends AppCompatActivity {
     private void resumePlayback() {
         try {
             if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+                if (!requestAudioFocus()) {
+                    Log.w(TAG, "Audio focus not granted, not resuming");
+                    return;
+                }
                 mediaPlayer.start();
                 isPlaying = true;
                 safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
@@ -3761,6 +3811,45 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error resuming playback after call", e);
+        }
+    }
+
+    private boolean requestAudioFocus() {
+        try {
+            if (audioManager == null) return true; // fallback
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (audioFocusRequest == null) {
+                    audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                            .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                            .setAudioAttributes(new AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                    .build())
+                            .build();
+                }
+                int res = audioManager.requestAudioFocus(audioFocusRequest);
+                return res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            } else {
+                int res = audioManager.requestAudioFocus(audioFocusChangeListener,
+                        AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+                return res == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "requestAudioFocus error", e);
+            return true;
+        }
+    }
+
+    private void abandonAudioFocus() {
+        try {
+            if (audioManager == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (audioFocusRequest != null) audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            } else {
+                audioManager.abandonAudioFocus(audioFocusChangeListener);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "abandonAudioFocus error", e);
         }
     }
 }
