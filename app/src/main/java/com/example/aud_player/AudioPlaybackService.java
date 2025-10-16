@@ -13,7 +13,6 @@ import android.media.MediaPlayer;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
-import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -21,6 +20,11 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import android.support.v4.media.session.MediaSessionCompat;
+import android.support.v4.media.session.PlaybackStateCompat;
+import android.view.KeyEvent;
+import android.content.ComponentName;
+
 import android.telephony.TelephonyManager;
 
 public class AudioPlaybackService extends Service {
@@ -30,6 +34,8 @@ public class AudioPlaybackService extends Service {
     private static final String ACTION_PLAY = "ACTION_PLAY";
     private static final String ACTION_PAUSE = "ACTION_PAUSE";
     private static final String ACTION_STOP = "ACTION_STOP";
+    private static final String ACTION_NEXT = "ACTION_NEXT";
+    private static final String ACTION_PREV = "ACTION_PREV";
 
     private MediaPlayer mediaPlayer;
     private MediaPlayer secondMediaPlayer;
@@ -46,6 +52,8 @@ public class AudioPlaybackService extends Service {
     private AudioFocusRequest audioFocusRequest;
     private boolean pausedByAudioFocusLoss = false;
     private boolean noisyReceiverRegistered = false;
+    private MediaSessionCompat mediaSession;
+    private PlaybackStateCompat.Builder playbackStateBuilder;
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -131,6 +139,7 @@ public class AudioPlaybackService extends Service {
         super.onCreate();
         createNotificationChannel();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        setupMediaSession();
     }
 
     @Override
@@ -179,6 +188,22 @@ public class AudioPlaybackService extends Service {
                                 Log.e(TAG, "Error pausing playback in service", e);
                             }
                         }
+                    }
+                    break;
+                case ACTION_NEXT:
+                    try {
+                        Intent nextIntent = new Intent("MEDIA_NEXT");
+                        sendBroadcast(nextIntent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error broadcasting next", e);
+                    }
+                    break;
+                case ACTION_PREV:
+                    try {
+                        Intent prevIntent = new Intent("MEDIA_PREV");
+                        sendBroadcast(prevIntent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error broadcasting prev", e);
                     }
                     break;
                 case ACTION_STOP:
@@ -238,6 +263,103 @@ public class AudioPlaybackService extends Service {
         return START_NOT_STICKY;
     }
 
+    private void setupMediaSession() {
+        try {
+            ComponentName mediaButtonReceiver = new ComponentName(this, androidx.media.session.MediaButtonReceiver.class);
+            mediaSession = new MediaSessionCompat(this, TAG, mediaButtonReceiver, null);
+            mediaSession.setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS |
+                    MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS);
+
+            mediaSession.setCallback(new MediaSessionCompat.Callback() {
+                @Override
+                public boolean onMediaButtonEvent(Intent mediaButtonIntent) {
+                    try {
+                        if (mediaButtonIntent != null && Intent.ACTION_MEDIA_BUTTON.equals(mediaButtonIntent.getAction())) {
+                            KeyEvent event = mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                            if (event != null && event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                                int keyCode = event.getKeyCode();
+                                if (keyCode == KeyEvent.KEYCODE_HEADSETHOOK || keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
+                                    Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                                    i.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
+                                    startServiceCompat(i);
+                                    return true;
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    return super.onMediaButtonEvent(mediaButtonIntent);
+                }
+                @Override
+                public void onPlay() {
+                    Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                    i.setAction(ACTION_PLAY);
+                    startServiceCompat(i);
+                }
+
+                @Override
+                public void onPause() {
+                    Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                    i.setAction(ACTION_PAUSE);
+                    startServiceCompat(i);
+                }
+
+                @Override
+                public void onSkipToNext() {
+                    Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                    i.setAction(ACTION_NEXT);
+                    startServiceCompat(i);
+                }
+
+                @Override
+                public void onSkipToPrevious() {
+                    Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                    i.setAction(ACTION_PREV);
+                    startServiceCompat(i);
+                }
+            });
+
+            playbackStateBuilder = new PlaybackStateCompat.Builder()
+                    .setActions(
+                            PlaybackStateCompat.ACTION_PLAY |
+                            PlaybackStateCompat.ACTION_PAUSE |
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE |
+                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
+                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                            PlaybackStateCompat.ACTION_STOP
+                    )
+                    .setState(PlaybackStateCompat.STATE_PAUSED, 0, 1f);
+            mediaSession.setPlaybackState(playbackStateBuilder.build());
+            mediaSession.setActive(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting up MediaSession", e);
+        }
+    }
+
+    private void updatePlaybackState() {
+        if (mediaSession == null || playbackStateBuilder == null) return;
+        int state = isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED;
+        try {
+            mediaSession.setPlaybackState(
+                    playbackStateBuilder
+                            .setState(state, mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0, 1f)
+                            .build()
+            );
+        } catch (Exception ignored) {}
+    }
+
+    private void startServiceCompat(Intent i) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                startForegroundService(i);
+            } catch (Exception e) {
+                Log.e(TAG, "startForegroundService failed", e);
+                try { startService(i); } catch (Exception ignored) {}
+            }
+        } else {
+            try { startService(i); } catch (Exception ignored) {}
+        }
+    }
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
@@ -269,6 +391,7 @@ public class AudioPlaybackService extends Service {
         NotificationManager notificationManager = 
             (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.notify(NOTIFICATION_ID, createNotification());
+        updatePlaybackState();
     }
 
     private Notification createNotification() {
@@ -279,11 +402,27 @@ public class AudioPlaybackService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
+        // Previous
+        Intent prevIntent = new Intent(this, AudioPlaybackService.class);
+        prevIntent.setAction(ACTION_PREV);
+        PendingIntent prevPendingIntent = PendingIntent.getService(
+            this, 3, prevIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
         // Create play/pause intent
         Intent playPauseIntent = new Intent(this, AudioPlaybackService.class);
         playPauseIntent.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent playPausePendingIntent = PendingIntent.getService(
             this, 1, playPauseIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        // Next
+        Intent nextIntent = new Intent(this, AudioPlaybackService.class);
+        nextIntent.setAction(ACTION_NEXT);
+        PendingIntent nextPendingIntent = PendingIntent.getService(
+            this, 4, nextIntent,
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
@@ -301,12 +440,20 @@ public class AudioPlaybackService extends Service {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            // Add play/pause action
-            .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play, 
-                      isPlaying ? "Pause" : "Play", 
+            // Add prev, play/pause, next
+            .addAction(android.R.drawable.ic_media_previous, "Previous", prevPendingIntent)
+            .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play,
+                      isPlaying ? "Pause" : "Play",
                       playPausePendingIntent)
-            // Add stop action
+            .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
+            // Add stop
             .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent);
+
+        if (mediaSession != null) {
+            builder.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(mediaSession.getSessionToken())
+                    .setShowActionsInCompactView(0, 1, 2));
+        }
 
         return builder.build();
     }
@@ -332,6 +479,11 @@ public class AudioPlaybackService extends Service {
             secondAudioActive = false;
             isPlaying = false;
             abandonAudioFocus();
+            if (mediaSession != null) {
+                mediaSession.setActive(false);
+                mediaSession.release();
+                mediaSession = null;
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
         }

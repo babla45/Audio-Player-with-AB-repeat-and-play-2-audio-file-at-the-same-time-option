@@ -344,6 +344,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Add a new class variable for the receiver
     private BroadcastReceiver closeAppReceiver;
+    private BroadcastReceiver mediaControlsReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -421,6 +422,23 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
+
+        // Register media controls (next/prev) receiver
+        mediaControlsReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                if ("MEDIA_NEXT".equals(action)) {
+                    playNextFromContext();
+                } else if ("MEDIA_PREV".equals(action)) {
+                    playPreviousFromContext();
+                }
+            }
+        };
+        IntentFilter mediaFilter = new IntentFilter();
+        mediaFilter.addAction("MEDIA_NEXT");
+        mediaFilter.addAction("MEDIA_PREV");
+        registerReceiver(mediaControlsReceiver, mediaFilter);
 
         // Update UI when playback is paused by service (e.g., headphones unplugged)
         BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
