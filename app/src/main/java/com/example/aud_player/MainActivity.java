@@ -70,6 +70,7 @@ import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.content.SharedPreferences;
 import java.util.Locale;
+import java.util.Random;
 import android.widget.RadioButton;
 import android.content.DialogInterface;
 import android.os.Environment;
@@ -450,9 +451,11 @@ public class MainActivity extends AppCompatActivity {
             abRepeatIndicator = findViewById(R.id.abRepeatIndicator);
             mixerIndicator = findViewById(R.id.mixerIndicator);
 
-            // Seek buttons
+            // Seek and prev/next buttons
+            ImageButton prevButton = findViewById(R.id.prevButton);
             seekBackwardButton = findViewById(R.id.seekBackwardButton);
             seekForwardButton = findViewById(R.id.seekForwardButton);
+            ImageButton nextButton = findViewById(R.id.nextButton);
 
             // RecyclerView elements
             audioRecyclerView = findViewById(R.id.audioRecyclerView);
@@ -481,21 +484,19 @@ public class MainActivity extends AppCompatActivity {
             // Log successful initialization
             Log.d(TAG, "Views initialized successfully");
 
-            // In your initializeViews() method, add this line after initializing the seekBackwardButton:
+            // Ensure backward icon matches forward style
             if (seekBackwardButton != null) {
-                try {
-                    seekBackwardButton.setImageResource(R.drawable.ic_backward_simple);
-                } catch (Exception e) {
-                    Log.e(TAG, "Error setting backward button image", e);
-                    // Fallback to a simpler icon if available
-                    seekBackwardButton.setImageResource(android.R.drawable.ic_media_previous);
-                }
+                seekBackwardButton.setImageResource(R.drawable.ic_seek_backward_improved);
             }
 
             // Initialize playlist view elements
             playlistInfoContainer = findViewById(R.id.playlistInfoContainer);
             playlistNameText = findViewById(R.id.playlistNameText);
             showAllSongsButton = findViewById(R.id.showAllSongsButton);
+
+            // Wire prev/next actions
+            prevButton.setOnClickListener(v -> playPreviousFromContext());
+            nextButton.setOnClickListener(v -> playNextFromContext());
 
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
@@ -568,6 +569,14 @@ public class MainActivity extends AppCompatActivity {
 
         // Add the menu button listener
         menuButton.setOnClickListener(v -> showPopupMenu(v));
+
+        // Hook seek/prev/next if views are ready
+        try {
+            ImageButton prevButton = findViewById(R.id.prevButton);
+            ImageButton nextButton = findViewById(R.id.nextButton);
+            if (prevButton != null) prevButton.setOnClickListener(v -> playPreviousFromContext());
+            if (nextButton != null) nextButton.setOnClickListener(v -> playNextFromContext());
+        } catch (Exception ignored) {}
 
         // Add search functionality with clear button toggle
         searchEditText.addTextChangedListener(new TextWatcher() {
@@ -964,6 +973,55 @@ public class MainActivity extends AppCompatActivity {
                     }
                     break;
             }
+        }
+    }
+
+    private void playNextFromContext() {
+        try {
+            List<AudioFile> list = getPlaybackContextList();
+            int idx = getCurrentSongIndexInList(list);
+            if (idx != -1 && list != null && !list.isEmpty()) {
+                int next;
+                if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
+                    // Choose a different random index than current
+                    if (list.size() == 1) return;
+                    int candidate = idx;
+                    Random r = new Random();
+                    for (int tries = 0; tries < 5 && candidate == idx; tries++) {
+                        candidate = r.nextInt(list.size());
+                    }
+                    next = candidate == idx ? (idx + 1) % list.size() : candidate;
+                } else {
+                    next = (idx + 1) % list.size();
+                }
+                onAudioFileSelected(list.get(next));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error playing next", e);
+        }
+    }
+
+    private void playPreviousFromContext() {
+        try {
+            List<AudioFile> list = getPlaybackContextList();
+            int idx = getCurrentSongIndexInList(list);
+            if (idx != -1 && list != null && !list.isEmpty()) {
+                int prev;
+                if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
+                    if (list.size() == 1) return;
+                    int candidate = idx;
+                    Random r = new Random();
+                    for (int tries = 0; tries < 5 && candidate == idx; tries++) {
+                        candidate = r.nextInt(list.size());
+                    }
+                    prev = candidate == idx ? (idx - 1 + list.size()) % list.size() : candidate;
+                } else {
+                    prev = (idx - 1 + list.size()) % list.size();
+                }
+                onAudioFileSelected(list.get(prev));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error playing previous", e);
         }
     }
 

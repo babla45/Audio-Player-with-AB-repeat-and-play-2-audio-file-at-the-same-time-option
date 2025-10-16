@@ -209,9 +209,19 @@
             android:orientation="horizontal">
 
             <ImageButton
+                android:id="@+id/prevButton"
+                android:layout_width="43dp"
+                android:layout_height="44dp"
+                android:background="@drawable/rounded_button_background"
+                android:contentDescription="@string/seek_backward"
+                android:padding="12dp"
+                android:src="@android:drawable/ic_media_previous" />
+
+            <ImageButton
                 android:id="@+id/seekBackwardButton"
                 android:layout_width="43dp"
                 android:layout_height="44dp"
+                android:layout_marginStart="8dp"
                 android:background="@drawable/rounded_button_background"
                 android:contentDescription="@string/seek_backward"
                 android:padding="12dp"
@@ -233,10 +243,20 @@
                 android:id="@+id/seekForwardButton"
                 android:layout_width="43dp"
                 android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
                 android:background="@drawable/rounded_button_background"
                 android:contentDescription="@string/seek_forward"
                 android:padding="12dp"
                 android:src="@drawable/ic_seek_forward_improved" />
+
+            <ImageButton
+                android:id="@+id/nextButton"
+                android:layout_width="43dp"
+                android:layout_height="44dp"
+                android:background="@drawable/rounded_button_background"
+                android:contentDescription="@string/seek_forward"
+                android:padding="12dp"
+                android:src="@android:drawable/ic_media_next" />
         </LinearLayout>
 
         <LinearLayout
