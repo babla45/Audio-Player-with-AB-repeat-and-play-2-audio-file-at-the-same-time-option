@@ -799,7 +799,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleSongCompletion() {
         // If we're playing a playlist, handle playlist navigation
-        if (currentPlaylistId != null && !currentPlaylistSongs.isEmpty() && currentPlaylistIndex >= 0) {
+        if (currentPlaylistId != null && !currentPlaylistSongs.isEmpty()) {
             if (currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT) {
                 // Restart the current song
                 if (mediaPlayer != null) {
@@ -807,30 +807,20 @@ public class MainActivity extends AppCompatActivity {
                     mediaPlayer.start();
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST) {
-                // Go to the next song in the playlist
-                int nextIndex = currentPlaylistIndex + 1;
-                if (nextIndex < currentPlaylistSongs.size()) {
-                    // Play the next song in the playlist
-                    selectedAudioUri = currentPlaylistSongs.get(nextIndex).getUri();
-                    currentPlaylistIndex = nextIndex;
-                    shouldAutoPlay = true;
-                    prepareMediaPlayer();
-
-                    // Update adapter to highlight the current song
-                    if (audioAdapter != null) {
-                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
-                    }
+                // Go to the next song from ALL songs
+                int currentIndex = getCurrentSongIndexInList(allAudioFiles);
+                Log.d(TAG, "Playlist Play Next: allAudioFiles.size()=" + 
+                      (allAudioFiles != null ? allAudioFiles.size() : "null") + ", currentIndex=" + currentIndex);
+                if (currentIndex != -1 && currentIndex + 1 < allAudioFiles.size()) {
+                    // Play the next song from all songs
+                    Log.d(TAG, "Playing next song from all songs at index " + (currentIndex + 1));
+                    onAudioFileSelected(allAudioFiles.get(currentIndex + 1));
+                } else if (!allAudioFiles.isEmpty()) {
+                    // End of all songs, loop back to the beginning
+                    Log.d(TAG, "Looping back to first song from all songs");
+                    onAudioFileSelected(allAudioFiles.get(0));
                 } else {
-                    // End of playlist, loop back to the beginning
-                    selectedAudioUri = currentPlaylistSongs.get(0).getUri();
-                    currentPlaylistIndex = 0;
-                    shouldAutoPlay = true;
-                    prepareMediaPlayer();
-
-                    // Update adapter to highlight the current song
-                    if (audioAdapter != null) {
-                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
-                    }
+                    Log.d(TAG, "No songs available in all songs list");
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
                 // Pick a random song from ALL songs, avoiding the current song
@@ -863,14 +853,19 @@ public class MainActivity extends AppCompatActivity {
                     break;
 
                 case PLAYBACK_MODE_NEXT_IN_LIST:
-                    // Play the next song in the current folder/playlist
-                    List<AudioFile> currentList = inPlaylistView ? currentPlaylistSongs : audioFiles;
-                    int currentIndex = getCurrentSongIndexInList(currentList);
-                    if (currentIndex != -1 && currentIndex + 1 < currentList.size()) {
-                        onAudioFileSelected(currentList.get(currentIndex + 1));
-                    } else if (!currentList.isEmpty()) {
+                    // Play the next song from ALL songs
+                    int currentIndex = getCurrentSongIndexInList(allAudioFiles);
+                    Log.d(TAG, "Play Next: allAudioFiles.size()=" + 
+                          (allAudioFiles != null ? allAudioFiles.size() : "null") + ", currentIndex=" + currentIndex);
+                    if (currentIndex != -1 && currentIndex + 1 < allAudioFiles.size()) {
+                        Log.d(TAG, "Playing next song at index " + (currentIndex + 1));
+                        onAudioFileSelected(allAudioFiles.get(currentIndex + 1));
+                    } else if (!allAudioFiles.isEmpty()) {
+                        Log.d(TAG, "Looping back to first song");
                         // Loop back to the first song if at the end
-                        onAudioFileSelected(currentList.get(0));
+                        onAudioFileSelected(allAudioFiles.get(0));
+                    } else {
+                        Log.d(TAG, "No songs available in all songs list");
                     }
                     break;
 
