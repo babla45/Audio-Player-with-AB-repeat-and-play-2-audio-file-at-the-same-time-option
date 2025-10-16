@@ -1,5 +1,8 @@
 package com.example.aud_player;
 
+import static android.telephony.TelephonyManager.*;
+import static android.telephony.TelephonyManager.EXTRA_STATE_RINGING;
+
 import android.Manifest;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -7,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.telephony.TelephonyManager;
 import android.database.Cursor;
 import android.media.MediaPlayer;
 import android.media.PlaybackParams;
@@ -155,6 +159,10 @@ public class MainActivity extends AppCompatActivity {
     private Uri selectedAudioUri = null;
     private boolean isPermissionGranted = false;
     private boolean isPlaying = false;
+    
+    // Call handling variables
+    private boolean wasPlayingBeforeCall = false;
+    private PhoneStateReceiver phoneStateReceiver;
 
     // Make sure these are properly declared in your class
     private Handler handler = new Handler(Looper.getMainLooper());
@@ -305,9 +313,17 @@ public class MainActivity extends AppCompatActivity {
         int backwardSeconds = prefs.getInt("seek_backward_seconds", 10); // Default 10 sec
         seekForwardMs = forwardSeconds * 1000;
         seekBackwardMs = backwardSeconds * 1000;
+        
+        // Load saved playback mode
+        loadPlaybackMode();
 
         // Initialize views
         initializeViews();
+        
+        // Initialize phone state receiver for call handling
+        phoneStateReceiver = new PhoneStateReceiver();
+        IntentFilter filter = new IntentFilter(ACTION_PHONE_STATE_CHANGED);
+        registerReceiver(phoneStateReceiver, filter);
 
         // Check mixer button - add this debug code
         if (mixerToggleButton != null) {
@@ -807,31 +823,33 @@ public class MainActivity extends AppCompatActivity {
                     mediaPlayer.start();
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST) {
-                // Go to the next song from ALL songs
-                int currentIndex = getCurrentSongIndexInList(allAudioFiles);
-                Log.d(TAG, "Playlist Play Next: allAudioFiles.size()=" + 
-                      (allAudioFiles != null ? allAudioFiles.size() : "null") + ", currentIndex=" + currentIndex);
-                if (currentIndex != -1 && currentIndex + 1 < allAudioFiles.size()) {
-                    // Play the next song from all songs
-                    Log.d(TAG, "Playing next song from all songs at index " + (currentIndex + 1));
-                    onAudioFileSelected(allAudioFiles.get(currentIndex + 1));
-                } else if (!allAudioFiles.isEmpty()) {
-                    // End of all songs, loop back to the beginning
-                    Log.d(TAG, "Looping back to first song from all songs");
-                    onAudioFileSelected(allAudioFiles.get(0));
+                // Go to the next song from current context (search results, playlist, or all songs)
+                List<AudioFile> playlistContextList = getPlaybackContextList();
+                int currentIndex = getCurrentSongIndexInList(playlistContextList);
+                Log.d(TAG, "Playlist Play Next: contextList.size()=" + 
+                      (playlistContextList != null ? playlistContextList.size() : "null") + ", currentIndex=" + currentIndex);
+                if (currentIndex != -1 && currentIndex + 1 < playlistContextList.size()) {
+                    // Play the next song from current context
+                    Log.d(TAG, "Playing next song from context at index " + (currentIndex + 1));
+                    onAudioFileSelected(playlistContextList.get(currentIndex + 1));
+                } else if (!playlistContextList.isEmpty()) {
+                    // End of context, loop back to the beginning
+                    Log.d(TAG, "Looping back to first song from context");
+                    onAudioFileSelected(playlistContextList.get(0));
                 } else {
-                    Log.d(TAG, "No songs available in all songs list");
+                    Log.d(TAG, "No songs available in current context");
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
-                // Pick a random song from ALL songs, avoiding the current song
-                if (!allAudioFiles.isEmpty()) {
+                // Pick a random song from current context (search results, playlist, or all songs)
+                List<AudioFile> randomPlaylistContextList = getPlaybackContextList();
+                if (!randomPlaylistContextList.isEmpty()) {
                     int randomIndex;
                     do {
-                        randomIndex = new java.util.Random().nextInt(allAudioFiles.size());
-                    } while (allAudioFiles.size() > 1 && 
-                             allAudioFiles.get(randomIndex).getUri().equals(selectedAudioUri));
+                        randomIndex = new java.util.Random().nextInt(randomPlaylistContextList.size());
+                    } while (randomPlaylistContextList.size() > 1 && 
+                             randomPlaylistContextList.get(randomIndex).getUri().equals(selectedAudioUri));
                     
-                    selectedAudioUri = allAudioFiles.get(randomIndex).getUri();
+                    selectedAudioUri = randomPlaylistContextList.get(randomIndex).getUri();
                     shouldAutoPlay = true;
                     prepareMediaPlayer();
 
@@ -853,31 +871,33 @@ public class MainActivity extends AppCompatActivity {
                     break;
 
                 case PLAYBACK_MODE_NEXT_IN_LIST:
-                    // Play the next song from ALL songs
-                    int currentIndex = getCurrentSongIndexInList(allAudioFiles);
-                    Log.d(TAG, "Play Next: allAudioFiles.size()=" + 
-                          (allAudioFiles != null ? allAudioFiles.size() : "null") + ", currentIndex=" + currentIndex);
-                    if (currentIndex != -1 && currentIndex + 1 < allAudioFiles.size()) {
+                    // Play the next song from current context (search results, playlist, or all songs)
+                    List<AudioFile> contextList = getPlaybackContextList();
+                    int currentIndex = getCurrentSongIndexInList(contextList);
+                    Log.d(TAG, "Play Next: contextList.size()=" + 
+                          (contextList != null ? contextList.size() : "null") + ", currentIndex=" + currentIndex);
+                    if (currentIndex != -1 && currentIndex + 1 < contextList.size()) {
                         Log.d(TAG, "Playing next song at index " + (currentIndex + 1));
-                        onAudioFileSelected(allAudioFiles.get(currentIndex + 1));
-                    } else if (!allAudioFiles.isEmpty()) {
+                        onAudioFileSelected(contextList.get(currentIndex + 1));
+                    } else if (!contextList.isEmpty()) {
                         Log.d(TAG, "Looping back to first song");
                         // Loop back to the first song if at the end
-                        onAudioFileSelected(allAudioFiles.get(0));
+                        onAudioFileSelected(contextList.get(0));
                     } else {
-                        Log.d(TAG, "No songs available in all songs list");
+                        Log.d(TAG, "No songs available in current context");
                     }
                     break;
 
                 case PLAYBACK_MODE_RANDOM:
-                    // Play a random song from ALL songs, avoiding the current song
-                    if (!allAudioFiles.isEmpty()) {
+                    // Play a random song from current context (search results, playlist, or all songs)
+                    List<AudioFile> randomContextList = getPlaybackContextList();
+                    if (!randomContextList.isEmpty()) {
                         int randomIndex;
                         do {
-                            randomIndex = new java.util.Random().nextInt(allAudioFiles.size());
-                        } while (allAudioFiles.size() > 1 && 
-                                 allAudioFiles.get(randomIndex).getUri().equals(selectedAudioUri));
-                        onAudioFileSelected(allAudioFiles.get(randomIndex));
+                            randomIndex = new java.util.Random().nextInt(randomContextList.size());
+                        } while (randomContextList.size() > 1 && 
+                                 randomContextList.get(randomIndex).getUri().equals(selectedAudioUri));
+                        onAudioFileSelected(randomContextList.get(randomIndex));
                     }
                     break;
             }
@@ -908,6 +928,47 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return -1;
+    }
+    
+    /**
+     * Get the appropriate list for playback modes based on current context
+     * - If searching: use filteredAudioFiles (search results)
+     * - If in playlist view: use currentPlaylistSongs
+     * - Otherwise: use allAudioFiles
+     */
+    private List<AudioFile> getPlaybackContextList() {
+        // If we're in playlist view, use playlist songs
+        if (inPlaylistView && currentPlaylistSongs != null && !currentPlaylistSongs.isEmpty()) {
+            return currentPlaylistSongs;
+        }
+        
+        // If we're searching (have search text), use filtered results
+        if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+            return filteredAudioFiles;
+        }
+        
+        // Otherwise, use all songs
+        return allAudioFiles;
+    }
+    
+    /**
+     * Save the current playback mode to SharedPreferences
+     */
+    private void savePlaybackMode() {
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putInt("playback_mode", currentPlaybackMode);
+        editor.apply();
+        Log.d(TAG, "Saved playback mode: " + currentPlaybackMode);
+    }
+    
+    /**
+     * Load the saved playback mode from SharedPreferences
+     */
+    private void loadPlaybackMode() {
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        currentPlaybackMode = prefs.getInt("playback_mode", PLAYBACK_MODE_NEXT_IN_LIST); // Default to "Play Next in List"
+        Log.d(TAG, "Loaded playback mode: " + currentPlaybackMode);
     }
 
     private void updateSeekBar() {
@@ -1087,14 +1148,17 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             } else if (itemId == 100) {
                 currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
+                savePlaybackMode();
                 Toast.makeText(this, "Mode: Repeat Current Song", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (itemId == 101) {
                 currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
+                savePlaybackMode();
                 Toast.makeText(this, "Mode: Play Next in List", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (itemId == 102) {
                 currentPlaybackMode = PLAYBACK_MODE_RANDOM;
+                savePlaybackMode();
                 Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
                 return true;
             } else if (itemId >= 225 && itemId <= 600) {
@@ -1794,6 +1858,15 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // Unregister phone state receiver
+        if (phoneStateReceiver != null) {
+            try {
+                unregisterReceiver(phoneStateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering phone state receiver", e);
+            }
+        }
+        
         // Unbind from the service
         if (serviceBound) {
             unbindService(serviceConnection);
@@ -3601,5 +3674,93 @@ public class MainActivity extends AppCompatActivity {
         String mixerText = String.format("Vol 1: %.0f%% | Vol 2: %.0f%%", 
                 firstAudioVolume * 100, secondAudioVolume * 100);
         mixerIndicator.setText(mixerText);
+    }
+
+    // Phone state receiver for handling incoming calls
+    private class PhoneStateReceiver extends BroadcastReceiver {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction().equals(ACTION_PHONE_STATE_CHANGED)) {
+                String state = intent.getStringExtra(EXTRA_STATE);
+                Log.d(TAG, "Phone state changed: " + state);
+                
+                if (state != null) {
+                    if (state.equals(EXTRA_STATE_RINGING)) {
+                        // Incoming call - pause music
+                        handleIncomingCall();
+                    } else if (state.equals(EXTRA_STATE_OFFHOOK)) {
+                        // Call answered - ensure music is paused
+                        handleCallAnswered();
+                    } else if (state.equals(EXTRA_STATE_IDLE)) {
+                        // Call ended - resume music if it was playing before
+                        handleCallEnded();
+                    }
+                }
+            }
+        }
+    }
+    
+    private void handleIncomingCall() {
+        Log.d(TAG, "Incoming call detected - pausing music");
+        if (isPlaying && mediaPlayer != null) {
+            wasPlayingBeforeCall = true;
+            pausePlayback();
+        } else {
+            wasPlayingBeforeCall = false;
+        }
+    }
+    
+    private void handleCallAnswered() {
+        Log.d(TAG, "Call answered - ensuring music is paused");
+        if (isPlaying && mediaPlayer != null) {
+            wasPlayingBeforeCall = true;
+            pausePlayback();
+        }
+    }
+    
+    private void handleCallEnded() {
+        Log.d(TAG, "Call ended - resuming music if it was playing before");
+        if (wasPlayingBeforeCall && mediaPlayer != null) {
+            resumePlayback();
+        }
+        wasPlayingBeforeCall = false;
+    }
+    
+    private void pausePlayback() {
+        try {
+            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+                isPlaying = false;
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                Log.d(TAG, "Music paused due to call");
+            }
+            
+            // Also pause second player if active
+            if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.pause();
+                Log.d(TAG, "Second audio paused due to call");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error pausing playback during call", e);
+        }
+    }
+    
+    private void resumePlayback() {
+        try {
+            if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+                mediaPlayer.start();
+                isPlaying = true;
+                safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                Log.d(TAG, "Music resumed after call");
+            }
+            
+            // Also resume second player if it was active
+            if (secondMediaPlayer != null && secondAudioActive && !secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.start();
+                Log.d(TAG, "Second audio resumed after call");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error resuming playback after call", e);
+        }
     }
 }
