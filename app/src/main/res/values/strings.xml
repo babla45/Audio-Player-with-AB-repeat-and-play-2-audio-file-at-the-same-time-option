@@ -108,4 +108,5 @@
     <string name="showing_all_songs">Showing all songs</string>
     <string name="showing_playlist">Showing playlist: %s</string>
     <string name="now_playing_from_playlist">Now playing from: %s</string>
+    <string name="permission_required_for_action">Permission required for action</string>
 </resources>

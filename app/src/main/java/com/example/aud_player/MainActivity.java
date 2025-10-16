@@ -72,6 +72,11 @@ import android.content.SharedPreferences;
 import java.util.Locale;
 import android.widget.RadioButton;
 import android.content.DialogInterface;
+import android.os.Environment;
+import android.content.ContentValues;
+import androidx.documentfile.provider.DocumentFile;
+import android.app.PendingIntent;
+import android.content.IntentSender;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -79,6 +84,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int REQUEST_BROWSE_AUDIO = 1001;
     private static final int REQUEST_BROWSE_SECOND_AUDIO = 1002;
+    private static final int REQUEST_WRITE_PERMISSION = 2001;
+    private static final int REQUEST_DELETE_PERMISSION = 2002;
+    private static final int REQUEST_SAF_EDIT = 2003;
+    private AudioFile pendingRenameFile;
+    private String pendingRenameNewName;
+    private AudioFile pendingDeleteFile;
 
     private static final int SORT_BY_NAME_ASC = 0;
     private static final int SORT_BY_NAME_DESC = 1;
@@ -409,6 +420,18 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
+
+        // Update UI when playback is paused by service (e.g., headphones unplugged)
+        BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("PLAYBACK_PAUSED".equals(intent.getAction())) {
+                    isPlaying = false;
+                    safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                }
+            }
+        };
+        registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"));
     }
 
     private void initializeViews() {
@@ -2004,6 +2027,44 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        // Handle consent results for rename/delete
+        if (requestCode == REQUEST_WRITE_PERMISSION && resultCode == RESULT_OK && pendingRenameFile != null) {
+            String name = pendingRenameNewName;
+            AudioFile file = pendingRenameFile;
+            pendingRenameFile = null;
+            pendingRenameNewName = null;
+            renameFile(file, name);
+            return;
+        } else if (requestCode == REQUEST_DELETE_PERMISSION && resultCode == RESULT_OK && pendingDeleteFile != null) {
+            AudioFile file = pendingDeleteFile;
+            pendingDeleteFile = null;
+            deleteFile(file);
+            return;
+        } else if (requestCode == REQUEST_SAF_EDIT && resultCode == RESULT_OK) {
+            if (data != null && data.getData() != null) {
+                try {
+                    getContentResolver().takePersistableUriPermission(data.getData(),
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to persist SAF permission", e);
+                }
+            }
+            if (pendingRenameFile != null) {
+                String name = pendingRenameNewName;
+                AudioFile file = pendingRenameFile;
+                pendingRenameFile = null;
+                pendingRenameNewName = null;
+                renameFile(file, name);
+                return;
+            }
+            if (pendingDeleteFile != null) {
+                AudioFile file = pendingDeleteFile;
+                pendingDeleteFile = null;
+                deleteFile(file);
+                return;
+            }
+        }
+
         if (resultCode == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
 
@@ -2263,11 +2324,91 @@ public class MainActivity extends AppCompatActivity {
         titleText.setText(audioFile.getTitle());
         durationText.setText(audioFile.getDuration());
         sizeText.setText(audioFile.getFormattedSize());
-        pathText.setText(audioFile.getUri().toString());
+        pathText.setText(getReadablePathFromUri(audioFile.getUri()));
 
         builder.setView(view);
         builder.setPositiveButton(R.string.ok, null);
         builder.show();
+    }
+
+    // Derive a readable path from a content/file URI for display in the details dialog
+    private String getReadablePathFromUri(Uri uri) {
+        try {
+            if (uri == null) return "";
+            String scheme = uri.getScheme();
+            if ("file".equalsIgnoreCase(scheme)) {
+                return uri.getPath();
+            }
+
+            if ("content".equalsIgnoreCase(scheme)) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    String[] projection = new String[] {
+                            MediaStore.MediaColumns.RELATIVE_PATH,
+                            MediaStore.MediaColumns.DISPLAY_NAME,
+                            MediaStore.MediaColumns.VOLUME_NAME
+                    };
+                    Cursor c = getContentResolver().query(uri, projection, null, null, null);
+                    if (c != null) {
+                        try {
+                            if (c.moveToFirst()) {
+                                int rpIdx = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH);
+                                int dnIdx = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME);
+                                int vnIdx = c.getColumnIndex(MediaStore.MediaColumns.VOLUME_NAME);
+                                String rel = rpIdx != -1 ? c.getString(rpIdx) : null;
+                                String name = dnIdx != -1 ? c.getString(dnIdx) : null;
+                                String volume = vnIdx != -1 ? c.getString(vnIdx) : null;
+                                if (!TextUtils.isEmpty(rel) && !TextUtils.isEmpty(name)) {
+                                    // Build a full-looking path for display: /storage/<volume>/<RELATIVE_PATH><DISPLAY_NAME>
+                                    String base;
+                                    if ("external_primary".equalsIgnoreCase(volume) || "primary".equalsIgnoreCase(volume)) {
+                                        base = Environment.getExternalStorageDirectory() != null
+                                                ? Environment.getExternalStorageDirectory().getAbsolutePath()
+                                                : "/storage/emulated/0";
+                                    } else if (!TextUtils.isEmpty(volume)) {
+                                        base = "/storage/" + volume;
+                                    } else {
+                                        base = "/storage/emulated/0";
+                                    }
+                                    if (!base.endsWith("/")) base = base + "/";
+                                    return base + rel + name;
+                                }
+                                if (!TextUtils.isEmpty(name)) {
+                                    return name;
+                                }
+                            }
+                        } finally {
+                            c.close();
+                        }
+                    }
+                } else {
+                    String[] projection = new String[] { MediaStore.MediaColumns.DATA };
+                    Cursor c = getContentResolver().query(uri, projection, null, null, null);
+                    if (c != null) {
+                        try {
+                            if (c.moveToFirst()) {
+                                int dataIdx = c.getColumnIndex(MediaStore.MediaColumns.DATA);
+                                if (dataIdx != -1) {
+                                    String absPath = c.getString(dataIdx);
+                                    if (!TextUtils.isEmpty(absPath)) return absPath;
+                                }
+                            }
+                        } finally {
+                            c.close();
+                        }
+                    }
+                }
+
+                // Fallback: show the URI last segment or whole URI
+                String last = uri.getLastPathSegment();
+                return !TextUtils.isEmpty(last) ? last : uri.toString();
+            }
+
+            // Unknown scheme fallback
+            return uri.toString();
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to derive readable path from URI", e);
+            return uri != null ? uri.toString() : "";
+        }
     }
 
     private void showRenameFileDialog(AudioFile audioFile) {
@@ -2292,12 +2433,57 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void renameFile(AudioFile audioFile, String newName) {
-        // This is a placeholder - actual implementation would depend on your requirements
-        // In a real app, you'd use MediaStore or ContentResolver to update the file name
-        Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
+        try {
+            if (audioFile == null || audioFile.getUri() == null || TextUtils.isEmpty(newName)) return;
 
-        // After successful rename, refresh the audio files list
-        refreshAudioFiles();
+            // Preserve file extension if user omitted it
+            String currentTitle = audioFile.getTitle();
+            String extension = "";
+            int dot = currentTitle.lastIndexOf('.');
+            if (dot != -1) {
+                extension = currentTitle.substring(dot); // includes dot
+            }
+            if (!newName.contains(".") && !TextUtils.isEmpty(extension)) {
+                newName = newName + extension;
+            }
+
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
+            int rows = getContentResolver().update(audioFile.getUri(), values, null, null);
+            if (rows > 0) {
+                Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
+                refreshAudioFiles();
+            } else {
+                // Try SAF-based rename (useful on SD card)
+                if (trySafRename(audioFile.getUri(), newName)) {
+                    Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
+                    refreshAudioFiles();
+                } else {
+                    Toast.makeText(this, R.string.error_renaming_file, Toast.LENGTH_SHORT).show();
+                }
+            }
+        } catch (SecurityException se) {
+            Log.e(TAG, "SecurityException renaming file", se);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    PendingIntent pi = MediaStore.createWriteRequest(getContentResolver(), java.util.Collections.singletonList(audioFile.getUri()));
+                    pendingRenameFile = audioFile;
+                    pendingRenameNewName = newName;
+                    startIntentSenderForResult(pi.getIntentSender(), REQUEST_WRITE_PERMISSION, null, 0, 0, 0);
+                    return;
+                } catch (Exception ex) {
+                    Log.e(TAG, "Failed to request write access", ex);
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // No API to request per-item edit consent on Android 10; show guidance
+                Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Error renaming file", e);
+            Toast.makeText(this, R.string.error_renaming_file, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void showDeleteConfirmationDialog(AudioFile audioFile) {
@@ -2312,12 +2498,46 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void deleteFile(AudioFile audioFile) {
-        // This is a placeholder - actual implementation would depend on your requirements
-        // In a real app, you'd use MediaStore or ContentResolver to delete the file
-        Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
-
-        // After successful delete, refresh the audio files list
-        refreshAudioFiles();
+        try {
+            if (audioFile == null || audioFile.getUri() == null) return;
+            int rows = getContentResolver().delete(audioFile.getUri(), null, null);
+            if (rows > 0) {
+                Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
+                refreshAudioFiles();
+            } else {
+                if (trySafDelete(audioFile.getUri())) {
+                    Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
+                    refreshAudioFiles();
+                } else {
+                    Toast.makeText(this, R.string.error_deleting_file, Toast.LENGTH_SHORT).show();
+                }
+            }
+        } catch (SecurityException se) {
+            Log.e(TAG, "SecurityException deleting file", se);
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    PendingIntent pi = MediaStore.createDeleteRequest(getContentResolver(), java.util.Collections.singletonList(audioFile.getUri()));
+                    pendingDeleteFile = audioFile;
+                    startIntentSenderForResult(pi.getIntentSender(), REQUEST_DELETE_PERMISSION, null, 0, 0, 0);
+                    return;
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // Use SAF to request write permission then delete
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setDataAndType(audioFile.getUri(), "audio/*");
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                    pendingDeleteFile = audioFile;
+                    startActivityForResult(intent, REQUEST_SAF_EDIT);
+                    return;
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Failed to request edit permissions for delete", ex);
+            }
+            Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Error deleting file", e);
+            Toast.makeText(this, R.string.error_deleting_file, Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void shareAudioFile(AudioFile audioFile) {
@@ -2325,6 +2545,30 @@ public class MainActivity extends AppCompatActivity {
         shareIntent.setType("audio/*");
         shareIntent.putExtra(Intent.EXTRA_STREAM, audioFile.getUri());
         startActivity(Intent.createChooser(shareIntent, "Share audio file"));
+    }
+
+    private boolean trySafRename(Uri uri, String newName) {
+        try {
+            DocumentFile doc = DocumentFile.fromSingleUri(this, uri);
+            if (doc != null && doc.canWrite()) {
+                return doc.renameTo(newName);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "SAF rename failed", e);
+        }
+        return false;
+    }
+
+    private boolean trySafDelete(Uri uri) {
+        try {
+            DocumentFile doc = DocumentFile.fromSingleUri(this, uri);
+            if (doc != null && doc.canWrite()) {
+                return doc.delete();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "SAF delete failed", e);
+        }
+        return false;
     }
 
     // Update the updateAudioFilesList method to use the new setupAudioAdapter method

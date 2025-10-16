@@ -6,6 +6,8 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
 import android.content.Intent;
 import android.media.MediaPlayer;
 import android.media.AudioManager;
@@ -43,6 +45,34 @@ public class AudioPlaybackService extends Service {
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
     private boolean pausedByAudioFocusLoss = false;
+    private boolean noisyReceiverRegistered = false;
+    private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())) {
+                try {
+                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                        mediaPlayer.pause();
+                    }
+                    if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.pause();
+                    }
+                    isPlaying = false;
+                    abandonAudioFocus();
+                    updateNotification();
+                    // Notify UI to reflect paused state
+                    try {
+                        Intent pausedIntent = new Intent("PLAYBACK_PAUSED");
+                        sendBroadcast(pausedIntent);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to broadcast paused state", e);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error handling becoming noisy", e);
+                }
+            }
+        }
+    };
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_LOSS:
@@ -125,6 +155,7 @@ public class AudioPlaybackService extends Service {
                                     }
                                 }
                                 isPlaying = true;
+                                registerBecomingNoisy();
                                 updateNotification();
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error starting playback in service", e);
@@ -142,6 +173,7 @@ public class AudioPlaybackService extends Service {
                                 }
                                 isPlaying = false;
                                 abandonAudioFocus();
+                                unregisterBecomingNoisy();
                                 updateNotification();
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error pausing playback in service", e);
@@ -186,6 +218,7 @@ public class AudioPlaybackService extends Service {
                         // Stop the service directly - don't use handler delay
                         stopSelf();
                         abandonAudioFocus();
+                        unregisterBecomingNoisy();
                         
                         // Return immediately - don't show notification again
                         return START_NOT_STICKY;
@@ -224,6 +257,11 @@ public class AudioPlaybackService extends Service {
         this.currentTitle = title != null ? title : "Audio Player";
         this.isPlaying = main != null && main.isPlaying();
         this.secondAudioActive = second != null;
+        if (this.isPlaying) {
+            registerBecomingNoisy();
+        } else {
+            unregisterBecomingNoisy();
+        }
         updateNotification();
     }
 
@@ -335,6 +373,30 @@ public class AudioPlaybackService extends Service {
             }
         } catch (Exception e) {
             Log.e(TAG, "abandonAudioFocus error", e);
+        }
+    }
+
+    private void registerBecomingNoisy() {
+        if (!noisyReceiverRegistered) {
+            try {
+                IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+                registerReceiver(becomingNoisyReceiver, filter);
+                noisyReceiverRegistered = true;
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to register becoming noisy receiver", e);
+            }
+        }
+    }
+
+    private void unregisterBecomingNoisy() {
+        if (noisyReceiverRegistered) {
+            try {
+                unregisterReceiver(becomingNoisyReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to unregister becoming noisy receiver", e);
+            } finally {
+                noisyReceiverRegistered = false;
+            }
         }
     }
 
