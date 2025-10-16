@@ -92,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int PLAYBACK_MODE_RANDOM = 2;
 
     private int currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST; // Default is list play
+    private Uri lastPlayedUri = null; // Track last played song for random mode
 
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
@@ -832,16 +833,22 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
-                // Pick a random song from the playlist
-                int randomIndex = new java.util.Random().nextInt(currentPlaylistSongs.size());
-                selectedAudioUri = currentPlaylistSongs.get(randomIndex).getUri();
-                currentPlaylistIndex = randomIndex;
-                shouldAutoPlay = true;
-                prepareMediaPlayer();
+                // Pick a random song from ALL songs, avoiding the current song
+                if (!allAudioFiles.isEmpty()) {
+                    int randomIndex;
+                    do {
+                        randomIndex = new java.util.Random().nextInt(allAudioFiles.size());
+                    } while (allAudioFiles.size() > 1 && 
+                             allAudioFiles.get(randomIndex).getUri().equals(selectedAudioUri));
+                    
+                    selectedAudioUri = allAudioFiles.get(randomIndex).getUri();
+                    shouldAutoPlay = true;
+                    prepareMediaPlayer();
 
-                // Update adapter to highlight the current song
-                if (audioAdapter != null) {
-                    audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    // Update adapter to highlight the current song
+                    if (audioAdapter != null) {
+                        audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
+                    }
                 }
             }
         } else {
@@ -856,21 +863,26 @@ public class MainActivity extends AppCompatActivity {
                     break;
 
                 case PLAYBACK_MODE_NEXT_IN_LIST:
-                    // Play the next song in the list
-                    int currentIndex = getCurrentSongIndex();
-                    if (currentIndex != -1 && currentIndex + 1 < audioFiles.size()) {
-                        onAudioFileSelected(audioFiles.get(currentIndex + 1));
-                    } else if (!audioFiles.isEmpty()) {
+                    // Play the next song in the current folder/playlist
+                    List<AudioFile> currentList = inPlaylistView ? currentPlaylistSongs : audioFiles;
+                    int currentIndex = getCurrentSongIndexInList(currentList);
+                    if (currentIndex != -1 && currentIndex + 1 < currentList.size()) {
+                        onAudioFileSelected(currentList.get(currentIndex + 1));
+                    } else if (!currentList.isEmpty()) {
                         // Loop back to the first song if at the end
-                        onAudioFileSelected(audioFiles.get(0));
+                        onAudioFileSelected(currentList.get(0));
                     }
                     break;
 
                 case PLAYBACK_MODE_RANDOM:
-                    // Play a random song from the list
-                    if (!audioFiles.isEmpty()) {
-                        int randomIndex = new java.util.Random().nextInt(audioFiles.size());
-                        onAudioFileSelected(audioFiles.get(randomIndex));
+                    // Play a random song from ALL songs, avoiding the current song
+                    if (!allAudioFiles.isEmpty()) {
+                        int randomIndex;
+                        do {
+                            randomIndex = new java.util.Random().nextInt(allAudioFiles.size());
+                        } while (allAudioFiles.size() > 1 && 
+                                 allAudioFiles.get(randomIndex).getUri().equals(selectedAudioUri));
+                        onAudioFileSelected(allAudioFiles.get(randomIndex));
                     }
                     break;
             }
@@ -884,6 +896,19 @@ public class MainActivity extends AppCompatActivity {
 
         for (int i = 0; i < audioFiles.size(); i++) {
             if (selectedAudioUri.toString().equals(audioFiles.get(i).getUri().toString())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private int getCurrentSongIndexInList(List<AudioFile> list) {
+        if (selectedAudioUri == null || list == null || list.isEmpty()) {
+            return -1;
+        }
+
+        for (int i = 0; i < list.size(); i++) {
+            if (selectedAudioUri.toString().equals(list.get(i).getUri().toString())) {
                 return i;
             }
         }
@@ -1067,6 +1092,12 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             } else if (itemId == 100) {
                 currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
+                Toast.makeText(this, "Mode: Repeat Current Song", Toast.LENGTH_SHORT).show();
+                return true;
+            } else if (itemId == 101) {
+                currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
+                Toast.makeText(this, "Mode: Play Next in List", Toast.LENGTH_SHORT).show();
+                return true;
             } else if (itemId == 102) {
                 currentPlaybackMode = PLAYBACK_MODE_RANDOM;
                 Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
