@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHolder> {
@@ -35,7 +36,17 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     private int defaultColor;
 
     public AudioAdapter(List<AudioFile> audioFiles) {
-        this.audioFiles = audioFiles;
+        this.audioFiles = new ArrayList<>(audioFiles);
+    }
+
+    /**
+     * Update the adapter's data with a new list of audio files
+     * @param newList the new list of audio files to display
+     */
+    public void updateList(List<AudioFile> newList) {
+        this.audioFiles.clear();
+        this.audioFiles.addAll(newList);
+        notifyDataSetChanged();
     }
 
     public interface OnItemClickListener {

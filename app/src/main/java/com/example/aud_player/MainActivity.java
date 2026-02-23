@@ -2664,8 +2664,12 @@ public class MainActivity extends AppCompatActivity {
             audioRecyclerView.setVisibility(View.VISIBLE);
             emptyView.setVisibility(View.GONE);
 
-            // Setup adapter with filtered files
-            setupAudioAdapter();
+            // Reuse existing adapter if possible, otherwise create a new one
+            if (audioAdapter != null && audioRecyclerView.getAdapter() == audioAdapter) {
+                audioAdapter.updateList(filteredAudioFiles);
+            } else {
+                setupAudioAdapter();
+            }
         }
     }
 
@@ -2823,7 +2827,8 @@ public class MainActivity extends AppCompatActivity {
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.DATE_ADDED,
-                MediaStore.Audio.Media.SIZE
+                MediaStore.Audio.Media.SIZE,
+                MediaStore.Audio.Media.DISPLAY_NAME
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -2845,6 +2850,7 @@ public class MainActivity extends AppCompatActivity {
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
                 int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
+                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
 
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idColumn);
@@ -2853,11 +2859,20 @@ public class MainActivity extends AppCompatActivity {
                     long size = cursor.getLong(sizeColumn);
                     long dateAdded = cursor.getLong(dateAddedColumn);  // Get dateAdded from cursor
 
+                    // Get the display name with extension
+                    String displayName = title;
+                    if (displayNameColumn != -1) {
+                        String fullName = cursor.getString(displayNameColumn);
+                        if (fullName != null && !fullName.isEmpty()) {
+                            displayName = fullName;
+                        }
+                    }
+
                     String durationFormatted = formatTime((int)duration);
                     Uri contentUri = Uri.withAppendedPath(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                    sortedFiles.add(new AudioFile(title, durationFormatted, contentUri, id, size, dateAdded));
+                    sortedFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded));
                 }
                 cursor.close();
 
@@ -2903,9 +2918,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        // Filter based on the query
+        String lowerQuery = query.toLowerCase(Locale.ROOT);
+
+        // Filter based on the query - matches against both display name and metadata title
         for (AudioFile audioFile : sourceList) {
-            if (audioFile.getTitle().toLowerCase().contains(query.toLowerCase())) {
+            if (audioFile.matchesSearch(lowerQuery)) {
                 filteredAudioFiles.add(audioFile);
             }
         }
@@ -2950,7 +2967,8 @@ public class MainActivity extends AppCompatActivity {
                     MediaStore.Audio.Media.TITLE,
                     MediaStore.Audio.Media.DURATION,
                     MediaStore.Audio.Media.SIZE,
-                    MediaStore.Audio.Media.DATE_ADDED
+                    MediaStore.Audio.Media.DATE_ADDED,
+                    MediaStore.Audio.Media.DISPLAY_NAME
             };
 
             String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -2974,6 +2992,7 @@ public class MainActivity extends AppCompatActivity {
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
                 int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
+                int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
 
                 Log.d(TAG, "Found " + cursor.getCount() + " music files in query");
 
@@ -2984,15 +3003,24 @@ public class MainActivity extends AppCompatActivity {
                     long size = cursor.getLong(sizeColumn);
                     long dateAdded = cursor.getLong(dateAddedColumn);
 
+                    // Get the display name with extension
+                    String displayName = title;
+                    if (displayNameColumn != -1) {
+                        String fullName = cursor.getString(displayNameColumn);
+                        if (fullName != null && !fullName.isEmpty()) {
+                            displayName = fullName;
+                        }
+                    }
+
                     // Track the largest file for debugging
                     if (size > largestSize) {
                         largestSize = size;
-                        largestFileName = title;
+                        largestFileName = displayName;
                     }
 
                     // Log large files for debugging (files larger than 100MB)
                     if (size > 100 * 1024 * 1024) {
-                        Log.d(TAG, "Large file found: " + title + " - Size: " +
+                        Log.d(TAG, "Large file found: " + displayName + " - Size: " +
                                 (size / (1024 * 1024)) + " MB");
                     }
 
@@ -3013,7 +3041,7 @@ public class MainActivity extends AppCompatActivity {
                     Uri contentUri = Uri.withAppendedPath(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                    AudioFile audioFile = new AudioFile(title, durationFormatted, contentUri, id, size, dateAdded);
+                    AudioFile audioFile = new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded);
                     sizeInfoList.add(new AudioFileSizePair(audioFile, size));
                 }
                 cursor.close();
