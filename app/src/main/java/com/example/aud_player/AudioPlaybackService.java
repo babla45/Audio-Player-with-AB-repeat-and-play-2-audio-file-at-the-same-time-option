@@ -20,6 +20,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 import androidx.core.app.NotificationCompat;
+import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
 import android.view.KeyEvent;
@@ -151,8 +152,25 @@ public class AudioPlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && intent.getAction() != null) {
-            switch (intent.getAction()) {
+        // CRITICAL: Call startForeground IMMEDIATELY before doing any work.
+        // On Android 11 and below, delaying this call can cause the notification
+        // to never appear (the system silently drops it). On Android 12+ it can
+        // cause a ForegroundServiceDidNotStartInTimeException crash.
+        // For ACTION_STOP we still need to call it first, then remove it.
+        String action = (intent != null) ? intent.getAction() : null;
+        boolean isStopAction = ACTION_STOP.equals(action);
+
+        if (!isStopAction) {
+            try {
+                startForeground(NOTIFICATION_ID, createNotification());
+                isForegroundStarted = true;
+            } catch (Exception e) {
+                Log.e(TAG, "startForeground failed in onStartCommand", e);
+            }
+        }
+
+        if (action != null) {
+            switch (action) {
                 case ACTION_PLAY:
                     if (mediaPlayer != null) {
                         if (!isPlaying) {
@@ -167,7 +185,9 @@ public class AudioPlaybackService extends Service {
                                 }
                                 isPlaying = true;
                                 registerBecomingNoisy();
-                                updateNotification();
+                                updateMediaSessionMetadata();
+                                // Re-post foreground notification now that isPlaying changed
+                                startForeground(NOTIFICATION_ID, createNotification());
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error starting playback in service", e);
                             }
@@ -185,7 +205,8 @@ public class AudioPlaybackService extends Service {
                                 isPlaying = false;
                                 abandonAudioFocus();
                                 unregisterBecomingNoisy();
-                                updateNotification();
+                                // Re-post foreground notification now that isPlaying changed
+                                startForeground(NOTIFICATION_ID, createNotification());
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error pausing playback in service", e);
                             }
@@ -223,7 +244,8 @@ public class AudioPlaybackService extends Service {
                         } else {
                             stopForeground(true);
                         }
-                        
+                        isForegroundStarted = false;
+
                         // Cancel any pending timers
                         if (timerRunnable != null) {
                             timerHandler.removeCallbacks(timerRunnable);
@@ -256,13 +278,8 @@ public class AudioPlaybackService extends Service {
                     break;
             }
         }
-        
-        // Always call startForeground to avoid ForegroundServiceDidNotStartInTimeException
-        // on Android 12+. The notification is shown in both playing and paused states.
-        startForeground(NOTIFICATION_ID, createNotification());
-        isForegroundStarted = true;
 
-        // Change this to NOT_STICKY for the stop case
+        updatePlaybackState();
         return START_NOT_STICKY;
     }
 
@@ -350,6 +367,27 @@ public class AudioPlaybackService extends Service {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Update the MediaSession metadata with the current track title and duration.
+     * On Android 11 (API 30) and below, the system's media notification relies on
+     * MediaSession metadata to render properly. Without it the notification may
+     * appear blank or not show at all on some devices (e.g. Itel Vision 3).
+     */
+    private void updateMediaSessionMetadata() {
+        if (mediaSession == null) return;
+        try {
+            long duration = (mediaPlayer != null) ? mediaPlayer.getDuration() : 0;
+            MediaMetadataCompat metadata = new MediaMetadataCompat.Builder()
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "")
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+                    .build();
+            mediaSession.setMetadata(metadata);
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating media session metadata", e);
+        }
+    }
+
     private void startServiceCompat(Intent i) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
@@ -396,6 +434,8 @@ public class AudioPlaybackService extends Service {
         } else {
             unregisterBecomingNoisy();
         }
+        // Update media session metadata so the notification renders properly on Android 11
+        updateMediaSessionMetadata();
         // If the service has already been started as foreground, use startForeground
         // to ensure the notification stays visible on all Android versions (including 11).
         // If only bound (not started), use notify() as fallback — startForeground would crash.
