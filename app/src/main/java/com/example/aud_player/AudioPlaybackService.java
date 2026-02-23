@@ -29,7 +29,8 @@ import android.telephony.TelephonyManager;
 
 public class AudioPlaybackService extends Service {
     private static final String TAG = "AudioPlaybackService";
-    private static final String CHANNEL_ID = "AudioPlaybackChannel";
+    private static final String CHANNEL_ID = "AudioPlaybackChannel_v2";
+    private static final String OLD_CHANNEL_ID = "AudioPlaybackChannel";
     private static final int NOTIFICATION_ID = 1;
     private static final String ACTION_PLAY = "ACTION_PLAY";
     private static final String ACTION_PAUSE = "ACTION_PAUSE";
@@ -52,6 +53,7 @@ public class AudioPlaybackService extends Service {
     private AudioFocusRequest audioFocusRequest;
     private boolean pausedByAudioFocusLoss = false;
     private boolean noisyReceiverRegistered = false;
+    private boolean isForegroundStarted = false;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
@@ -71,7 +73,7 @@ public class AudioPlaybackService extends Service {
                     // Notify UI to reflect paused state
                     try {
                         Intent pausedIntent = new Intent("PLAYBACK_PAUSED");
-                        sendBroadcast(pausedIntent);
+                        sendLocalBroadcast(pausedIntent);
                     } catch (Exception e) {
                         Log.e(TAG, "Failed to broadcast paused state", e);
                     }
@@ -193,7 +195,7 @@ public class AudioPlaybackService extends Service {
                 case ACTION_NEXT:
                     try {
                         Intent nextIntent = new Intent("MEDIA_NEXT");
-                        sendBroadcast(nextIntent);
+                        sendLocalBroadcast(nextIntent);
                     } catch (Exception e) {
                         Log.e(TAG, "Error broadcasting next", e);
                     }
@@ -201,7 +203,7 @@ public class AudioPlaybackService extends Service {
                 case ACTION_PREV:
                     try {
                         Intent prevIntent = new Intent("MEDIA_PREV");
-                        sendBroadcast(prevIntent);
+                        sendLocalBroadcast(prevIntent);
                     } catch (Exception e) {
                         Log.e(TAG, "Error broadcasting prev", e);
                     }
@@ -213,8 +215,8 @@ public class AudioPlaybackService extends Service {
                         
                         // Send broadcast to close the app immediately
                         Intent closeAppIntent = new Intent("CLOSE_APP_COMMAND");
-                        sendBroadcast(closeAppIntent);
-                        
+                        sendLocalBroadcast(closeAppIntent);
+
                         // Stop the service from foreground state
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                             stopForeground(STOP_FOREGROUND_REMOVE);
@@ -255,10 +257,11 @@ public class AudioPlaybackService extends Service {
             }
         }
         
-        if (isPlaying) {
-            startForeground(NOTIFICATION_ID, createNotification());
-        }
-        
+        // Always call startForeground to avoid ForegroundServiceDidNotStartInTimeException
+        // on Android 12+. The notification is shown in both playing and paused states.
+        startForeground(NOTIFICATION_ID, createNotification());
+        isForegroundStarted = true;
+
         // Change this to NOT_STICKY for the stop case
         return START_NOT_STICKY;
     }
@@ -362,13 +365,22 @@ public class AudioPlaybackService extends Service {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = getSystemService(NotificationManager.class);
+
+            // Delete old channel so its stale IMPORTANCE_LOW setting doesn't persist
+            manager.deleteNotificationChannel(OLD_CHANNEL_ID);
+
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
                 "Audio Playback",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             );
             channel.setDescription("Used for audio playback controls");
-            NotificationManager manager = getSystemService(NotificationManager.class);
+            channel.setShowBadge(true);
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            // Disable sound for this channel so play/pause doesn't beep
+            channel.setSound(null, null);
+            channel.enableVibration(false);
             manager.createNotificationChannel(channel);
         }
     }
@@ -384,7 +396,36 @@ public class AudioPlaybackService extends Service {
         } else {
             unregisterBecomingNoisy();
         }
-        updateNotification();
+        // If the service has already been started as foreground, use startForeground
+        // to ensure the notification stays visible on all Android versions (including 11).
+        // If only bound (not started), use notify() as fallback — startForeground would crash.
+        if (isForegroundStarted) {
+            try {
+                startForeground(NOTIFICATION_ID, createNotification());
+            } catch (Exception e) {
+                Log.e(TAG, "startForeground failed in setMediaPlayers", e);
+                updateNotification();
+            }
+        } else {
+            updateNotification();
+        }
+        updatePlaybackState();
+    }
+
+    /**
+     * Called from the Activity right after startForegroundService() to immediately
+     * promote this service to foreground. This ensures the notification appears
+     * on Android 11 and below without waiting for onStartCommand to run.
+     */
+    public void ensureForeground() {
+        if (!isForegroundStarted) {
+            try {
+                startForeground(NOTIFICATION_ID, createNotification());
+                isForegroundStarted = true;
+            } catch (Exception e) {
+                Log.e(TAG, "ensureForeground failed", e);
+            }
+        }
     }
 
     private void updateNotification() {
@@ -397,49 +438,56 @@ public class AudioPlaybackService extends Service {
     private Notification createNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+        // Use FLAG_IMMUTABLE on API 31+; FLAG_UPDATE_CURRENT alone on older APIs
+        int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+
         PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            this, 0, notificationIntent, pendingFlags
         );
 
         // Previous
         Intent prevIntent = new Intent(this, AudioPlaybackService.class);
         prevIntent.setAction(ACTION_PREV);
         PendingIntent prevPendingIntent = PendingIntent.getService(
-            this, 3, prevIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            this, 3, prevIntent, pendingFlags
         );
 
         // Create play/pause intent
         Intent playPauseIntent = new Intent(this, AudioPlaybackService.class);
         playPauseIntent.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent playPausePendingIntent = PendingIntent.getService(
-            this, 1, playPauseIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            this, 1, playPauseIntent, pendingFlags
         );
 
         // Next
         Intent nextIntent = new Intent(this, AudioPlaybackService.class);
         nextIntent.setAction(ACTION_NEXT);
         PendingIntent nextPendingIntent = PendingIntent.getService(
-            this, 4, nextIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            this, 4, nextIntent, pendingFlags
         );
 
         // Create stop intent
         Intent stopIntent = new Intent(this, AudioPlaybackService.class);
         stopIntent.setAction(ACTION_STOP);
         PendingIntent stopPendingIntent = PendingIntent.getService(
-            this, 2, stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            this, 2, stopIntent, pendingFlags
         );
 
+        // Use ic_music_note as small icon — it's a proper 24dp monochrome vector.
+        // ic_launcher_foreground is 108dp with gradients and renders invisible on
+        // many Android 11 devices (including Itel Vision 3).
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
             .setContentText(isPlaying ? "Playing" : "Paused")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_music_note)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             // Add prev, play/pause, next
             .addAction(android.R.drawable.ic_media_previous, "Previous", prevPendingIntent)
             .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play,
@@ -528,11 +576,25 @@ public class AudioPlaybackService extends Service {
         }
     }
 
+    /**
+     * Send an explicit broadcast targeted to this app's package.
+     * On Android 14+, receivers registered with RECEIVER_NOT_EXPORTED only receive
+     * broadcasts that are explicitly targeted to the app's package.
+     */
+    private void sendLocalBroadcast(Intent intent) {
+        intent.setPackage(getPackageName());
+        sendBroadcast(intent);
+    }
+
     private void registerBecomingNoisy() {
         if (!noisyReceiverRegistered) {
             try {
                 IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
-                registerReceiver(becomingNoisyReceiver, filter);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(becomingNoisyReceiver, filter, Context.RECEIVER_EXPORTED);
+                } else {
+                    registerReceiver(becomingNoisyReceiver, filter);
+                }
                 noisyReceiverRegistered = true;
             } catch (Exception e) {
                 Log.e(TAG, "Failed to register becoming noisy receiver", e);
@@ -589,8 +651,8 @@ public class AudioPlaybackService extends Service {
                             // Send broadcast to update UI with action
                             Intent finishedIntent = new Intent("TIMER_FINISHED");
                             finishedIntent.putExtra("TIMER_ACTION", timerAction);
-                            sendBroadcast(finishedIntent);
-                            
+                            sendLocalBroadcast(finishedIntent);
+
                             // Stop service and remove notification
                             stopForeground(true);
                             stopSelf();
@@ -609,8 +671,8 @@ public class AudioPlaybackService extends Service {
                         // Send broadcast to update UI
                         Intent finishedIntent = new Intent("TIMER_FINISHED");
                         finishedIntent.putExtra("TIMER_ACTION", timerAction);
-                        sendBroadcast(finishedIntent);
-                        
+                        sendLocalBroadcast(finishedIntent);
+
                         // Update notification to show paused state
                         isPlaying = false;
                         updateNotification();
@@ -619,8 +681,8 @@ public class AudioPlaybackService extends Service {
                     // Timer still running, send update broadcast
                     Intent updateIntent = new Intent("TIMER_UPDATE");
                     updateIntent.putExtra("TIME_LEFT", timeLeft);
-                    sendBroadcast(updateIntent);
-                    
+                    sendLocalBroadcast(updateIntent);
+
                     // Schedule next update
                     timerHandler.postDelayed(this, TIMER_UPDATE_INTERVAL);
                 }
@@ -639,6 +701,6 @@ public class AudioPlaybackService extends Service {
         
         // Send broadcast to update UI
         Intent finishedIntent = new Intent("TIMER_FINISHED");
-        sendBroadcast(finishedIntent);
+        sendLocalBroadcast(finishedIntent);
     }
 } 

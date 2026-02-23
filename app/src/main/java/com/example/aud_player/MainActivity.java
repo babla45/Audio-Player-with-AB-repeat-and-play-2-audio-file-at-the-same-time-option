@@ -373,7 +373,11 @@ public class MainActivity extends AppCompatActivity {
         // Initialize phone state receiver for call handling
         phoneStateReceiver = new PhoneStateReceiver();
         IntentFilter filter = new IntentFilter(ACTION_PHONE_STATE_CHANGED);
-        registerReceiver(phoneStateReceiver, filter);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(phoneStateReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            registerReceiver(phoneStateReceiver, filter);
+        }
 
         // Check mixer button - add this debug code
         if (mixerToggleButton != null) {
@@ -409,7 +413,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"));
+        }
 
         // Register broadcast receiver for app close command
         closeAppReceiver = new BroadcastReceiver() {
@@ -421,7 +429,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
+        }
 
         // Register media controls (next/prev) receiver
         mediaControlsReceiver = new BroadcastReceiver() {
@@ -438,7 +450,11 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter mediaFilter = new IntentFilter();
         mediaFilter.addAction("MEDIA_NEXT");
         mediaFilter.addAction("MEDIA_PREV");
-        registerReceiver(mediaControlsReceiver, mediaFilter);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(mediaControlsReceiver, mediaFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(mediaControlsReceiver, mediaFilter);
+        }
 
         // Update UI when playback is paused by service (e.g., headphones unplugged)
         BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
@@ -450,7 +466,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"), Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"));
+        }
     }
 
     private void initializeViews() {
@@ -537,7 +557,6 @@ public class MainActivity extends AppCompatActivity {
             animateButtonPress(v);
             if (mediaPlayer != null && selectedAudioUri != null) {
                 try {
-                    Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
                     if (isPlaying) {
                         mediaPlayer.pause();
 
@@ -549,7 +568,7 @@ public class MainActivity extends AppCompatActivity {
                         // Use the new improved icons
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
-                        serviceIntent.setAction("ACTION_PAUSE");
+                        startPlaybackService("ACTION_PAUSE");
                     } else {
                         mediaPlayer.start();
 
@@ -562,20 +581,13 @@ public class MainActivity extends AppCompatActivity {
                         safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                         isPlaying = true;
                         updateSeekBar();
-                        serviceIntent.setAction("ACTION_PLAY");
+                        startPlaybackService("ACTION_PLAY");
                     }
 
                     // Update service with current state
                     if (serviceBound && audioService != null) {
                         audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer,
                                 fileNameText.getText().toString());
-                    }
-
-                    // Start or update the service
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(serviceIntent);
-                    } else {
-                        startService(serviceIntent);
                     }
 
                 } catch (IllegalStateException e) {
@@ -836,13 +848,7 @@ public class MainActivity extends AppCompatActivity {
                         updateSeekBar();
 
                         // Start the service
-                        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
-                        serviceIntent.setAction("ACTION_PLAY");
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(serviceIntent);
-                        } else {
-                            startService(serviceIntent);
-                        }
+                        startPlaybackService("ACTION_PLAY");
 
                         // Update service with media players
                         if (serviceBound && audioService != null) {
@@ -1766,7 +1772,11 @@ public class MainActivity extends AppCompatActivity {
                 IntentFilter filter = new IntentFilter();
                 filter.addAction("TIMER_UPDATE");
                 filter.addAction("TIMER_FINISHED");
-                registerReceiver(timerUpdateReceiver, filter);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(timerUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    registerReceiver(timerUpdateReceiver, filter);
+                }
             }
         } else {
             // Fallback to the old timer implementation if service not bound
@@ -3259,24 +3269,33 @@ public class MainActivity extends AppCompatActivity {
 
     private void startPlayback() {
         if (mediaPlayer != null) {
-            // Check for notification permission on Android 13+
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
-                    return;
-                }
-            }
-
-            // Start the service for background playback
-            Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
-
+            startPlaybackService("ACTION_PLAY");
             // ... existing playback code ...
+        }
+    }
+
+    private void startPlaybackService(String action) {
+        Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
+        serviceIntent.setAction(action);
+
+        // Ensure notification permission is requested before starting a foreground service on 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS);
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+
+        // Immediately promote to foreground via the bound reference so the notification
+        // appears right away on Android 11 and below (before onStartCommand runs).
+        if (serviceBound && audioService != null) {
+            audioService.ensureForeground();
         }
     }
 
