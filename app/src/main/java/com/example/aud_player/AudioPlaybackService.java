@@ -336,6 +336,15 @@ public class AudioPlaybackService extends Service {
                     i.setAction(ACTION_PREV);
                     startServiceCompat(i);
                 }
+
+                @Override
+                public void onCustomAction(String action, android.os.Bundle extras) {
+                    if (ACTION_STOP.equals(action)) {
+                        Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
+                        i.setAction(ACTION_STOP);
+                        startServiceCompat(i);
+                    }
+                }
             });
 
             playbackStateBuilder = new PlaybackStateCompat.Builder()
@@ -347,6 +356,8 @@ public class AudioPlaybackService extends Service {
                             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
                             PlaybackStateCompat.ACTION_STOP
                     )
+                    .addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
+                            ACTION_STOP, "Stop", R.drawable.ic_stop).build())
                     .setState(PlaybackStateCompat.STATE_PAUSED, 0, 1f);
             mediaSession.setPlaybackState(playbackStateBuilder.build());
             mediaSession.setActive(true);
@@ -377,12 +388,23 @@ public class AudioPlaybackService extends Service {
         if (mediaSession == null) return;
         try {
             long duration = (mediaPlayer != null) ? mediaPlayer.getDuration() : 0;
-            MediaMetadataCompat metadata = new MediaMetadataCompat.Builder()
+            MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
                     .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
-                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "")
-                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-                    .build();
-            mediaSession.setMetadata(metadata);
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "AudPlayer")
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
+
+            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.R) {
+                try {
+                    // MIUI 14 dark mode bug: If we pass no album art, it extracts white from the app icon.
+                    // Passing a solid dark gray 1x1 bitmap forces the system media notification to be dark,
+                    // fixing the unreadable white text issue.
+                    android.graphics.Bitmap art = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888);
+                    art.eraseColor(0xFF202020);
+                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
+                } catch (Exception ignored) {}
+            }
+
+            mediaSession.setMetadata(metadataBuilder.build());
         } catch (Exception e) {
             Log.e(TAG, "Error updating media session metadata", e);
         }
@@ -536,6 +558,8 @@ public class AudioPlaybackService extends Service {
             .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
             // Add stop
             .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent);
+
+
 
         if (mediaSession != null) {
             builder.setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
@@ -743,4 +767,4 @@ public class AudioPlaybackService extends Service {
         Intent finishedIntent = new Intent("TIMER_FINISHED");
         sendLocalBroadcast(finishedIntent);
     }
-} 
+}
