@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 public class AudioListActivity extends AppCompatActivity {
 
     private RecyclerView recyclerView;
-    private TextView emptyView;
+    private View emptyView;
     private List<AudioFile> audioFiles = new ArrayList<>();
     private boolean isSelectingSecondFile = false;
 

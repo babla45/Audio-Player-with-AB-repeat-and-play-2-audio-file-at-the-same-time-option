@@ -102,20 +102,55 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         
         // Highlight if this is the currently playing track
         if (currentlyPlayingUri != null && currentlyPlayingUri.equals(audioFile.getUri())) {
-            // This is the currently playing track - use default color (white)
-            holder.cardView.setCardBackgroundColor(Color.parseColor("#680190"));
-            // holder.nowPlayingIcon.setVisibility(View.VISIBLE);
-            holder.titleTextView.setTextColor(Color.parseColor("#E0F9F7"));
-            holder.durationTextView.setTextColor(Color.parseColor("#00ff00"));
-        } else {
-            // This is not the currently playing track - use highlight color (blue)
-            holder.cardView.setCardBackgroundColor(highlightColor);
+            // This is the currently playing track
+
+            // Background is a noticeable gray to indicate selection
+            int bgColor = Color.parseColor("#30888888"); // Light/Dark gray overlay based on 888888 with transparency
+
+            // Maintain ripple effect by creating a state list or ripple drawable over the color
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                android.util.TypedValue rippleValue = new android.util.TypedValue();
+                holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.colorControlHighlight, rippleValue, true);
+                android.graphics.drawable.RippleDrawable ripple = new android.graphics.drawable.RippleDrawable(
+                        android.content.res.ColorStateList.valueOf(rippleValue.data),
+                        new android.graphics.drawable.ColorDrawable(bgColor),
+                        null
+                );
+                holder.itemContainer.setBackground(ripple);
+            } else {
+                holder.itemContainer.setBackgroundColor(bgColor);
+            }
+
+            // Remove the icon which appears after selecting
             holder.nowPlayingIcon.setVisibility(View.GONE);
-            holder.titleTextView.setTextColor(Color.WHITE);
-            holder.durationTextView.setTextColor(Color.parseColor("#E0E0E0"));
+
+            // Reapply normal theme colors for text so it matches unselected but highlighted by background
+            android.util.TypedValue primaryText = new android.util.TypedValue();
+            holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.textColorPrimary, primaryText, true);
+            holder.titleTextView.setTextColor(ContextCompat.getColor(holder.itemContainer.getContext(), primaryText.resourceId != 0 ? primaryText.resourceId : primaryText.data));
+
+            android.util.TypedValue secondaryText = new android.util.TypedValue();
+            holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.textColorSecondary, secondaryText, true);
+            holder.durationTextView.setTextColor(ContextCompat.getColor(holder.itemContainer.getContext(), secondaryText.resourceId != 0 ? secondaryText.resourceId : secondaryText.data));
+        } else {
+            // This is not the currently playing track
+            // Use standard selectableItemBackground to maintain ripple
+            android.util.TypedValue outValue = new android.util.TypedValue();
+            holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.selectableItemBackground, outValue, true);
+            holder.itemContainer.setBackgroundResource(outValue.resourceId);
+            holder.nowPlayingIcon.setVisibility(View.GONE);
+
+            // Reapply theme colors using attrs
+            android.util.TypedValue primaryText = new android.util.TypedValue();
+            holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.textColorPrimary, primaryText, true);
+            holder.titleTextView.setTextColor(ContextCompat.getColor(holder.itemContainer.getContext(), primaryText.resourceId != 0 ? primaryText.resourceId : primaryText.data));
+
+            android.util.TypedValue secondaryText = new android.util.TypedValue();
+            holder.itemContainer.getContext().getTheme().resolveAttribute(android.R.attr.textColorSecondary, secondaryText, true);
+            holder.durationTextView.setTextColor(ContextCompat.getColor(holder.itemContainer.getContext(), secondaryText.resourceId != 0 ? secondaryText.resourceId : secondaryText.data));
         }
         
-        holder.itemView.setOnClickListener(v -> {
+        holder.itemContainer.setOnClickListener(v -> {
             if (listener != null) {
                 listener.onItemClick(audioFile);
             }
@@ -163,7 +198,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         TextView titleTextView;
         TextView durationTextView;
         ImageView optionsMenu;
-        CardView cardView;
+        View itemContainer;
         ImageView nowPlayingIcon;
 
         AudioViewHolder(View itemView) {
@@ -171,7 +206,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             titleTextView = itemView.findViewById(R.id.audioTitle);
             durationTextView = itemView.findViewById(R.id.audioDuration);
             optionsMenu = itemView.findViewById(R.id.fileOptionsMenu);
-            cardView = (CardView) itemView;
+            itemContainer = itemView.findViewById(R.id.innerLayout);
             nowPlayingIcon = itemView.findViewById(R.id.nowPlayingIcon);
         }
     }
