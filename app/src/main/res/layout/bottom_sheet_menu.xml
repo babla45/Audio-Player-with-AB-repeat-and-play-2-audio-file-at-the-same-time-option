@@ -7,25 +7,49 @@
     android:background="@drawable/bg_bottom_sheet"
     android:paddingBottom="16dp">
 
-    <!-- Drag handle -->
-    <View
-        android:layout_width="40dp"
-        android:layout_height="4dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="16dp"
-        android:background="@drawable/bg_icon_container" />
+    <!-- Top bar (tap small header area to close) -->
+    <LinearLayout
+        android:id="@+id/menu_top_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:clickable="true"
+        android:focusable="true"
+        android:paddingTop="12dp"
+        android:paddingBottom="8dp">
+
+        <View
+            android:layout_width="40dp"
+            android:layout_height="4dp"
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/bg_icon_container" />
+    </LinearLayout>
 
     <!-- Title -->
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/menu_title"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
         android:text="Options"
         android:textSize="18sp"
         android:textStyle="bold"
         android:textColor="@color/text_primary"
-        android:paddingHorizontal="20dp"
+        android:paddingHorizontal="10dp"
         android:paddingBottom="16dp" />
+
+    <!-- Keep menu at two visible rows; scroll if more rows are added -->
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
 
     <!-- Icon Grid: Row 1 -->
     <LinearLayout
@@ -276,6 +300,70 @@
                 android:layout_marginTop="6dp" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- Spacer -->
+    <View android:layout_width="match_parent" android:layout_height="4dp" />
+
+    <!-- Icon Grid: Row 3 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:gravity="center">
+
+        <!-- Exit App -->
+        <LinearLayout
+            android:id="@+id/menu_exit_btn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/bg_menu_grid_item"
+            android:padding="14dp"
+            android:layout_margin="4dp"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:src="@drawable/ic_close"
+                app:tint="@color/accent_primary"
+                android:contentDescription="Exit App" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Exit App"
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1"
+            android:layout_margin="4dp"
+            android:visibility="invisible" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1"
+            android:layout_margin="4dp"
+            android:visibility="invisible" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1"
+            android:layout_margin="4dp"
+            android:visibility="invisible" />
+    </LinearLayout>
+
+    </LinearLayout>
+    </ScrollView>
 
     <!-- Add to playlist (visible when song is playing) -->
     <LinearLayout

@@ -1358,6 +1358,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onExitAppClicked() {
+                exitAppCompletely();
+            }
+
+            @Override
             public void onAddToPlaylistClicked() {
                 showAddToPlaylistDialog();
             }
@@ -1458,7 +1463,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (ev != null) {
+        if (ev != null && !isBottomSheetMenuVisible()) {
             final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
                     * getResources().getDisplayMetrics().density;
             float startRegionTop = getWindow().getDecorView().getHeight() * BOTTOM_SWIPE_START_REGION_RATIO;
@@ -4143,6 +4148,43 @@ public class MainActivity extends AppCompatActivity {
         // appears right away on Android 11 and below (before onStartCommand runs).
         if (serviceBound && audioService != null) {
             audioService.ensureForeground();
+        }
+    }
+
+    private void exitAppCompletely() {
+        try {
+            // Stop local players immediately to avoid any audible delay.
+            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+            }
+            if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.pause();
+            }
+            isPlaying = false;
+
+            // Ask the foreground playback service to stop and remove notification.
+            Intent stopIntent = new Intent(this, AudioPlaybackService.class);
+            stopIntent.setAction("ACTION_STOP");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(stopIntent);
+            } else {
+                startService(stopIntent);
+            }
+            stopService(new Intent(this, AudioPlaybackService.class));
+        } catch (Exception e) {
+            Log.e(TAG, "Error while stopping playback during app exit", e);
+        } finally {
+            try {
+                if (serviceBound) {
+                    unbindService(serviceConnection);
+                    serviceBound = false;
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error while unbinding service during app exit", e);
+            }
+
+            finishAffinity();
+            finishAndRemoveTask();
         }
     }
 

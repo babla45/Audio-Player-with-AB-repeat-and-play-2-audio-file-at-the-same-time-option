@@ -1,7 +1,9 @@
 package com.example.aud_player;
 
 import android.os.Bundle;
+import android.app.Dialog;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
@@ -10,9 +12,12 @@ import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 
 public class MenuBottomSheet extends BottomSheetDialogFragment {
+    private static final float HEADER_SWIPE_CLOSE_THRESHOLD_DP = 22f;
 
     public interface MenuListener {
         void onSortClicked();
@@ -23,6 +28,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onEqualizerClicked();
         void onSettingsClicked();
         void onRefreshClicked();
+        void onExitAppClicked();
         void onAddToPlaylistClicked();
         boolean hasSongSelected();
         float getCurrentSpeed();
@@ -39,6 +45,13 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.bottom_sheet_menu, container, false);
+
+        View topBar = view.findViewById(R.id.menu_top_bar);
+        View title = view.findViewById(R.id.menu_title);
+        topBar.setOnClickListener(v -> dismiss());
+        title.setOnClickListener(v -> dismiss());
+        setupHeaderSwipeToClose(topBar);
+        setupHeaderSwipeToClose(title);
 
         // Grid items
         view.findViewById(R.id.menu_sort_btn).setOnClickListener(v -> {
@@ -81,6 +94,11 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
+        view.findViewById(R.id.menu_exit_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onExitAppClicked();
+            dismiss();
+        });
+
         // Speed label
         if (listener != null) {
             TextView speedLabel = view.findViewById(R.id.menu_speed_label);
@@ -111,5 +129,60 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
     @Override
     public int getTheme() {
         return com.google.android.material.R.style.Theme_Material3_Dark_BottomSheetDialog;
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Dialog dialog = getDialog();
+        if (dialog != null) {
+            dialog.setCanceledOnTouchOutside(false);
+        }
+        if (!(dialog instanceof BottomSheetDialog)) {
+            return;
+        }
+
+        BottomSheetDialog bottomSheetDialog = (BottomSheetDialog) dialog;
+        View bottomSheet = bottomSheetDialog.findViewById(
+                com.google.android.material.R.id.design_bottom_sheet);
+        if (bottomSheet == null) {
+            return;
+        }
+
+        BottomSheetBehavior<View> behavior = BottomSheetBehavior.from(bottomSheet);
+        // Prevent whole-sheet drag conflicts. Only top bar tap closes the sheet.
+        behavior.setDraggable(false);
+        behavior.setHideable(true);
+        behavior.setSkipCollapsed(true);
+    }
+
+    private void setupHeaderSwipeToClose(View target) {
+        if (target == null) return;
+
+        final float thresholdPx = HEADER_SWIPE_CLOSE_THRESHOLD_DP
+                * requireContext().getResources().getDisplayMetrics().density;
+        final float[] downY = new float[1];
+        final float[] downX = new float[1];
+
+        target.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downY[0] = event.getRawY();
+                    downX[0] = event.getRawX();
+                    return false;
+                case MotionEvent.ACTION_MOVE:
+                case MotionEvent.ACTION_UP:
+                    float deltaY = event.getRawY() - downY[0];
+                    float deltaX = event.getRawX() - downX[0];
+                    boolean verticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.1f;
+                    if (verticalSwipe && deltaY >= thresholdPx) {
+                        dismiss();
+                        return true;
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        });
     }
 }
