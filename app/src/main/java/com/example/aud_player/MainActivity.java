@@ -34,6 +34,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.SubMenu;
 import android.view.View;
 import android.widget.Button;
@@ -56,6 +57,7 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.Fragment;
 
 import com.google.android.material.button.MaterialButton;
 
@@ -117,6 +119,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
     private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
     private static final int PLAYBACK_MODE_RANDOM = 2;
+    private static final float MORE_BUTTON_SWIPE_THRESHOLD_DP = 22f;
+    // Allow swipe gesture only from the small lower area (bottom ~18% of screen).
+    private static final float BOTTOM_SWIPE_START_REGION_RATIO = 0.82f;
+    private float bottomSwipeStartX = 0f;
+    private float bottomSwipeStartY = 0f;
+    private boolean bottomSwipeHandled = false;
 
     private int currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST; // Default is list play
     private Uri lastPlayedUri = null; // Track last played song for random mode
@@ -554,12 +562,20 @@ public class MainActivity extends AppCompatActivity {
             ImageButton appBarMenuButton = findViewById(R.id.appBarMenuButton);
             if (appBarMenuButton != null) {
                 appBarMenuButton.setOnClickListener(v -> showBottomSheetMenu());
+                setupMoreButtonSwipeGesture(appBarMenuButton);
             }
 
             // Mini player click to expand
             if (miniPlayerBar != null) {
                 miniPlayerBar.setOnClickListener(v -> togglePlayerExpansion());
             }
+
+            // Swipe up/down on bottom area to open/close More options.
+            View playerPanel = findViewById(R.id.playerPanel);
+            setupBottomPanelSwipeGesture(playerPanel);
+            setupBottomPanelSwipeGesture(miniPlayerBar);
+            setupBottomPanelSwipeGesture(expandedPlayerControls);
+            setupBottomPanelSwipeGesture(bottomNavigation);
 
             // Mini play/pause
             if (miniPlayPauseBtn != null) {
@@ -669,6 +685,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Add the menu button listener — now opens bottom sheet
         menuButton.setOnClickListener(v -> showBottomSheetMenu());
+        setupMoreButtonSwipeGesture(menuButton);
 
         // Hook seek/prev/next if views are ready
         try {
@@ -1300,6 +1317,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showBottomSheetMenu() {
+        if (isBottomSheetMenuVisible()) {
+            return;
+        }
+
         MenuBottomSheet menuSheet = new MenuBottomSheet();
         menuSheet.setMenuListener(new MenuBottomSheet.MenuListener() {
             @Override
@@ -1367,6 +1388,126 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         menuSheet.show(getSupportFragmentManager(), "MenuBottomSheet");
+    }
+
+    private void setupMoreButtonSwipeGesture(View moreButton) {
+        if (moreButton == null) {
+            return;
+        }
+
+        final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
+                * getResources().getDisplayMetrics().density;
+        final float[] downY = new float[1];
+
+        moreButton.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downY[0] = event.getRawY();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    float deltaY = event.getRawY() - downY[0];
+                    if (Math.abs(deltaY) >= swipeThresholdPx) {
+                        if (deltaY < 0) {
+                            showBottomSheetMenu();
+                        } else {
+                            dismissBottomSheetMenu();
+                        }
+                        return true;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        });
+    }
+
+    private void setupBottomPanelSwipeGesture(View playerPanel) {
+        if (playerPanel == null) {
+            return;
+        }
+
+        final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
+                * getResources().getDisplayMetrics().density;
+        final float[] downY = new float[1];
+
+        playerPanel.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downY[0] = event.getRawY();
+                    break;
+                case MotionEvent.ACTION_UP:
+                    float deltaY = event.getRawY() - downY[0];
+                    if (Math.abs(deltaY) >= swipeThresholdPx) {
+                        if (deltaY < 0) {
+                            showBottomSheetMenu();
+                        } else {
+                            dismissBottomSheetMenu();
+                        }
+                        return true;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        });
+    }
+
+    private boolean isBottomSheetMenuVisible() {
+        Fragment fragment = getSupportFragmentManager().findFragmentByTag("MenuBottomSheet");
+        return fragment != null && fragment.isVisible();
+    }
+
+    private void dismissBottomSheetMenu() {
+        Fragment fragment = getSupportFragmentManager().findFragmentByTag("MenuBottomSheet");
+        if (fragment instanceof MenuBottomSheet && fragment.isVisible()) {
+            ((MenuBottomSheet) fragment).dismiss();
+        }
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (ev != null) {
+            final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
+                    * getResources().getDisplayMetrics().density;
+            float startRegionTop = getWindow().getDecorView().getHeight() * BOTTOM_SWIPE_START_REGION_RATIO;
+
+            switch (ev.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    bottomSwipeStartX = ev.getRawX();
+                    bottomSwipeStartY = ev.getRawY();
+                    bottomSwipeHandled = false;
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                case MotionEvent.ACTION_UP:
+                    float deltaX = ev.getRawX() - bottomSwipeStartX;
+                    float deltaY = ev.getRawY() - bottomSwipeStartY;
+
+                    boolean startedNearBottom = bottomSwipeStartY >= startRegionTop;
+                    boolean isVerticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.15f;
+
+                    if (!bottomSwipeHandled && startedNearBottom && isVerticalSwipe
+                            && Math.abs(deltaY) >= swipeThresholdPx) {
+                        if (deltaY < 0) {
+                            showBottomSheetMenu();
+                        } else {
+                            dismissBottomSheetMenu();
+                        }
+                        bottomSwipeHandled = true;
+                    }
+                    if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+                        bottomSwipeHandled = false;
+                    }
+                    break;
+                case MotionEvent.ACTION_CANCEL:
+                    bottomSwipeHandled = false;
+                    break;
+                default:
+                    break;
+            }
+        }
+        return super.dispatchTouchEvent(ev);
     }
 
     private void showSortBottomSheet() {
@@ -1467,6 +1608,17 @@ public class MainActivity extends AppCompatActivity {
         if (secondAudioActive) {
             options.add("Adjust Volume Balance");
             actions.add(this::showBalanceDialog);
+
+            options.add(useIndividualPlaybackSpeeds ? "Disable Individual Speeds" : "Enable Individual Speeds");
+            actions.add(this::toggleIndividualPlaybackSpeeds);
+
+            if (useIndividualPlaybackSpeeds) {
+                options.add("Set Primary Speed");
+                actions.add(() -> showIndividualSpeedDialog(true));
+
+                options.add("Set Secondary Speed");
+                actions.add(() -> showIndividualSpeedDialog(false));
+            }
 
             options.add("Sync Track Positions");
             actions.add(this::showPositionSyncDialog);
