@@ -499,7 +499,9 @@ public class AudioPlaybackService extends Service {
 
     private Notification createNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
-        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // If the activity was swiped away from recents, tapping the notification
+        // will recreate it. CLEAR_TOP helps reuse an existing instance if present.
+        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
         // Use FLAG_IMMUTABLE on API 31+; FLAG_UPDATE_CURRENT alone on older APIs
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
@@ -568,6 +570,27 @@ public class AudioPlaybackService extends Service {
         }
 
         return builder.build();
+    }
+
+    // Expose current state so the Activity can restore UI after it was killed.
+    public MediaPlayer getMediaPlayer() {
+        return mediaPlayer;
+    }
+
+    public MediaPlayer getSecondMediaPlayer() {
+        return secondMediaPlayer;
+    }
+
+    public String getCurrentTitle() {
+        return currentTitle;
+    }
+
+    public boolean isPlaying() {
+        return isPlaying;
+    }
+
+    public boolean isSecondAudioActive() {
+        return secondAudioActive;
     }
 
     @Override

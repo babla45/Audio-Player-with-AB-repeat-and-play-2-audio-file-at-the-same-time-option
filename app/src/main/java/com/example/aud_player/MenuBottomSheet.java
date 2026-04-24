@@ -6,7 +6,6 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -98,6 +97,17 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
+        View addToPlaylistButton = view.findViewById(R.id.menu_add_to_playlist_btn);
+        boolean canAddToPlaylist = listener != null && listener.hasSongSelected();
+        addToPlaylistButton.setEnabled(canAddToPlaylist);
+        addToPlaylistButton.setAlpha(canAddToPlaylist ? 1f : 0.45f);
+        addToPlaylistButton.setOnClickListener(v -> {
+            if (listener != null && listener.hasSongSelected()) {
+                listener.onAddToPlaylistClicked();
+                dismiss();
+            }
+        });
+
         // Speed label
         if (listener != null) {
             TextView speedLabel = view.findViewById(R.id.menu_speed_label);
@@ -109,17 +119,6 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             if (mode == 0) modeLabel.setText("Repeat");
             else if (mode == 1) modeLabel.setText("Next");
             else modeLabel.setText("Shuffle");
-        }
-
-        LinearLayout addToPlaylistRow = view.findViewById(R.id.menu_add_to_playlist_row);
-
-        // Add to playlist
-        if (listener != null && listener.hasSongSelected()) {
-            addToPlaylistRow.setVisibility(View.VISIBLE);
-            addToPlaylistRow.setOnClickListener(v -> {
-                listener.onAddToPlaylistClicked();
-                dismiss();
-            });
         }
 
         return view;

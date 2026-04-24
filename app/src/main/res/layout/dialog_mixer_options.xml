@@ -2,6 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="@drawable/bg_mixer_panel"
     android:fillViewport="true">
 
     <LinearLayout
@@ -20,9 +21,9 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Mixer Mode"
+                android:text="Mixer"
                 android:textStyle="bold"
-                android:textSize="18sp"
+                android:textSize="17sp"
                 android:textColor="@color/text_primary" />
 
             <androidx.appcompat.widget.SwitchCompat
@@ -35,19 +36,21 @@
             android:id="@+id/mixerStatusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:textColor="@color/text_secondary"
-            android:textSize="13sp"
-            android:text="Mix two tracks with independent controls." />
+            android:textSize="12sp"
+            android:text="OFF" />
 
         <TextView
             android:id="@+id/mixerSecondTrackText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textColor="@color/text_tertiary"
+            android:layout_marginTop="4dp"
+            android:textColor="@color/text_secondary"
             android:textSize="12sp"
-            android:text="Second track: Not selected" />
+            android:text="2nd: Not selected"
+            android:maxLines="1"
+            android:ellipsize="end" />
 
         <View
             android:layout_width="match_parent"
@@ -60,28 +63,28 @@
             android:id="@+id/mixerSelectSecondButton"
             android:layout_width="match_parent"
             android:layout_height="44dp"
-            android:text="Select Second Audio" />
+            android:text="Select 2nd Track" />
 
         <Button
             android:id="@+id/mixerBalanceButton"
             android:layout_width="match_parent"
             android:layout_height="44dp"
             android:layout_marginTop="8dp"
-            android:text="Adjust Volume Balance" />
+            android:text="Balance" />
 
         <Button
             android:id="@+id/mixerSyncButton"
             android:layout_width="match_parent"
             android:layout_height="44dp"
             android:layout_marginTop="8dp"
-            android:text="Sync Track Positions" />
+            android:text="Sync Position" />
 
         <Button
             android:id="@+id/mixerToggleIndividualSpeedButton"
             android:layout_width="match_parent"
             android:layout_height="44dp"
             android:layout_marginTop="8dp"
-            android:text="Enable Individual Speeds" />
+            android:text="Individual Speeds" />
 
         <LinearLayout
             android:id="@+id/mixerIndividualSpeedRow"
@@ -95,7 +98,7 @@
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:text="Primary Speed" />
+                android:text="Speed 1" />
 
             <Button
                 android:id="@+id/mixerSecondarySpeedButton"
@@ -103,7 +106,7 @@
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp"
-                android:text="Secondary Speed" />
+                android:text="Speed 2" />
         </LinearLayout>
 
         <Button
@@ -111,7 +114,7 @@
             android:layout_width="match_parent"
             android:layout_height="44dp"
             android:layout_marginTop="8dp"
-            android:text="Clear Second Audio" />
+            android:text="Clear 2nd Track" />
 
         <Button
             android:id="@+id/mixerSavedButton"

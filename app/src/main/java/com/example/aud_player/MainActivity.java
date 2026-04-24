@@ -89,6 +89,9 @@ import androidx.documentfile.provider.DocumentFile;
 import android.app.PendingIntent;
 import android.content.IntentSender;
 import android.widget.ScrollView;
+import android.view.Window;
+import android.view.WindowManager;
+import android.graphics.drawable.ColorDrawable;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -172,6 +175,10 @@ public class MainActivity extends AppCompatActivity {
 
     private AudioPlaybackService audioService;
     private boolean serviceBound = false;
+
+    private static final String PREFS_NAME = "audio_player_prefs";
+    private static final String PREF_NOW_PLAYING_URI = "now_playing_uri";
+    private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -282,7 +289,11 @@ public class MainActivity extends AppCompatActivity {
             audioService = binder.getService();
             serviceBound = true;
 
-            // Pass the current MediaPlayer instances to the service with title
+            // If we were killed (e.g. swiped away) while the foreground service kept playing,
+            // restore the UI by adopting the already-playing MediaPlayer from the service.
+            syncFromServiceToUi();
+
+            // Normal flow: pass the current MediaPlayer instances to the service with title
             if (mediaPlayer != null && secondMediaPlayer != null) {
                 String currentTitle = fileNameText != null ? fileNameText.getText().toString() : "Audio Player";
                 audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, currentTitle);
@@ -306,6 +317,7 @@ public class MainActivity extends AppCompatActivity {
                         String fileName = getFileNameFromUri(uri);
                         fileNameText.setText(fileName);
                         updateMiniPlayer();
+                        saveNowPlayingPrefs();
 
                         // Take persistent permission for this URI
                         try {
@@ -401,7 +413,7 @@ public class MainActivity extends AppCompatActivity {
         playlistDbHelper = new PlaylistDatabaseHelper(this);
 
         // Load seek settings from SharedPreferences
-        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int forwardSeconds = prefs.getInt("seek_forward_seconds", 10); // Default 10 sec
         int backwardSeconds = prefs.getInt("seek_backward_seconds", 10); // Default 10 sec
         seekForwardMs = forwardSeconds * 1000;
@@ -447,6 +459,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Handle startup intents such as "open this playlist".
         handleIntent(getIntent());
+
+        // Best-effort restore of last known now-playing metadata (UI will fully sync once bound).
+        restoreNowPlayingPrefsToUi();
 
         // Bind to the service
         Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
@@ -504,6 +519,91 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         ContextCompat.registerReceiver(this, pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"), ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void saveNowPlayingPrefs() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putString(PREF_NOW_PLAYING_URI, selectedAudioUri != null ? selectedAudioUri.toString() : null);
+            editor.putString(PREF_NOW_PLAYING_TITLE, fileNameText != null ? fileNameText.getText().toString() : null);
+            editor.apply();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to save now playing prefs", e);
+        }
+    }
+
+    private void restoreNowPlayingPrefsToUi() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String uriStr = prefs.getString(PREF_NOW_PLAYING_URI, null);
+            String title = prefs.getString(PREF_NOW_PLAYING_TITLE, null);
+
+            if (selectedAudioUri == null && uriStr != null) {
+                try {
+                    selectedAudioUri = Uri.parse(uriStr);
+                } catch (Exception ignored) {}
+            }
+
+            if (fileNameText != null) {
+                String current = fileNameText.getText() != null ? fileNameText.getText().toString() : "";
+                if ((current == null || current.isEmpty() || "No file selected".equalsIgnoreCase(current)) && title != null && !title.isEmpty()) {
+                    fileNameText.setText(title);
+                }
+            }
+            updateMiniPlayer();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to restore now playing prefs", e);
+        }
+    }
+
+    private void syncFromServiceToUi() {
+        if (!serviceBound || audioService == null) return;
+
+        try {
+            MediaPlayer svcMain = audioService.getMediaPlayer();
+            MediaPlayer svcSecond = audioService.getSecondMediaPlayer();
+
+            if (mediaPlayer == null && svcMain != null) {
+                mediaPlayer = svcMain;
+            }
+            if (secondMediaPlayer == null && svcSecond != null) {
+                secondMediaPlayer = svcSecond;
+            }
+
+            if (svcMain != null) {
+                isPlaying = audioService.isPlaying();
+
+                String titleFromSvc = audioService.getCurrentTitle();
+                if (fileNameText != null) {
+                    String current = fileNameText.getText() != null ? fileNameText.getText().toString() : "";
+                    if ((current == null || current.isEmpty() || current.contains("No song")) &&
+                            titleFromSvc != null && !titleFromSvc.isEmpty()) {
+                        fileNameText.setText(titleFromSvc);
+                    }
+                }
+
+                restoreNowPlayingPrefsToUi();
+
+                int duration = 0;
+                int pos = 0;
+                try { duration = svcMain.getDuration(); } catch (Exception ignored) {}
+                try { pos = svcMain.getCurrentPosition(); } catch (Exception ignored) {}
+
+                if (seekBar != null && duration > 0) seekBar.setMax(duration);
+                if (seekBar != null && pos >= 0) seekBar.setProgress(pos);
+                if (duration > 0) updateTimeText(pos, duration);
+
+                safeSetImageResource(playPauseButton, isPlaying ? R.drawable.ic_pause_improved : R.drawable.ic_play_improved);
+                updateMiniPlayer();
+
+                if (isPlaying) {
+                    updateSeekBar();
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to sync from service to UI", e);
+        }
     }
 
     private void initializeViews() {
@@ -584,12 +684,10 @@ public class MainActivity extends AppCompatActivity {
                 miniPlayerBar.setOnClickListener(v -> togglePlayerExpansion());
             }
 
-            // Swipe up/down on bottom area to open/close More options.
-            View playerPanel = findViewById(R.id.playerPanel);
-            setupBottomPanelSwipeGesture(playerPanel);
-            setupBottomPanelSwipeGesture(miniPlayerBar);
-            setupBottomPanelSwipeGesture(expandedPlayerControls);
-            setupBottomPanelSwipeGesture(bottomNavigation);
+            // Gesture zones:
+            // - Red area (mini player): swipe up/down to expand/collapse now-playing.
+            // - Green area (bottom nav): swipe up to open More options.
+            setupMiniPlayerSwipeGesture(miniPlayerBar);
 
             // Mini play/pause
             if (miniPlayPauseBtn != null) {
@@ -606,6 +704,7 @@ public class MainActivity extends AppCompatActivity {
 
             // Bottom Navigation
             bottomNavigation = findViewById(R.id.bottomNavigation);
+            setupBottomNavSwipeGesture(bottomNavigation);
             if (bottomNavigation != null) {
                 bottomNavigation.setOnItemSelectedListener(item -> {
                     int id = item.getItemId();
@@ -1497,6 +1596,72 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void setupMiniPlayerSwipeGesture(View target) {
+        if (target == null) {
+            return;
+        }
+
+        final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
+                * getResources().getDisplayMetrics().density;
+        final float[] downX = new float[1];
+        final float[] downY = new float[1];
+
+        target.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX[0] = event.getRawX();
+                    downY[0] = event.getRawY();
+                    return false;
+                case MotionEvent.ACTION_UP:
+                    float deltaX = event.getRawX() - downX[0];
+                    float deltaY = event.getRawY() - downY[0];
+                    boolean verticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.15f;
+                    if (verticalSwipe && Math.abs(deltaY) >= swipeThresholdPx) {
+                        if (deltaY < 0) {
+                            setPlayerExpanded(true);
+                        } else {
+                            setPlayerExpanded(false);
+                        }
+                        return true;
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        });
+    }
+
+    private void setupBottomNavSwipeGesture(View target) {
+        if (target == null) {
+            return;
+        }
+
+        final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
+                * getResources().getDisplayMetrics().density;
+        final float[] downX = new float[1];
+        final float[] downY = new float[1];
+
+        target.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX[0] = event.getRawX();
+                    downY[0] = event.getRawY();
+                    return false;
+                case MotionEvent.ACTION_UP:
+                    float deltaX = event.getRawX() - downX[0];
+                    float deltaY = event.getRawY() - downY[0];
+                    boolean verticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.15f;
+                    if (verticalSwipe && deltaY <= -swipeThresholdPx) {
+                        showBottomSheetMenu();
+                        return true;
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        });
+    }
+
     private boolean isBottomSheetMenuVisible() {
         Fragment fragment = getSupportFragmentManager().findFragmentByTag("MenuBottomSheet");
         return fragment != null && fragment.isVisible();
@@ -1511,10 +1676,15 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        if (ev != null && !isBottomSheetMenuVisible()) {
+        if (ev != null && !isBottomSheetMenuVisible() && bottomNavigation != null) {
             final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
                     * getResources().getDisplayMetrics().density;
-            float startRegionTop = getWindow().getDecorView().getHeight() * BOTTOM_SWIPE_START_REGION_RATIO;
+            int[] navLocation = new int[2];
+            bottomNavigation.getLocationOnScreen(navLocation);
+            int navTop = navLocation[1];
+            int navBottom = navTop + bottomNavigation.getHeight();
+            int navLeft = navLocation[0];
+            int navRight = navLeft + bottomNavigation.getWidth();
 
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -1527,16 +1697,14 @@ public class MainActivity extends AppCompatActivity {
                     float deltaX = ev.getRawX() - bottomSwipeStartX;
                     float deltaY = ev.getRawY() - bottomSwipeStartY;
 
-                    boolean startedNearBottom = bottomSwipeStartY >= startRegionTop;
+                    boolean startedInBottomNav =
+                            bottomSwipeStartX >= navLeft && bottomSwipeStartX <= navRight
+                                    && bottomSwipeStartY >= navTop && bottomSwipeStartY <= navBottom;
                     boolean isVerticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.15f;
 
-                    if (!bottomSwipeHandled && startedNearBottom && isVerticalSwipe
-                            && Math.abs(deltaY) >= swipeThresholdPx) {
-                        if (deltaY < 0) {
-                            showBottomSheetMenu();
-                        } else {
-                            dismissBottomSheetMenu();
-                        }
+                    if (!bottomSwipeHandled && startedInBottomNav && isVerticalSwipe
+                            && deltaY <= -swipeThresholdPx) {
+                        showBottomSheetMenu();
                         bottomSwipeHandled = true;
                     }
                     if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
@@ -1664,14 +1832,14 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (!mixerModeActive) {
-                mixerStatusText.setText("Mixer is OFF. Enable mixer mode to blend two tracks.");
+                mixerStatusText.setText("OFF");
             } else if (!secondAudioActive) {
-                mixerStatusText.setText("Mixer is ON. Add a second track to unlock mix controls.");
+                mixerStatusText.setText("ON - No 2nd track");
             } else {
-                mixerStatusText.setText("Mixer ready. Balance volumes, sync positions, and tune each speed.");
+                mixerStatusText.setText("ON - Ready");
             }
 
-            mixerSecondTrackText.setText("Second track: " + secondTrackName);
+            mixerSecondTrackText.setText("2nd: " + secondTrackName);
 
             boolean hasSecondTrack = secondAudioActive;
             balanceButton.setEnabled(hasSecondTrack);
@@ -1689,7 +1857,6 @@ public class MainActivity extends AppCompatActivity {
         updateUiState.run();
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Mixer Controls")
                 .setView(dialogView)
                 .setNegativeButton("Close", null)
                 .create();
@@ -1754,6 +1921,17 @@ public class MainActivity extends AppCompatActivity {
         savedMixerButton.setOnClickListener(v -> showSavedMixerDialog());
 
         dialog.show();
+        dialog.setCanceledOnTouchOutside(true);
+        dialog.setCancelable(true);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(android.graphics.Color.TRANSPARENT));
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.gravity = Gravity.END | Gravity.BOTTOM;
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.82f);
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+            window.setAttributes(params);
+        }
     }
 
     private void showEqualizerPanel() {
@@ -2174,7 +2352,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void togglePlayerExpansion() {
-        playerExpanded = !playerExpanded;
+        setPlayerExpanded(!playerExpanded);
+    }
+
+    private void setPlayerExpanded(boolean expanded) {
+        playerExpanded = expanded;
         if (expandedPlayerControls != null) {
             expandedPlayerControls.setVisibility(playerExpanded ? View.VISIBLE : View.GONE);
         }
@@ -3189,6 +3371,7 @@ public class MainActivity extends AppCompatActivity {
         String fileName = audioFile.getTitle();
         fileNameText.setText(fileName);
         updateMiniPlayer();
+        saveNowPlayingPrefs();
 
         // Set flag to auto-play after preparation
         shouldAutoPlay = true;
