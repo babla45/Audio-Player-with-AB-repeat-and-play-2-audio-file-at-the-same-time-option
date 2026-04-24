@@ -516,8 +516,8 @@
         app:labelVisibilityMode="labeled"
         app:itemIconTint="@color/text_tertiary"
         app:itemTextColor="@color/text_tertiary"
-        app:itemPaddingTop="8dp"
-        app:itemPaddingBottom="8dp"
+        app:itemPaddingTop="16dp"
+        app:itemPaddingBottom="16dp"
         app:itemActiveIndicatorStyle="@style/Widget.Material3.BottomNavigationView.ActiveIndicator" />
 
 </LinearLayout>

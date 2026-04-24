@@ -17,6 +17,10 @@ import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.PlaybackParams;
+import android.media.audiofx.AudioEffect;
+import android.media.audiofx.BassBoost;
+import android.media.audiofx.Equalizer;
+import android.media.audiofx.Virtualizer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -81,6 +85,7 @@ import android.content.ContentValues;
 import androidx.documentfile.provider.DocumentFile;
 import android.app.PendingIntent;
 import android.content.IntentSender;
+import android.widget.ScrollView;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -182,6 +187,11 @@ public class MainActivity extends AppCompatActivity {
 
     // Add this variable declaration with your other media player variables
     private MediaPlayer mediaPlayer = null;
+    private Equalizer equalizer = null;
+    private BassBoost bassBoost = null;
+    private Virtualizer virtualizer = null;
+    private int equalizerSessionId = -1;
+    private int[] bandSeekIds = null;
 
     // Add these missing variables
     private Uri selectedAudioUri = null;
@@ -584,8 +594,7 @@ public class MainActivity extends AppCompatActivity {
                         startActivity(intent);
                         return true;
                     } else if (id == R.id.nav_mixer) {
-                        // Toggle mixer mode
-                        toggleMixerMode();
+                        showMixerOptionsDialog();
                         return true;
                     }
                     return false;
@@ -890,6 +899,9 @@ public class MainActivity extends AppCompatActivity {
             // Set listeners before preparing
             mediaPlayer.setOnPreparedListener(mp -> {
                 try {
+                    ensureEqualizerInitialized();
+                    openAudioEffectSession(mp.getAudioSessionId());
+
                     // Set the seekbar maximum to the total duration
                     int duration = mp.getDuration();
                     seekBar.setMax(duration);
@@ -971,6 +983,35 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleSongCompletion() {
+        // Keep A-B repeat authoritative even when MediaPlayer triggers completion
+        // (e.g. when point B is close to the end of the track).
+        if (abRepeatActive && pointA != -1 && pointB != -1 && pointB > pointA && mediaPlayer != null) {
+            try {
+                mediaPlayer.seekTo(pointA);
+                mediaPlayer.start();
+                isPlaying = true;
+                safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                updateMiniPlayer();
+
+                if (secondMediaPlayer != null && secondAudioActive) {
+                    float mainDuration = mediaPlayer.getDuration();
+                    float secondDuration = secondMediaPlayer.getDuration();
+                    if (mainDuration > 0 && secondDuration > 0) {
+                        float aPercentage = pointA / mainDuration;
+                        int secondPositionA = (int) (aPercentage * secondDuration);
+                        secondMediaPlayer.seekTo(secondPositionA);
+                    }
+                    if (!secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.start();
+                    }
+                }
+                updateSeekBar();
+                return;
+            } catch (Exception e) {
+                Log.e(TAG, "Error looping A-B repeat on completion", e);
+            }
+        }
+
         // If we're playing a playlist, handle playlist navigation
         if (currentPlaylistId != null && !currentPlaylistSongs.isEmpty()) {
             if (currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT) {
@@ -1183,7 +1224,7 @@ public class MainActivity extends AppCompatActivity {
                 int currentPosition = mediaPlayer.getCurrentPosition();
 
                 // Check if A-B repeat is active and we need to loop
-                if (abRepeatActive && pointA != -1 && pointB != -1) {
+                if (abRepeatActive && pointA != -1 && pointB != -1 && pointB > pointA) {
                     if (currentPosition >= pointB) {
                         // Reached point B, loop back to point A
                         mediaPlayer.seekTo(pointA);
@@ -1208,7 +1249,8 @@ public class MainActivity extends AppCompatActivity {
 
                 if (mediaPlayer.isPlaying()) {
                     runnable = () -> updateSeekBar();
-                    handler.postDelayed(runnable, 1000);
+                    // Keep A-B repeat responsive for short loop ranges.
+                    handler.postDelayed(runnable, 100);
                 }
             } catch (IllegalStateException e) {
                 Log.e(TAG, "Error updating seek bar", e);
@@ -1242,6 +1284,8 @@ public class MainActivity extends AppCompatActivity {
     private void releaseMediaPlayer() {
         if (mediaPlayer != null) {
             try {
+                closeAudioEffectSession(mediaPlayer.getAudioSessionId());
+                releaseEqualizerEffects();
                 mediaPlayer.release();
                 mediaPlayer = null;
             } catch (Exception e) {
@@ -1288,9 +1332,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onPlaylistsClicked() {
-                Intent intent = new Intent(MainActivity.this, PlaylistActivity.class);
-                startActivity(intent);
+            public void onEqualizerClicked() {
+                showEqualizerPanel();
             }
 
             @Override
@@ -1304,28 +1347,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onMixerSelectClicked() {
-                selectSecondAudio();
-            }
-
-            @Override
-            public void onMixerBalanceClicked() {
-                showBalanceDialog();
-            }
-
-            @Override
-            public void onMixerClearClicked() {
-                clearSecondAudio();
-            }
-
-            @Override
             public void onAddToPlaylistClicked() {
                 showAddToPlaylistDialog();
-            }
-
-            @Override
-            public boolean isMixerActive() {
-                return secondAudioActive;
             }
 
             @Override
@@ -1429,6 +1452,450 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         speedSheet.show(getSupportFragmentManager(), "SpeedBottomSheet");
+    }
+
+    private void showMixerOptionsDialog() {
+        List<String> options = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+
+        options.add(mixerModeActive ? "Disable Mixer Mode" : "Enable Mixer Mode");
+        actions.add(this::toggleMixerMode);
+
+        options.add("Select Second Audio");
+        actions.add(this::selectSecondAudio);
+
+        if (secondAudioActive) {
+            options.add("Adjust Volume Balance");
+            actions.add(this::showBalanceDialog);
+
+            options.add("Sync Track Positions");
+            actions.add(this::showPositionSyncDialog);
+
+            options.add("Clear Second Audio");
+            actions.add(this::clearSecondAudio);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Mixer Options")
+                .setItems(options.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
+                .show();
+    }
+
+    private void showEqualizerPanel() {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Play a song first to open Equalizer", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int audioSessionId = mediaPlayer.getAudioSessionId();
+        openAudioEffectSession(audioSessionId);
+
+        if (!ensureEqualizerInitialized() || equalizer == null) {
+            Toast.makeText(this, "Unable to initialize equalizer", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            short[] bandRange = equalizer.getBandLevelRange();
+            short minLevel = bandRange[0];
+            short maxLevel = bandRange[1];
+
+            ScrollView scrollView = new ScrollView(this);
+            LinearLayout container = new LinearLayout(this);
+            container.setOrientation(LinearLayout.VERTICAL);
+            int padding = (int) (16 * getResources().getDisplayMetrics().density);
+            container.setPadding(padding, padding, padding, padding);
+            scrollView.addView(container);
+
+            TextView titleInfo = new TextView(this);
+            titleInfo.setText("Adjust bands for current track");
+            titleInfo.setTextSize(14);
+            container.addView(titleInfo);
+
+            LinearLayout presetRow = new LinearLayout(this);
+            presetRow.setOrientation(LinearLayout.HORIZONTAL);
+            presetRow.setPadding(0, padding / 2, 0, padding / 2);
+
+            Button rockBtn = new Button(this);
+            rockBtn.setText("Rock");
+            rockBtn.setOnClickListener(v -> {
+                applyCustomEqualizerPreset("Rock");
+                syncEqualizerSeekBars(scrollView);
+            });
+            presetRow.addView(rockBtn);
+
+            Button softBtn = new Button(this);
+            softBtn.setText("Soft");
+            softBtn.setOnClickListener(v -> {
+                applyCustomEqualizerPreset("Soft");
+                syncEqualizerSeekBars(scrollView);
+            });
+            presetRow.addView(softBtn);
+
+            Button popBtn = new Button(this);
+            popBtn.setText("Pop");
+            popBtn.setOnClickListener(v -> {
+                applyCustomEqualizerPreset("Pop");
+                syncEqualizerSeekBars(scrollView);
+            });
+            presetRow.addView(popBtn);
+
+            Button jazzBtn = new Button(this);
+            jazzBtn.setText("Jazz");
+            jazzBtn.setOnClickListener(v -> {
+                applyCustomEqualizerPreset("Jazz");
+                syncEqualizerSeekBars(scrollView);
+            });
+            presetRow.addView(jazzBtn);
+
+            Button flatBtn = new Button(this);
+            flatBtn.setText("Flat");
+            flatBtn.setOnClickListener(v -> {
+                resetEqualizerLevels();
+                syncEqualizerSeekBars(scrollView);
+            });
+            presetRow.addView(flatBtn);
+
+            container.addView(presetRow);
+
+            if (equalizer.getNumberOfPresets() > 0) {
+                Button devicePresetBtn = new Button(this);
+                devicePresetBtn.setText("Device Preset");
+                devicePresetBtn.setOnClickListener(v -> showDevicePresetDialog());
+                container.addView(devicePresetBtn);
+            }
+
+            short bands = equalizer.getNumberOfBands();
+            bandSeekIds = new int[bands];
+            for (short band = 0; band < bands; band++) {
+                int centerHz = equalizer.getCenterFreq(band) / 1000;
+                short currentLevel = equalizer.getBandLevel(band);
+
+                TextView bandLabel = new TextView(this);
+                bandLabel.setText(String.format(Locale.getDefault(), "Band %d (%d Hz)", band + 1, centerHz));
+                bandLabel.setPadding(0, padding / 2, 0, padding / 4);
+                container.addView(bandLabel);
+
+                SeekBar bandSeek = new SeekBar(this);
+                bandSeek.setMax(maxLevel - minLevel);
+                bandSeek.setProgress(currentLevel - minLevel);
+                int seekId = View.generateViewId();
+                bandSeek.setId(seekId);
+                bandSeekIds[band] = seekId;
+                short targetBand = band;
+                bandSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                    @Override
+                    public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                        if (fromUser && equalizer != null) {
+                            try {
+                                equalizer.setEnabled(true);
+                                equalizer.setBandLevel(targetBand, (short) (progress + minLevel));
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to set equalizer band level", e);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                    @Override
+                    public void onStopTrackingTouch(SeekBar seekBar) {}
+                });
+                container.addView(bandSeek);
+            }
+
+            TextView bassLabel = new TextView(this);
+            bassLabel.setText("Bass Boost");
+            bassLabel.setPadding(0, padding, 0, padding / 4);
+            container.addView(bassLabel);
+
+            SeekBar bassSeek = new SeekBar(this);
+            bassSeek.setMax(1000);
+            bassSeek.setProgress(bassBoost != null ? bassBoost.getRoundedStrength() : 0);
+            bassSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (fromUser && bassBoost != null) {
+                        try {
+                            bassBoost.setStrength((short) progress);
+                            bassBoost.setEnabled(progress > 0);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to set bass boost", e);
+                        }
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {}
+            });
+            container.addView(bassSeek);
+
+            TextView virtualizerLabel = new TextView(this);
+            virtualizerLabel.setText("Virtualizer");
+            virtualizerLabel.setPadding(0, padding, 0, padding / 4);
+            container.addView(virtualizerLabel);
+
+            SeekBar virtualizerSeek = new SeekBar(this);
+            virtualizerSeek.setMax(1000);
+            virtualizerSeek.setProgress(virtualizer != null ? virtualizer.getRoundedStrength() : 0);
+            virtualizerSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (fromUser && virtualizer != null) {
+                        try {
+                            virtualizer.setStrength((short) progress);
+                            virtualizer.setEnabled(progress > 0);
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to set virtualizer", e);
+                        }
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {}
+            });
+            container.addView(virtualizerSeek);
+
+            new AlertDialog.Builder(this)
+                    .setTitle("Equalizer")
+                    .setView(scrollView)
+                    .setPositiveButton("Close", null)
+                    .setNeutralButton("Reset", (dialog, which) -> {
+                        resetEqualizerLevels();
+                        syncEqualizerSeekBars(scrollView);
+                    })
+                    .show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open equalizer panel", e);
+            Toast.makeText(this, "Unable to open equalizer", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void openAudioEffectSession(int audioSessionId) {
+        if (audioSessionId <= 0) {
+            return;
+        }
+        try {
+            Intent openIntent = new Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION);
+            openIntent.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
+            openIntent.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
+            sendBroadcast(openIntent);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to broadcast open audio effect session", e);
+        }
+    }
+
+    private void closeAudioEffectSession(int audioSessionId) {
+        if (audioSessionId <= 0) {
+            return;
+        }
+        try {
+            Intent closeIntent = new Intent(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION);
+            closeIntent.putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId);
+            closeIntent.putExtra(AudioEffect.EXTRA_PACKAGE_NAME, getPackageName());
+            sendBroadcast(closeIntent);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to broadcast close audio effect session", e);
+        }
+    }
+
+    private boolean ensureEqualizerInitialized() {
+        if (mediaPlayer == null) {
+            return false;
+        }
+
+        try {
+            int sessionId = mediaPlayer.getAudioSessionId();
+            if (sessionId <= 0) {
+                return false;
+            }
+
+            if (equalizer != null && equalizerSessionId == sessionId) {
+                return true;
+            }
+
+            releaseEqualizerEffects();
+            equalizer = new Equalizer(0, sessionId);
+            equalizer.setEnabled(true);
+            Log.d(TAG, "Equalizer init: session=" + sessionId + ", bands=" + equalizer.getNumberOfBands());
+            if (!equalizer.hasControl()) {
+                Log.w(TAG, "Equalizer initialized without control for session " + sessionId);
+            }
+
+            bassBoost = new BassBoost(0, sessionId);
+            bassBoost.setEnabled(true);
+
+            virtualizer = new Virtualizer(0, sessionId);
+            virtualizer.setEnabled(true);
+
+            equalizerSessionId = sessionId;
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Unable to initialize audio effects", e);
+            releaseEqualizerEffects();
+            return false;
+        }
+    }
+
+    private void resetEqualizerLevels() {
+        if (equalizer == null) {
+            return;
+        }
+
+        try {
+            short bands = equalizer.getNumberOfBands();
+            for (short band = 0; band < bands; band++) {
+                equalizer.setBandLevel(band, (short) 0);
+            }
+            if (bassBoost != null) {
+                bassBoost.setStrength((short) 0);
+                bassBoost.setEnabled(false);
+            }
+            if (virtualizer != null) {
+                virtualizer.setStrength((short) 0);
+                virtualizer.setEnabled(false);
+            }
+            Toast.makeText(this, "Equalizer reset", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to reset equalizer", e);
+        }
+    }
+
+    private void applyCustomEqualizerPreset(String presetName) {
+        if (equalizer == null) {
+            return;
+        }
+
+        try {
+            short bands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            short max = range[1];
+            short min = range[0];
+            short boost = (short) (max * 0.6f);
+            short lightBoost = (short) (max * 0.35f);
+            short cut = (short) (min * 0.35f);
+
+            for (short band = 0; band < bands; band++) {
+                equalizer.setBandLevel(band, (short) 0);
+            }
+
+            for (short band = 0; band < bands; band++) {
+                float pos = bands == 1 ? 0f : (float) band / (float) (bands - 1);
+                short level = 0;
+                switch (presetName) {
+                    case "Rock":
+                        if (pos < 0.2f) level = lightBoost;
+                        else if (pos > 0.7f) level = boost;
+                        else if (pos > 0.45f && pos < 0.65f) level = cut;
+                        break;
+                    case "Soft":
+                        if (pos < 0.3f) level = (short) (lightBoost * 0.5f);
+                        else if (pos > 0.6f) level = (short) (lightBoost * 0.4f);
+                        break;
+                    case "Pop":
+                        if (pos < 0.2f || pos > 0.75f) level = lightBoost;
+                        else if (pos > 0.4f && pos < 0.6f) level = cut;
+                        break;
+                    case "Jazz":
+                        if (pos < 0.2f) level = (short) (lightBoost * 0.7f);
+                        else if (pos > 0.35f && pos < 0.65f) level = (short) (lightBoost * 0.6f);
+                        else if (pos > 0.8f) level = (short) (lightBoost * 0.5f);
+                        break;
+                    default:
+                        level = 0;
+                        break;
+                }
+                if (level > max) level = max;
+                if (level < min) level = min;
+                equalizer.setBandLevel(band, level);
+            }
+            equalizer.setEnabled(true);
+            Toast.makeText(this, presetName + " preset applied", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply preset: " + presetName, e);
+        }
+    }
+
+    private void showDevicePresetDialog() {
+        if (equalizer == null) {
+            return;
+        }
+        try {
+            short presetCount = equalizer.getNumberOfPresets();
+            if (presetCount <= 0) {
+                return;
+            }
+            String[] presetNames = new String[presetCount];
+            for (short i = 0; i < presetCount; i++) {
+                presetNames[i] = equalizer.getPresetName(i);
+            }
+
+            new AlertDialog.Builder(this)
+                    .setTitle("Device Presets")
+                    .setItems(presetNames, (dialog, which) -> {
+                        try {
+                            equalizer.usePreset((short) which);
+                            equalizer.setEnabled(true);
+                            Toast.makeText(this, "Preset: " + presetNames[which], Toast.LENGTH_SHORT).show();
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to apply device preset", e);
+                        }
+                    })
+                    .show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to show device presets", e);
+        }
+    }
+
+    private void syncEqualizerSeekBars(View rootView) {
+        if (equalizer == null || bandSeekIds == null) {
+            return;
+        }
+        try {
+            short[] bandRange = equalizer.getBandLevelRange();
+            short minLevel = bandRange[0];
+            short bands = equalizer.getNumberOfBands();
+            for (short band = 0; band < bands; band++) {
+                if (band >= bandSeekIds.length) {
+                    break;
+                }
+                View view = rootView.findViewById(bandSeekIds[band]);
+                if (view instanceof SeekBar) {
+                    short level = equalizer.getBandLevel(band);
+                    ((SeekBar) view).setProgress(level - minLevel);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to sync equalizer sliders", e);
+        }
+    }
+
+    private void releaseEqualizerEffects() {
+        try {
+            if (equalizer != null) {
+                equalizer.release();
+                equalizer = null;
+            }
+            if (bassBoost != null) {
+                bassBoost.release();
+                bassBoost = null;
+            }
+            if (virtualizer != null) {
+                virtualizer.release();
+                virtualizer = null;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to release audio effects", e);
+        } finally {
+            equalizerSessionId = -1;
+        }
     }
 
     private void togglePlayerExpansion() {
@@ -2229,6 +2696,11 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        if (mediaPlayer != null) {
+            closeAudioEffectSession(mediaPlayer.getAudioSessionId());
+        }
+        releaseEqualizerEffects();
+
         super.onDestroy();
     }
 
@@ -2547,6 +3019,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onShareFileClick(AudioFile audioFile) {
                 shareAudioFile(audioFile);
+            }
+
+            @Override
+            public void onAddToPlaylistClick(AudioFile audioFile) {
+                showAddToPlaylistDialog(audioFile);
             }
         });
 
@@ -3917,6 +4394,12 @@ public class MainActivity extends AppCompatActivity {
         try {
             int currentPosition = mediaPlayer.getCurrentPosition();
             pointA = currentPosition;
+
+            // If a previously set B is now invalid, clear B and disable repeat.
+            if (pointB != -1 && pointA >= pointB) {
+                pointB = -1;
+                abRepeatActive = false;
+            }
             String pointATime = formatTime(pointA);
 
             // Log point setting
@@ -3938,6 +4421,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
+            if (pointA == -1) {
+                Toast.makeText(this, "Set Point A first", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
             int currentPosition = mediaPlayer.getCurrentPosition();
 
             // Ensure point B is after point A
@@ -3956,9 +4444,8 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Point B set: " + pointBTime, Toast.LENGTH_SHORT).show();
             updateABRepeatIndicator();
 
-            // If both points are set, enable A-B repeat
             if (pointA != -1 && pointB != -1) {
-                enableABRepeat();
+                Toast.makeText(this, "Points set. Tap Enable to start A-B repeat", Toast.LENGTH_SHORT).show();
             }
         } catch (Exception e) {
             Log.e(TAG, "Error setting point B", e);
@@ -3997,6 +4484,19 @@ public class MainActivity extends AppCompatActivity {
             abRepeatActive = true;
             updateABRepeatIndicator();
             Toast.makeText(this, "A-B repeat active", Toast.LENGTH_SHORT).show();
+
+            // Start loop from A immediately for predictable behavior.
+            if (mediaPlayer != null) {
+                try {
+                    mediaPlayer.seekTo(pointA);
+                    if (!mediaPlayer.isPlaying() && isPlaying) {
+                        mediaPlayer.start();
+                    }
+                    updateSeekBar();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error enabling A-B repeat", e);
+                }
+            }
         }
     }
 
@@ -4028,6 +4528,22 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
             return;
         }
+        AudioFile currentAudio = new AudioFile(
+                fileNameText.getText().toString(),
+                totalTimeText.getText().toString(),
+                selectedAudioUri,
+                0,
+                0,
+                System.currentTimeMillis()
+        );
+        showAddToPlaylistDialog(currentAudio);
+    }
+
+    private void showAddToPlaylistDialog(AudioFile targetAudioFile) {
+        if (targetAudioFile == null || targetAudioFile.getUri() == null) {
+            Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         // Get all playlists
         List<Playlist> playlists = playlistDbHelper.getAllPlaylists();
@@ -4051,11 +4567,11 @@ public class MainActivity extends AppCompatActivity {
                 .setItems(playlistNames, (dialog, which) -> {
                     if (which == playlists.size()) {
                         // Create new playlist option selected
-                        showCreatePlaylistDialog();
+                        showCreatePlaylistDialog(targetAudioFile);
                     } else {
                         // Add to selected playlist
                         Playlist selectedPlaylist = playlists.get(which);
-                        addCurrentSongToPlaylist(selectedPlaylist);
+                        addSongToPlaylist(selectedPlaylist, targetAudioFile);
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -4066,6 +4582,22 @@ public class MainActivity extends AppCompatActivity {
      * Show dialog to create a new playlist and add the current song
      */
     private void showCreatePlaylistDialog() {
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        AudioFile currentAudio = new AudioFile(
+                fileNameText.getText().toString(),
+                totalTimeText.getText().toString(),
+                selectedAudioUri,
+                0,
+                0,
+                System.currentTimeMillis()
+        );
+        showCreatePlaylistDialog(currentAudio);
+    }
+
+    private void showCreatePlaylistDialog(AudioFile targetAudioFile) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Create Playlist");
 
@@ -4082,8 +4614,8 @@ public class MainActivity extends AppCompatActivity {
                 playlistDbHelper.createPlaylist(newPlaylist);
 
                 // If a song is selected, add it to the new playlist
-                if (selectedAudioUri != null) {
-                    addCurrentSongToPlaylist(newPlaylist);
+                if (targetAudioFile != null && targetAudioFile.getUri() != null) {
+                    addSongToPlaylist(newPlaylist, targetAudioFile);
                 }
 
                 Toast.makeText(this, "Playlist created", Toast.LENGTH_SHORT).show();
@@ -4112,6 +4644,13 @@ public class MainActivity extends AppCompatActivity {
 
         // Create audio file object
         AudioFile audioFile = new AudioFile(title, duration, selectedAudioUri, 0, fileSize, dateAdded);
+        addSongToPlaylist(playlist, audioFile);
+    }
+
+    private void addSongToPlaylist(Playlist playlist, AudioFile audioFile) {
+        if (audioFile == null || audioFile.getUri() == null) {
+            return;
+        }
 
         // Add to playlist
         long result = playlistDbHelper.addSongToPlaylist(playlist.getId(), audioFile);

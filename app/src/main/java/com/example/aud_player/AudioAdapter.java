@@ -57,6 +57,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         void onRenameFileClick(AudioFile audioFile);
         void onDeleteFileClick(AudioFile audioFile);
         void onShareFileClick(AudioFile audioFile);
+        void onAddToPlaylistClick(AudioFile audioFile);
     }
 
     public void setOnItemClickListener(OnItemClickListener listener) {
@@ -166,6 +167,9 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
                 return true;
             } else if (itemId == R.id.menu_share_file) {
                 optionsListener.onShareFileClick(audioFile);
+                return true;
+            } else if (itemId == R.id.menu_add_to_playlist) {
+                optionsListener.onAddToPlaylistClick(audioFile);
                 return true;
             }
             return false;

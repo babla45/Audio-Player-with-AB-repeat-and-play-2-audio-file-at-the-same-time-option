@@ -20,14 +20,10 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onABRepeatClicked();
         void onPlaybackModeClicked();
         void onSpeedClicked();
-        void onPlaylistsClicked();
+        void onEqualizerClicked();
         void onSettingsClicked();
         void onRefreshClicked();
-        void onMixerSelectClicked();
-        void onMixerBalanceClicked();
-        void onMixerClearClicked();
         void onAddToPlaylistClicked();
-        boolean isMixerActive();
         boolean hasSongSelected();
         float getCurrentSpeed();
         int getCurrentPlaybackMode();
@@ -70,8 +66,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
-        view.findViewById(R.id.menu_playlists_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onPlaylistsClicked();
+        view.findViewById(R.id.menu_equalizer_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onEqualizerClicked();
             dismiss();
         });
 
@@ -98,33 +94,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             else modeLabel.setText("Shuffle");
         }
 
-        // Mixer section
-        LinearLayout mixerOptions = view.findViewById(R.id.menu_mixer_options);
-        TextView mixerActionLabel = view.findViewById(R.id.menu_mixer_action_label);
         LinearLayout addToPlaylistRow = view.findViewById(R.id.menu_add_to_playlist_row);
-
-        if (listener != null && listener.isMixerActive()) {
-            mixerOptions.setVisibility(View.VISIBLE);
-            mixerActionLabel.setText("Active ✓");
-        } else {
-            mixerOptions.setVisibility(View.GONE);
-            mixerActionLabel.setText("Select 2nd");
-        }
-
-        view.findViewById(R.id.menu_mixer_select_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onMixerSelectClicked();
-            dismiss();
-        });
-
-        view.findViewById(R.id.menu_mixer_balance_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onMixerBalanceClicked();
-            dismiss();
-        });
-
-        view.findViewById(R.id.menu_mixer_clear_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onMixerClearClicked();
-            dismiss();
-        });
 
         // Add to playlist
         if (listener != null && listener.hasSongSelected()) {

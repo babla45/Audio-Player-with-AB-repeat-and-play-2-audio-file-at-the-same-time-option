@@ -102,6 +102,12 @@ public class PlaylistDetailActivity extends AppCompatActivity {
             public void onShareFileClick(AudioFile audioFile) {
                 shareAudioFile(audioFile);
             }
+
+            @Override
+            public void onAddToPlaylistClick(AudioFile audioFile) {
+                // Song is already in this playlist view; no action needed here.
+                Toast.makeText(PlaylistDetailActivity.this, "Use Add Songs to add tracks", Toast.LENGTH_SHORT).show();
+            }
         });
 
         playAllButton.setOnClickListener(v -> playAllSongs());

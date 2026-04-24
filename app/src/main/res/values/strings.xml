@@ -67,6 +67,7 @@
     <string name="rename_file">Rename</string>
     <string name="delete_file">Delete</string>
     <string name="share_file">Share</string>
+    <string name="add_to_playlist">Add to Playlist</string>
     <string name="file_details_title">File Details</string>
     <string name="file_title">Title</string>
     <string name="file_duration">Duration</string>
