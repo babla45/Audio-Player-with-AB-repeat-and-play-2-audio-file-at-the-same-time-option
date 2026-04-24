@@ -108,9 +108,8 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             if (holder.nowPlayingBar != null) {
                 holder.nowPlayingBar.setVisibility(View.VISIBLE);
             }
-            // Subtle accent surface background
-            holder.itemContainer.setBackgroundColor(
-                ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_surface));
+            // Gradient background for the currently playing row (keeps rounded corners + ripple)
+            holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item_playing);
             // Show equalizer icon overlay
             if (holder.nowPlayingIcon != null) {
                 holder.nowPlayingIcon.setVisibility(View.VISIBLE);

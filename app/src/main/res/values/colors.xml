@@ -41,10 +41,16 @@
     <color name="chip_selected_bg">#6C63FF</color>
     <color name="chip_unselected_bg">#252540</color>
     <color name="mini_player_bg">#1E1E38</color>
-    <color name="bottom_nav_bg">#141428</color>
-    <color name="bottom_sheet_bg">#1A1A2E</color>
+    <!-- Slightly darker than surface_900 so bottom nav is distinct -->
+    <color name="bottom_nav_bg">#101022</color>
+    <!-- Slightly darker than song list items (surface_800) for better separation -->
+    <color name="bottom_sheet_bg">#16162B</color>
     <color name="menu_grid_item_bg">#252540</color>
     <color name="divider">#2A2A45</color>
+    <!-- Subtle card outline used for list items -->
+    <color name="card_stroke">#332A2A45</color>
+    <!-- Separate the player panel from the list area -->
+    <color name="player_panel_bg">#121226</color>
     <color name="ripple_light">#20FFFFFF</color>
     <color name="icon_container_bg">#20888888</color>
     <color name="now_playing_glow">#806C63FF</color>

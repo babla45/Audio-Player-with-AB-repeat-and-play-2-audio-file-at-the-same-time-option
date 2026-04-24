@@ -53,7 +53,7 @@
                 android:src="@drawable/ic_now_playing"
                 android:contentDescription="Now playing"
                 android:visibility="gone"
-                android:background="@color/accent_primary_dim"
+                android:background="@drawable/bg_now_playing_icon_overlay"
                 app:tint="#FFFFFF" />
         </FrameLayout>
 

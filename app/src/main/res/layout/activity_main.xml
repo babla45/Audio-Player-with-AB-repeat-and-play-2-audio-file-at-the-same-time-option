@@ -156,66 +156,69 @@
         android:id="@+id/playerPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/surface_900"
+        android:background="@color/player_panel_bg"
         android:orientation="vertical">
 
         <!-- Mini Player Bar (always visible when song loaded) -->
+
+        <!-- Mini progress bar -->
         <LinearLayout
             android:id="@+id/miniPlayerBar"
             android:layout_width="match_parent"
             android:layout_height="64dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingHorizontal="16dp"
-            android:background="@drawable/bg_mini_player"
             android:layout_marginHorizontal="8dp"
             android:layout_marginTop="4dp"
+            android:background="@drawable/gradient_accent"
             android:clickable="true"
-            android:focusable="true">
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp">
 
             <!-- Music icon -->
             <FrameLayout
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="@drawable/bg_icon_container">
+
                 <ImageView
                     android:layout_width="20dp"
                     android:layout_height="20dp"
                     android:layout_gravity="center"
+                    android:contentDescription="Now playing"
                     android:src="@drawable/ic_music_note"
-                    app:tint="@color/accent_primary"
-                    android:contentDescription="Now playing" />
+                    app:tint="@color/accent_primary" />
             </FrameLayout>
 
             <!-- Song info -->
             <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginHorizontal="12dp"
                 android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginHorizontal="12dp">
+                android:orientation="vertical">
 
                 <TextView
                     android:id="@+id/miniPlayerTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="No song selected"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:textStyle="bold"
                     android:ellipsize="marquee"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true"
                     android:marqueeRepeatLimit="marquee_forever"
                     android:singleLine="true"
-                    android:focusable="true"
-                    android:focusableInTouchMode="true" />
+                    android:text="No song selected"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
 
                 <TextView
                     android:id="@+id/miniPlayerSubtitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_tertiary"
-                    android:singleLine="true" />
+                    android:singleLine="true"
+                    android:textColor="@color/white"
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <!-- Play/Pause mini button -->
@@ -223,25 +226,24 @@
                 android:id="@+id/miniPlayPauseBtn"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:src="@drawable/ic_play_improved"
-                app:tint="@color/text_primary"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Play/Pause"
-                android:padding="8dp" />
+                android:padding="8dp"
+                android:src="@drawable/ic_play_improved"
+                app:tint="@color/text_primary" />
 
             <!-- Expand arrow -->
             <ImageView
                 android:id="@+id/expandPlayerBtn"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
-                android:src="@drawable/ic_chevron_down"
-                app:tint="@color/text_tertiary"
-                android:rotation="180"
+                android:layout_marginStart="4dp"
                 android:contentDescription="Expand player"
-                android:layout_marginStart="4dp" />
+                android:rotation="180"
+                android:src="@drawable/ic_chevron_down"
+                app:tint="@color/white" />
         </LinearLayout>
 
-        <!-- Mini progress bar -->
         <ProgressBar
             android:id="@+id/miniProgressBar"
             style="@android:style/Widget.ProgressBar.Horizontal"
