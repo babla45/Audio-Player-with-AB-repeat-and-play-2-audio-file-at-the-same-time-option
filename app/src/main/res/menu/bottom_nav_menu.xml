@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_library"
+        android:icon="@drawable/ic_library_music"
+        android:title="Library" />
+    <item
+        android:id="@+id/nav_playlists"
+        android:icon="@drawable/ic_queue_music"
+        android:title="Playlists" />
+    <item
+        android:id="@+id/nav_mixer"
+        android:icon="@drawable/ic_tune"
+        android:title="Mixer" />
+</menu>

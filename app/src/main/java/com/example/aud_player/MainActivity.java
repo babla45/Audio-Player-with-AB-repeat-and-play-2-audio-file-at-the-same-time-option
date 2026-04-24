@@ -43,7 +43,10 @@ import android.widget.RadioGroup;
 import android.text.InputType;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.view.Gravity;
+
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -163,6 +166,16 @@ public class MainActivity extends AppCompatActivity {
     // Add this as a class member at the top of your class with other UI elements
     private ImageButton syncPositionButton;
 
+    // New redesigned UI elements
+    private LinearLayout miniPlayerBar;
+    private LinearLayout expandedPlayerControls;
+    private TextView miniPlayerTitle;
+    private TextView miniPlayerSubtitle;
+    private ImageButton miniPlayPauseBtn;
+    private ProgressBar miniProgressBar;
+    private BottomNavigationView bottomNavigation;
+    private boolean playerExpanded = false;
+
     // Change these from constants to instance variables
     private int seekForwardMs = 10000; // Default 10 seconds
     private int seekBackwardMs = 10000; // Default 10 seconds
@@ -272,6 +285,7 @@ public class MainActivity extends AppCompatActivity {
                         selectedAudioUri = uri;
                         String fileName = getFileNameFromUri(uri);
                         fileNameText.setText(fileName);
+                        updateMiniPlayer();
 
                         // Take persistent permission for this URI
                         try {
@@ -413,11 +427,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"), Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"));
-        }
+        ContextCompat.registerReceiver(this, playbackStoppedReceiver, new IntentFilter("PLAYBACK_STOPPED"), ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Register broadcast receiver for app close command
         closeAppReceiver = new BroadcastReceiver() {
@@ -429,11 +439,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"), Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"));
-        }
+        ContextCompat.registerReceiver(this, closeAppReceiver, new IntentFilter("CLOSE_APP_COMMAND"), ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Register media controls (next/prev) receiver
         mediaControlsReceiver = new BroadcastReceiver() {
@@ -450,11 +456,7 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter mediaFilter = new IntentFilter();
         mediaFilter.addAction("MEDIA_NEXT");
         mediaFilter.addAction("MEDIA_PREV");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(mediaControlsReceiver, mediaFilter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(mediaControlsReceiver, mediaFilter);
-        }
+        ContextCompat.registerReceiver(this, mediaControlsReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Update UI when playback is paused by service (e.g., headphones unplugged)
         BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
@@ -466,11 +468,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"), Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"));
-        }
+        ContextCompat.registerReceiver(this, pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"), ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private void initializeViews() {
@@ -510,11 +508,7 @@ public class MainActivity extends AppCompatActivity {
             mixerToggleButton = findViewById(R.id.mixerToggleButton);
 
             // Set default color for mixer toggle
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
-            } else {
-                mixerToggleButton.setTextColor(getResources().getColor(android.R.color.darker_gray));
-            }
+            mixerToggleButton.setTextColor(getResources().getColor(R.color.text_tertiary, null));
 
             // Sync position button
             syncPositionButton = findViewById(R.id.syncPositionButton);
@@ -535,6 +529,73 @@ public class MainActivity extends AppCompatActivity {
             // Wire prev/next actions
             prevButton.setOnClickListener(v -> playPreviousFromContext());
             nextButton.setOnClickListener(v -> playNextFromContext());
+
+            // ═══ NEW REDESIGNED UI ELEMENTS ═══
+
+            // Mini player
+            miniPlayerBar = findViewById(R.id.miniPlayerBar);
+            miniPlayerTitle = findViewById(R.id.miniPlayerTitle);
+            miniPlayerSubtitle = findViewById(R.id.miniPlayerSubtitle);
+            miniPlayPauseBtn = findViewById(R.id.miniPlayPauseBtn);
+            miniProgressBar = findViewById(R.id.miniProgressBar);
+            expandedPlayerControls = findViewById(R.id.expandedPlayerControls);
+
+            // App bar menu button (top-right dots)
+            ImageButton appBarMenuButton = findViewById(R.id.appBarMenuButton);
+            if (appBarMenuButton != null) {
+                appBarMenuButton.setOnClickListener(v -> showBottomSheetMenu());
+            }
+
+            // Mini player click to expand
+            if (miniPlayerBar != null) {
+                miniPlayerBar.setOnClickListener(v -> togglePlayerExpansion());
+            }
+
+            // Mini play/pause
+            if (miniPlayPauseBtn != null) {
+                miniPlayPauseBtn.setOnClickListener(v -> {
+                    if (playPauseButton != null) playPauseButton.performClick();
+                });
+            }
+
+            // Expand/collapse buttons
+            ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
+            if (expandBtn != null) {
+                expandBtn.setOnClickListener(v -> togglePlayerExpansion());
+            }
+
+            ImageButton collapseBtn = findViewById(R.id.collapsePlayerBtn);
+            if (collapseBtn != null) {
+                collapseBtn.setOnClickListener(v -> togglePlayerExpansion());
+            }
+
+            // Bottom Navigation
+            bottomNavigation = findViewById(R.id.bottomNavigation);
+            if (bottomNavigation != null) {
+                bottomNavigation.setOnItemSelectedListener(item -> {
+                    int id = item.getItemId();
+                    if (id == R.id.nav_library) {
+                        // Show all songs view
+                        if (inPlaylistView) toggleToAllSongsView();
+                        return true;
+                    } else if (id == R.id.nav_playlists) {
+                        // Open playlists
+                        Intent intent = new Intent(this, PlaylistActivity.class);
+                        startActivity(intent);
+                        return true;
+                    } else if (id == R.id.nav_mixer) {
+                        // Toggle mixer mode
+                        toggleMixerMode();
+                        return true;
+                    }
+                    return false;
+                });
+            }
+
+            // Start with player collapsed
+            if (expandedPlayerControls != null) {
+                expandedPlayerControls.setVisibility(View.GONE);
+            }
 
         } catch (Exception e) {
             Log.e(TAG, "Error initializing views", e);
@@ -597,8 +658,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Add the menu button listener
-        menuButton.setOnClickListener(v -> showPopupMenu(v));
+        // Add the menu button listener — now opens bottom sheet
+        menuButton.setOnClickListener(v -> showBottomSheetMenu());
 
         // Hook seek/prev/next if views are ready
         try {
@@ -1142,6 +1203,9 @@ public class MainActivity extends AppCompatActivity {
                 seekBar.setProgress(currentPosition);
                 updateTimeText(currentPosition, mediaPlayer.getDuration());
 
+                // Update mini player
+                updateMiniPlayer();
+
                 if (mediaPlayer.isPlaying()) {
                     runnable = () -> updateSeekBar();
                     handler.postDelayed(runnable, 1000);
@@ -1187,135 +1251,219 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showPopupMenu(View v) {
-        PopupMenu popup = new PopupMenu(this, v);
+        // Legacy method - redirect to new bottom sheet menu
+        showBottomSheetMenu();
+    }
 
-        // Create menu items programmatically
-        Menu menu = popup.getMenu();
-
-        // Add your existing menu items
-        menu.add(0, 1, 0, "Sort Audio Files");
-        menu.add(0, 2, 0, "Sleep Timer");
-        menu.add(0, 3, 0, "A-B Repeat");
-
-        // Create Audio Mixer submenu
-        SubMenu mixerMenu = menu.addSubMenu("Audio Mixer");
-        mixerMenu.add(0, 41, 0, "Mix with Second Audio");
-        if (secondAudioActive) {
-            mixerMenu.add(0, 42, 0, "Adjust Volume");
-            mixerMenu.add(0, 43, 0, "Clear Second Audio");
-            mixerMenu.add(0, 44, 0, useIndividualPlaybackSpeeds ?
-                    "Use Global Playback Speed" : "Use Individual Playback Speeds");
-            if (useIndividualPlaybackSpeeds) {
-                mixerMenu.add(0, 45, 0, "Set Primary Audio Speed (" + String.format("%.2fx", primaryPlaybackSpeed) + ")");
-                mixerMenu.add(0, 46, 0, "Set Secondary Audio Speed (" + String.format("%.2fx", secondaryPlaybackSpeed) + ")");
+    private void showBottomSheetMenu() {
+        MenuBottomSheet menuSheet = new MenuBottomSheet();
+        menuSheet.setMenuListener(new MenuBottomSheet.MenuListener() {
+            @Override
+            public void onSortClicked() {
+                showSortBottomSheet();
             }
-        }
 
-        menu.add(0, 5, 0, "Settings");
-        menu.add(0, 6, 0, "Refresh List");
+            @Override
+            public void onTimerClicked() {
+                showTimerBottomSheet();
+            }
 
-        // Add Playlist submenu
-        SubMenu playlistMenu = menu.addSubMenu("Playlists");
-        playlistMenu.add(0, 70, 0, "View All Playlists");
+            @Override
+            public void onABRepeatClicked() {
+                showABRepeatBottomSheet();
+            }
 
-        // Add "Add to Playlist" option only if a song is selected
-        if (selectedAudioUri != null) {
-            playlistMenu.add(0, 71, 0, "Add Current Song to Playlist");
-        }
+            @Override
+            public void onPlaybackModeClicked() {
+                // Cycle through modes
+                currentPlaybackMode = (currentPlaybackMode + 1) % 3;
+                savePlaybackMode();
+                String[] modes = {"Repeat Current Song", "Play Next in List", "Random Play"};
+                Toast.makeText(MainActivity.this, "Mode: " + modes[currentPlaybackMode], Toast.LENGTH_SHORT).show();
+            }
 
-        // Add playback mode submenu
-        SubMenu playbackModeMenu = menu.addSubMenu("Playback Mode");
-        playbackModeMenu.add(0, 100, 0, "Repeat Current Song").setCheckable(true)
-                .setChecked(currentPlaybackMode == PLAYBACK_MODE_REPEAT_CURRENT);
-        playbackModeMenu.add(0, 101, 0, "Play Next in List").setCheckable(true)
-                .setChecked(currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST);
-        playbackModeMenu.add(0, 102, 0, "Random Play").setCheckable(true)
-                .setChecked(currentPlaybackMode == PLAYBACK_MODE_RANDOM);
+            @Override
+            public void onSpeedClicked() {
+                showSpeedBottomSheet();
+            }
 
-        // Add playback speed submenu
-        SubMenu playbackSpeedMenu = menu.addSubMenu("Playback Speed");
-
-        // Add speed options from 0.25x to 4.0x with 0.25 intervals
-        for (float speed = MIN_PLAYBACK_SPEED; speed <= MAX_PLAYBACK_SPEED; speed += PLAYBACK_SPEED_STEP) {
-            // Format speed with 2 decimal places if needed
-            String speedText = speed == (int)speed ? String.format("%.0fx", speed) : String.format("%.2fx", speed);
-
-            // Add menu item and mark current speed as checked
-            // Use a different approach for menu item IDs to accommodate the wider range
-            int menuItemId = 200 + Math.round(speed * 100);
-            playbackSpeedMenu.add(0, menuItemId, 0, speedText).setCheckable(true)
-                    .setChecked(Math.abs(currentPlaybackSpeed - speed) < 0.01f);
-        }
-
-        popup.setOnMenuItemClickListener(item -> {
-            int itemId = item.getItemId();
-            if (itemId == 1) {
-                showSortMenu(v);
-                return true;
-            } else if (itemId == 2) {
-                showCustomTimerDialog();
-                return true;
-            } else if (itemId == 3) {
-                showABRepeatMenu(v);
-                return true;
-            } else if (itemId == 41) {
-                selectSecondAudio();
-                return true;
-            } else if (itemId == 42) {
-                showBalanceDialog();
-                return true;
-            } else if (itemId == 43) {
-                clearSecondAudio();
-                return true;
-            } else if (itemId == 44) {
-                toggleIndividualPlaybackSpeeds();
-                return true;
-            } else if (itemId == 45) {
-                showIndividualSpeedDialog(true);  // For primary audio
-                return true;
-            } else if (itemId == 46) {
-                showIndividualSpeedDialog(false);  // For secondary audio
-                return true;
-            } else if (itemId == 5) {
-                showOtherSettingsDialog();
-                return true;
-            } else if (itemId == 6) {
-                refreshAudioFiles();
-                return true;
-            } else if (itemId == 70) {
-                // Open Playlists activity
-                Intent intent = new Intent(this, PlaylistActivity.class);
+            @Override
+            public void onPlaylistsClicked() {
+                Intent intent = new Intent(MainActivity.this, PlaylistActivity.class);
                 startActivity(intent);
-                return true;
-            } else if (itemId == 71) {
-                // Add current song to playlist
-                showAddToPlaylistDialog();
-                return true;
-            } else if (itemId == 100) {
-                currentPlaybackMode = PLAYBACK_MODE_REPEAT_CURRENT;
-                savePlaybackMode();
-                Toast.makeText(this, "Mode: Repeat Current Song", Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId == 101) {
-                currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST;
-                savePlaybackMode();
-                Toast.makeText(this, "Mode: Play Next in List", Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId == 102) {
-                currentPlaybackMode = PLAYBACK_MODE_RANDOM;
-                savePlaybackMode();
-                Toast.makeText(this, "Mode: Random Play", Toast.LENGTH_SHORT).show();
-                return true;
-            } else if (itemId >= 225 && itemId <= 600) {
-                // Handle playback speed change (ID range covers 0.25x to 4.0x)
-                float selectedSpeed = (itemId - 200) / 100.0f;
-                setPlaybackSpeed(selectedSpeed);
-                return true;
             }
-            return false;
-        });
 
-        popup.show();
+            @Override
+            public void onSettingsClicked() {
+                showOtherSettingsDialog();
+            }
+
+            @Override
+            public void onRefreshClicked() {
+                refreshAudioFiles();
+            }
+
+            @Override
+            public void onMixerSelectClicked() {
+                selectSecondAudio();
+            }
+
+            @Override
+            public void onMixerBalanceClicked() {
+                showBalanceDialog();
+            }
+
+            @Override
+            public void onMixerClearClicked() {
+                clearSecondAudio();
+            }
+
+            @Override
+            public void onAddToPlaylistClicked() {
+                showAddToPlaylistDialog();
+            }
+
+            @Override
+            public boolean isMixerActive() {
+                return secondAudioActive;
+            }
+
+            @Override
+            public boolean hasSongSelected() {
+                return selectedAudioUri != null;
+            }
+
+            @Override
+            public float getCurrentSpeed() {
+                return currentPlaybackSpeed;
+            }
+
+            @Override
+            public int getCurrentPlaybackMode() {
+                return currentPlaybackMode;
+            }
+        });
+        menuSheet.show(getSupportFragmentManager(), "MenuBottomSheet");
+    }
+
+    private void showSortBottomSheet() {
+        SortBottomSheet sortSheet = new SortBottomSheet();
+        sortSheet.setSortListener(new SortBottomSheet.SortListener() {
+            @Override
+            public void onSortSelected(int sortOrder) {
+                currentSortOrder = sortOrder;
+                sortAudioFiles();
+                audioAdapter.notifyDataSetChanged();
+            }
+
+            @Override
+            public int getCurrentSortOrder() {
+                return currentSortOrder;
+            }
+        });
+        sortSheet.show(getSupportFragmentManager(), "SortBottomSheet");
+    }
+
+    private void showTimerBottomSheet() {
+        TimerBottomSheet timerSheet = new TimerBottomSheet();
+        timerSheet.setTimerListener(new TimerBottomSheet.TimerListener() {
+            @Override
+            public void onTimerSet(int minutes, int action) {
+                timerAction = action;
+                setSleepTimer(minutes);
+            }
+
+            @Override
+            public void onTimerCancel() {
+                cancelSleepTimer();
+            }
+        });
+        timerSheet.show(getSupportFragmentManager(), "TimerBottomSheet");
+    }
+
+    private void showABRepeatBottomSheet() {
+        ABRepeatBottomSheet abSheet = new ABRepeatBottomSheet();
+        abSheet.setABRepeatListener(new ABRepeatBottomSheet.ABRepeatListener() {
+            @Override
+            public void onSetPointA() { setPointA(); }
+
+            @Override
+            public void onSetPointB() { setPointB(); }
+
+            @Override
+            public void onClearABPoints() { clearABPoints(); }
+
+            @Override
+            public void onToggleABRepeat() {
+                if (abRepeatActive) {
+                    abRepeatActive = false;
+                    updateABRepeatIndicator();
+                } else {
+                    enableABRepeat();
+                }
+            }
+
+            @Override
+            public int getPointA() { return pointA; }
+
+            @Override
+            public int getPointB() { return pointB; }
+
+            @Override
+            public boolean isABRepeatActive() { return abRepeatActive; }
+        });
+        abSheet.show(getSupportFragmentManager(), "ABRepeatBottomSheet");
+    }
+
+    private void showSpeedBottomSheet() {
+        SpeedBottomSheet speedSheet = new SpeedBottomSheet();
+        speedSheet.setSpeedListener(new SpeedBottomSheet.SpeedListener() {
+            @Override
+            public void onSpeedChanged(float speed) {
+                setPlaybackSpeed(speed);
+            }
+
+            @Override
+            public float getCurrentSpeed() {
+                return currentPlaybackSpeed;
+            }
+        });
+        speedSheet.show(getSupportFragmentManager(), "SpeedBottomSheet");
+    }
+
+    private void togglePlayerExpansion() {
+        playerExpanded = !playerExpanded;
+        if (expandedPlayerControls != null) {
+            expandedPlayerControls.setVisibility(playerExpanded ? View.VISIBLE : View.GONE);
+        }
+        // Rotate the expand arrow
+        ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
+        if (expandBtn != null) {
+            expandBtn.setRotation(playerExpanded ? 0 : 180);
+        }
+    }
+
+    private void updateMiniPlayer() {
+        if (miniPlayerTitle != null && fileNameText != null) {
+            String title = fileNameText.getText().toString();
+            miniPlayerTitle.setText(title.isEmpty() ? "No song selected" : title);
+        }
+        if (miniPlayerSubtitle != null && currentTimeText != null && totalTimeText != null) {
+            String sub = currentTimeText.getText().toString() + " / " + totalTimeText.getText().toString();
+            miniPlayerSubtitle.setText(sub);
+        }
+        if (miniPlayPauseBtn != null) {
+            miniPlayPauseBtn.setImageResource(isPlaying ? R.drawable.ic_pause_improved : R.drawable.ic_play_improved);
+        }
+        if (miniProgressBar != null && mediaPlayer != null) {
+            try {
+                int duration = mediaPlayer.getDuration();
+                int position = mediaPlayer.getCurrentPosition();
+                if (duration > 0) {
+                    miniProgressBar.setProgress((int) (position * 100L / duration));
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private void setPlaybackSpeed(float speed) {
@@ -1720,6 +1868,19 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, "Timer will stop at end of current song", Toast.LENGTH_SHORT).show();
     }
 
+    private void cancelSleepTimer() {
+        if (sleepTimer != null) {
+            sleepTimer.cancel();
+            sleepTimer = null;
+        }
+        if (audioService != null) {
+            audioService.cancelTimer();
+        }
+        timerActive = false;
+        timerIndicator.setVisibility(View.GONE);
+        Toast.makeText(this, "Sleep timer cancelled", Toast.LENGTH_SHORT).show();
+    }
+
     /**
      * Sets a sleep timer for the specified number of minutes
      * @param minutes The duration of the timer in minutes
@@ -1772,11 +1933,7 @@ public class MainActivity extends AppCompatActivity {
                 IntentFilter filter = new IntentFilter();
                 filter.addAction("TIMER_UPDATE");
                 filter.addAction("TIMER_FINISHED");
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    registerReceiver(timerUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-                } else {
-                    registerReceiver(timerUpdateReceiver, filter);
-                }
+                ContextCompat.registerReceiver(this, timerUpdateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
             }
         } else {
             // Fallback to the old timer implementation if service not bound
@@ -2159,6 +2316,7 @@ public class MainActivity extends AppCompatActivity {
                 selectedAudioUri = uri;
                 String fileName = getFileNameFromUri(uri);
                 fileNameText.setText(fileName);
+                updateMiniPlayer();
 
                 // Take persistent permission
                 try {
@@ -2271,6 +2429,7 @@ public class MainActivity extends AppCompatActivity {
         selectedAudioUri = audioFile.getUri();
         String fileName = audioFile.getTitle();
         fileNameText.setText(fileName);
+        updateMiniPlayer();
 
         // Set flag to auto-play after preparation
         shouldAutoPlay = true;
@@ -3541,6 +3700,10 @@ public class MainActivity extends AppCompatActivity {
         if (button != null) {
             try {
                 button.setImageResource(resId);
+                // Sync mini player play/pause button if the main one is updated
+                if (button == playPauseButton && miniPlayPauseBtn != null) {
+                    miniPlayPauseBtn.setImageResource(resId);
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error setting image resource", e);
             }

@@ -64,8 +64,8 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.Playli
         String dateCreated = "Created on " + dateFormat.format(new Date(playlist.getDateCreated()));
         holder.dateCreatedTextView.setText(dateCreated);
         
-        // Set click listener
-        holder.itemView.setOnClickListener(v -> {
+        // Set click listener on inner layout to show ripple effect correctly
+        holder.innerLayout.setOnClickListener(v -> {
             if (listener != null) {
                 listener.onPlaylistClick(playlist);
             }
@@ -116,6 +116,7 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.Playli
         TextView songCountTextView;
         TextView dateCreatedTextView;
         ImageView optionsButton;
+        View innerLayout;
 
         PlaylistViewHolder(View itemView) {
             super(itemView);
@@ -123,6 +124,7 @@ public class PlaylistAdapter extends RecyclerView.Adapter<PlaylistAdapter.Playli
             songCountTextView = itemView.findViewById(R.id.playlist_song_count);
             dateCreatedTextView = itemView.findViewById(R.id.playlist_date_created);
             optionsButton = itemView.findViewById(R.id.playlist_options);
+            innerLayout = itemView.findViewById(R.id.innerLayout);
         }
     }
 } 

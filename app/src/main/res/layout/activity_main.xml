@@ -3,70 +3,128 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:orientation="vertical"
+    android:background="@color/background">
 
-    <!-- Search and file list area -->
+    <!-- ═══ TOP CONTENT AREA ═══ -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
+        <!-- App Bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:background="@color/background">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Audio Player"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary" />
+
+            <ImageButton
+                android:id="@+id/appBarMenuButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_more_vert"
+                app:tint="@color/text_secondary"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="More options"
+                android:padding="8dp" />
+        </LinearLayout>
+
         <!-- Search bar -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:padding="8dp">
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="8dp">
 
-            <EditText
-                android:id="@+id/searchEditText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:drawablePadding="8dp"
-                android:hint="@string/search_audio_files"
-                android:imeOptions="actionSearch"
-                android:inputType="text" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/bg_search_bar">
 
-            <ImageView
-                android:id="@+id/clearSearchButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:padding="8dp"
-                android:src="@drawable/ic_more"
-                android:visibility="gone"
-                android:contentDescription="@string/clear_search"/>
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_search"
+                    app:tint="@color/text_tertiary"
+                    android:contentDescription="Search" />
+
+                <EditText
+                    android:id="@+id/searchEditText"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:background="@android:color/transparent"
+                    android:hint="Search songs..."
+                    android:textColorHint="@color/text_tertiary"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:paddingStart="10dp"
+                    android:singleLine="true" />
+
+                <ImageView
+                    android:id="@+id/clearSearchButton"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:padding="4dp"
+                    android:src="@drawable/ic_close"
+                    app:tint="@color/text_tertiary"
+                    android:visibility="gone"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="@string/clear_search" />
+            </LinearLayout>
         </LinearLayout>
-        
-        <!-- Playlist info and all songs button -->
+
+        <!-- Playlist info banner (hidden by default) -->
         <LinearLayout
             android:id="@+id/playlistInfoContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:padding="8dp"
-            android:background="@color/colorPlayingHighlight"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="10dp"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginBottom="8dp"
+            android:background="@drawable/bg_icon_container"
             android:visibility="gone">
-            
+
             <TextView
                 android:id="@+id/playlistNameText"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textColor="@android:color/white"
+                android:textColor="@color/accent_primary"
                 android:textStyle="bold"
-                android:textSize="16sp"
-                android:text="Playlist name"/>
-                
+                android:textSize="14sp"
+                android:text="Playlist name" />
+
             <Button
                 android:id="@+id/showAllSongsButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:layout_height="32dp"
                 android:text="ALL SONGS"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                android:textColor="@android:color/white"/>
+                android:textSize="11sp"
+                style="@style/Widget.Material3.Button.TonalButton" />
         </LinearLayout>
 
         <!-- RecyclerView for audio files -->
@@ -77,7 +135,9 @@
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/audioRecyclerView"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent" />
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:paddingBottom="8dp" />
 
             <TextView
                 android:id="@+id/emptyView"
@@ -85,224 +145,379 @@
                 android:layout_height="match_parent"
                 android:gravity="center"
                 android:text="@string/no_audio_files"
+                android:textColor="@color/text_tertiary"
+                android:textSize="16sp"
                 android:visibility="gone" />
         </FrameLayout>
     </LinearLayout>
 
-    <!-- Audio Player Controls -->
+    <!-- ═══ PLAYER PANEL ═══ -->
     <LinearLayout
+        android:id="@+id/playerPanel"
         android:layout_width="match_parent"
-        android:layout_height="250dp"
-        android:background="@color/player_background"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:layout_height="wrap_content"
+        android:background="@color/surface_900"
+        android:orientation="vertical">
 
-        <!-- File name and time indicators -->
+        <!-- Mini Player Bar (always visible when song loaded) -->
         <LinearLayout
+            android:id="@+id/miniPlayerBar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:layout_height="64dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:background="@drawable/bg_mini_player"
+            android:layout_marginHorizontal="8dp"
+            android:layout_marginTop="4dp"
+            android:clickable="true"
+            android:focusable="true">
 
-            <TextView
-                android:id="@+id/fileNameText"
+            <!-- Music icon -->
+            <FrameLayout
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_icon_container">
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_music_note"
+                    app:tint="@color/accent_primary"
+                    android:contentDescription="Now playing" />
+            </FrameLayout>
+
+            <!-- Song info -->
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/player_text" />
+                android:orientation="vertical"
+                android:layout_marginHorizontal="12dp">
 
-            <TextView
-                android:id="@+id/timerIndicator"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/player_text"
-                android:textSize="12sp"
-                android:visibility="gone" />
+                <TextView
+                    android:id="@+id/miniPlayerTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="No song selected"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold"
+                    android:ellipsize="marquee"
+                    android:marqueeRepeatLimit="marquee_forever"
+                    android:singleLine="true"
+                    android:focusable="true"
+                    android:focusableInTouchMode="true" />
+
+                <TextView
+                    android:id="@+id/miniPlayerSubtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_tertiary"
+                    android:singleLine="true" />
+            </LinearLayout>
+
+            <!-- Play/Pause mini button -->
+            <ImageButton
+                android:id="@+id/miniPlayPauseBtn"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_play_improved"
+                app:tint="@color/text_primary"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Play/Pause"
+                android:padding="8dp" />
+
+            <!-- Expand arrow -->
+            <ImageView
+                android:id="@+id/expandPlayerBtn"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_chevron_down"
+                app:tint="@color/text_tertiary"
+                android:rotation="180"
+                android:contentDescription="Expand player"
+                android:layout_marginStart="4dp" />
         </LinearLayout>
 
-        <!-- Second File Name (Only visible in mixer mode) -->
+        <!-- Mini progress bar -->
+        <ProgressBar
+            android:id="@+id/miniProgressBar"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:layout_marginHorizontal="16dp"
+            android:progressTint="@color/accent_primary"
+            android:progressBackgroundTint="@color/surface_600"
+            android:max="100"
+            android:progress="0" />
+
+        <!-- ═══ EXPANDED PLAYER CONTROLS ═══ -->
         <LinearLayout
-            android:id="@+id/secondFileNameLayout"
+            android:id="@+id/expandedPlayerControls"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
+            android:orientation="vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/secondFileNameText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:textColor="@color/player_text" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <TextView
-                android:id="@+id/abRepeatIndicator"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="@color/player_text"
-                android:textSize="12sp"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/mixerIndicator"
+            <!-- File name and indicators -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="end"
-                android:textColor="@color/player_text"
-                android:textSize="12sp"
-                android:visibility="gone" />
-        </LinearLayout>
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-        <!-- SeekBar -->
-        <SeekBar
-            android:id="@+id/seekBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:progressTint="@color/player_seekbar_progress"
-            android:thumbTint="@color/player_seekbar_progress" />
+                <TextView
+                    android:id="@+id/fileNameText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
 
-        <!-- Time display -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal">
+                <TextView
+                    android:id="@+id/timerIndicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/warning"
+                    android:textSize="11sp"
+                    android:visibility="gone"
+                    android:background="@drawable/bg_icon_container"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/currentTimeText"
-                android:layout_width="wrap_content"
+            <!-- Second File Name (mixer mode) -->
+            <LinearLayout
+                android:id="@+id/secondFileNameLayout"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/player_text"
-                android:textSize="12sp" />
+                android:orientation="horizontal"
+                android:visibility="gone"
+                android:paddingTop="2dp">
 
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
+                <TextView
+                    android:id="@+id/secondFileNameText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/accent_secondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/totalTimeText"
-                android:layout_width="wrap_content"
+            <!-- Status indicators row -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/player_text"
-                android:textSize="12sp" />
-        </LinearLayout>
+                android:orientation="horizontal"
+                android:paddingTop="2dp">
 
-        <!-- Main Control Buttons -->
+                <TextView
+                    android:id="@+id/abRepeatIndicator"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/accent_primary"
+                    android:textSize="11sp"
+                    android:visibility="gone"
+                    android:background="@drawable/bg_icon_container"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="2dp" />
 
-        <!-- Additional Controls -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
-            android:gravity="center"
-            android:orientation="horizontal">
+                <TextView
+                    android:id="@+id/mixerIndicator"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:textColor="@color/accent_secondary"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+            </LinearLayout>
 
-            <ImageButton
-                android:id="@+id/prevButton"
-                android:layout_width="43dp"
-                android:layout_height="44dp"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_backward"
-                android:padding="12dp"
-                android:src="@android:drawable/ic_media_previous" />
-
-            <ImageButton
-                android:id="@+id/seekBackwardButton"
-                android:layout_width="43dp"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_backward"
-                android:padding="12dp"
-                android:src="@drawable/ic_seek_backward_improved" />
-
-            <ImageButton
-                android:id="@+id/playPauseButton"
-                android:layout_width="54dp"
-                android:layout_height="54dp"
-                android:layout_marginStart="16dp"
-                android:layout_marginEnd="16dp"
-                android:background="@drawable/rounded_button_background"
-                android:backgroundTint="@color/player_primary_button_bg"
-                android:contentDescription="@string/play_pause"
-                android:padding="16dp"
-                android:src="@drawable/ic_play_improved" />
-
-            <ImageButton
-                android:id="@+id/seekForwardButton"
-                android:layout_width="43dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="8dp"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_forward"
-                android:padding="12dp"
-                android:src="@drawable/ic_seek_forward_improved" />
-
-            <ImageButton
-                android:id="@+id/nextButton"
-                android:layout_width="43dp"
-                android:layout_height="44dp"
-                android:background="@drawable/rounded_button_background"
-                android:contentDescription="@string/seek_forward"
-                android:padding="12dp"
-                android:src="@android:drawable/ic_media_next" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="5dp"
-            android:gravity="center"
-            android:orientation="horizontal">
-
-            <Button
-                android:id="@+id/selectButton"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
+            <!-- SeekBar -->
+            <SeekBar
+                android:id="@+id/seekBar"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/select_audio"
-                android:textSize="12sp" />
+                android:layout_marginTop="8dp"
+                android:progressTint="@color/accent_primary"
+                android:thumbTint="@color/accent_primary"
+                android:progressBackgroundTint="@color/surface_600" />
 
-            <ImageButton
-                android:id="@+id/syncPositionButton"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginStart="8dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/position_sync_title"
-                android:src="@drawable/ic_more"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/mixerToggleButton"
-                android:layout_width="wrap_content"
+            <!-- Time display -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/currentTimeText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="12sp" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/totalTimeText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <!-- Transport Controls -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/prevButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_control_button"
+                    android:contentDescription="Previous"
+                    android:padding="10dp"
+                    android:src="@android:drawable/ic_media_previous"
+                    app:tint="@color/text_primary" />
+
+                <ImageButton
+                    android:id="@+id/seekBackwardButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="12dp"
+                    android:background="@drawable/bg_control_button"
+                    android:contentDescription="@string/seek_backward"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_seek_backward_improved"
+                    app:tint="@color/text_primary" />
+
+                <ImageButton
+                    android:id="@+id/playPauseButton"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:layout_marginStart="16dp"
+                    android:layout_marginEnd="16dp"
+                    android:background="@drawable/rounded_button_background"
+                    android:contentDescription="@string/play_pause"
+                    android:padding="16dp"
+                    android:src="@drawable/ic_play_improved"
+                    app:tint="@color/text_on_accent" />
+
+                <ImageButton
+                    android:id="@+id/seekForwardButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="12dp"
+                    android:background="@drawable/bg_control_button"
+                    android:contentDescription="@string/seek_forward"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_seek_forward_improved"
+                    app:tint="@color/text_primary" />
+
+                <ImageButton
+                    android:id="@+id/nextButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_control_button"
+                    android:contentDescription="Next"
+                    android:padding="10dp"
+                    android:src="@android:drawable/ic_media_next"
+                    app:tint="@color/text_primary" />
+            </LinearLayout>
+
+            <!-- Secondary action row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/selectButton"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:text="📂 BROWSE"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary" />
+
+                <ImageButton
+                    android:id="@+id/syncPositionButton"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/position_sync_title"
+                    android:src="@drawable/ic_more"
+                    app:tint="@color/text_secondary"
+                    android:visibility="gone"
+                    android:padding="6dp" />
+
+                <TextView
+                    android:id="@+id/mixerToggleButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:background="@drawable/bg_icon_container"
+                    android:gravity="center"
+                    android:paddingHorizontal="14dp"
+                    android:text="🎛 MIX"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="12sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/menuButton"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="8dp"
+                    android:text="⚡ MORE"
+                    android:textSize="11sp"
+                    android:textColor="@color/accent_primary" />
+            </LinearLayout>
+
+            <!-- Collapse button -->
+            <ImageButton
+                android:id="@+id/collapsePlayerBtn"
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:src="@drawable/ic_chevron_down"
+                app:tint="@color/text_tertiary"
                 android:background="?attr/selectableItemBackground"
-                android:padding="8dp"
-                android:text="MIX"
-                android:textColor="@android:color/darker_gray"
-                android:textSize="14sp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/menuButton"
-                style="@style/Widget.MaterialComponents.Button.TextButton"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Menu"
-                android:textSize="12sp" />
+                android:contentDescription="Collapse player"
+                android:scaleType="center" />
         </LinearLayout>
     </LinearLayout>
+
+    <!-- ═══ BOTTOM NAVIGATION ═══ -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:background="@color/bottom_nav_bg"
+        app:menu="@menu/bottom_nav_menu"
+        app:labelVisibilityMode="labeled"
+        app:itemIconTint="@color/text_tertiary"
+        app:itemTextColor="@color/text_tertiary"
+        app:itemPaddingTop="8dp"
+        app:itemPaddingBottom="8dp"
+        app:itemActiveIndicatorStyle="@style/Widget.Material3.BottomNavigationView.ActiveIndicator" />
+
 </LinearLayout>

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Spacing system (4dp grid) -->
+    <dimen name="spacing_xs">4dp</dimen>
+    <dimen name="spacing_sm">8dp</dimen>
+    <dimen name="spacing_md">12dp</dimen>
+    <dimen name="spacing_lg">16dp</dimen>
+    <dimen name="spacing_xl">24dp</dimen>
+    <dimen name="spacing_2xl">32dp</dimen>
+
+    <!-- Corner radii -->
+    <dimen name="radius_sm">8dp</dimen>
+    <dimen name="radius_md">12dp</dimen>
+    <dimen name="radius_lg">16dp</dimen>
+    <dimen name="radius_xl">24dp</dimen>
+    <dimen name="radius_pill">50dp</dimen>
+
+    <!-- Component sizes -->
+    <dimen name="icon_size_sm">20dp</dimen>
+    <dimen name="icon_size_md">24dp</dimen>
+    <dimen name="icon_size_lg">28dp</dimen>
+    <dimen name="icon_size_xl">32dp</dimen>
+
+    <dimen name="touch_target_min">48dp</dimen>
+    <dimen name="button_height">48dp</dimen>
+    <dimen name="mini_player_height">64dp</dimen>
+    <dimen name="bottom_nav_height">56dp</dimen>
+
+    <dimen name="song_icon_size">48dp</dimen>
+    <dimen name="song_icon_radius">12dp</dimen>
+
+    <dimen name="play_button_size">56dp</dimen>
+    <dimen name="control_button_size">40dp</dimen>
+    <dimen name="skip_button_size">36dp</dimen>
+
+    <!-- Typography sizes -->
+    <dimen name="text_headline">24sp</dimen>
+    <dimen name="text_title">18sp</dimen>
+    <dimen name="text_body_large">16sp</dimen>
+    <dimen name="text_body">14sp</dimen>
+    <dimen name="text_caption">12sp</dimen>
+    <dimen name="text_overline">11sp</dimen>
+
+    <!-- Player specific -->
+    <dimen name="player_panel_collapsed">72dp</dimen>
+    <dimen name="seekbar_thumb_radius">6dp</dimen>
+    <dimen name="seekbar_track_height">3dp</dimen>
+    <dimen name="now_playing_bar_width">3dp</dimen>
+
+    <!-- Bottom sheet -->
+    <dimen name="bottom_sheet_corner_radius">24dp</dimen>
+    <dimen name="menu_grid_item_size">80dp</dimen>
+    <dimen name="menu_grid_icon_size">24dp</dimen>
+</resources>

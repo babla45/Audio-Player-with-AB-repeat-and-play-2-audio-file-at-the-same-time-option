@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_bottom_sheet"
+    android:paddingBottom="24dp">
+
+    <!-- Drag handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="16dp"
+        android:background="@drawable/bg_icon_container" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Sort Songs By"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="@color/text_primary"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="12dp" />
+
+    <RadioGroup
+        android:id="@+id/sort_radio_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="20dp">
+
+        <RadioButton android:id="@+id/sort_name_asc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Name (A → Z)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_name_desc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Name (Z → A)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_duration_asc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Duration (Shortest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_duration_desc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Duration (Longest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_date_asc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Date (Oldest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_date_desc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Date (Newest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_size_asc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Size (Smallest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+        <RadioButton android:id="@+id/sort_size_desc"
+            android:layout_width="match_parent" android:layout_height="48dp"
+            android:text="Size (Largest)" android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+    </RadioGroup>
+</LinearLayout>

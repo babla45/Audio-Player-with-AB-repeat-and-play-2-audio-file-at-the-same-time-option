@@ -36,11 +36,10 @@ public class PlaylistActivity extends AppCompatActivity {
         // Initialize the database helper
         dbHelper = new PlaylistDatabaseHelper(this);
 
-        // Set up the toolbar
-        setSupportActionBar(findViewById(R.id.playlist_toolbar));
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Playlists");
+        // Set up the back button
+        View backButton = findViewById(R.id.playlist_back_button);
+        if (backButton != null) {
+            backButton.setOnClickListener(v -> onBackPressed());
         }
 
         // Initialize views

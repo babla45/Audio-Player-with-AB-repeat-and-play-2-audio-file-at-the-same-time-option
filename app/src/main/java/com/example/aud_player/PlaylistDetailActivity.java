@@ -53,11 +53,10 @@ public class PlaylistDetailActivity extends AppCompatActivity {
             return;
         }
 
-        // Set up the toolbar
-        setSupportActionBar(findViewById(R.id.playlist_detail_toolbar));
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle(currentPlaylist.getName());
+        // Set up the back button
+        View backButton = findViewById(R.id.playlist_detail_back_button);
+        if (backButton != null) {
+            backButton.setOnClickListener(v -> onBackPressed());
         }
 
         // Initialize views
