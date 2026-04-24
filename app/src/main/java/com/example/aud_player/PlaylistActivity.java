@@ -168,8 +168,9 @@ public class PlaylistActivity extends AppCompatActivity {
     }
 
     private void openPlaylist(Playlist playlist) {
-        Intent intent = new Intent(this, PlaylistDetailActivity.class);
+        Intent intent = new Intent(this, MainActivity.class);
         intent.putExtra("PLAYLIST_ID", playlist.getId());
+        intent.putExtra("SHOW_PLAYLIST_ONLY", true);
         startActivity(intent);
     }
 } 

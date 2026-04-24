@@ -50,6 +50,7 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.view.Gravity;
+import androidx.appcompat.widget.SwitchCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -175,9 +176,6 @@ public class MainActivity extends AppCompatActivity {
     // Add these UI elements as class members
     private ImageButton seekBackwardButton;
     private ImageButton seekForwardButton;
-
-    // Add this as a class member at the top of your class with other UI elements
-    private ImageButton syncPositionButton;
 
     // New redesigned UI elements
     private LinearLayout miniPlayerBar;
@@ -431,6 +429,9 @@ public class MainActivity extends AppCompatActivity {
             loadAudioFiles();
         }
 
+        // Handle startup intents such as "open this playlist".
+        handleIntent(getIntent());
+
         // Bind to the service
         Intent serviceIntent = new Intent(this, AudioPlaybackService.class);
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
@@ -528,9 +529,6 @@ public class MainActivity extends AppCompatActivity {
             // Set default color for mixer toggle
             mixerToggleButton.setTextColor(getResources().getColor(R.color.text_tertiary, null));
 
-            // Sync position button
-            syncPositionButton = findViewById(R.id.syncPositionButton);
-
             // Log successful initialization
             Log.d(TAG, "Views initialized successfully");
 
@@ -588,11 +586,6 @@ public class MainActivity extends AppCompatActivity {
             ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
             if (expandBtn != null) {
                 expandBtn.setOnClickListener(v -> togglePlayerExpansion());
-            }
-
-            ImageButton collapseBtn = findViewById(R.id.collapsePlayerBtn);
-            if (collapseBtn != null) {
-                collapseBtn.setOnClickListener(v -> togglePlayerExpansion());
             }
 
             // Bottom Navigation
@@ -752,9 +745,6 @@ public class MainActivity extends AppCompatActivity {
             animateButtonPress(v);
             seekRelative(seekForwardMs);
         });
-
-        // Set click listener for sync position button
-        syncPositionButton.setOnClickListener(v -> showPositionSyncDialog());
 
         // Inside setupListeners() method, add this code to properly handle seekbar interactions:
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -1596,41 +1586,118 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showMixerOptionsDialog() {
-        List<String> options = new ArrayList<>();
-        List<Runnable> actions = new ArrayList<>();
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_mixer_options, null);
 
-        options.add(mixerModeActive ? "Disable Mixer Mode" : "Enable Mixer Mode");
-        actions.add(this::toggleMixerMode);
+        SwitchCompat mixerModeSwitch = dialogView.findViewById(R.id.mixerModeSwitch);
+        TextView mixerStatusText = dialogView.findViewById(R.id.mixerStatusText);
+        TextView mixerSecondTrackText = dialogView.findViewById(R.id.mixerSecondTrackText);
+        Button selectSecondButton = dialogView.findViewById(R.id.mixerSelectSecondButton);
+        Button balanceButton = dialogView.findViewById(R.id.mixerBalanceButton);
+        Button syncButton = dialogView.findViewById(R.id.mixerSyncButton);
+        Button toggleIndividualSpeedButton = dialogView.findViewById(R.id.mixerToggleIndividualSpeedButton);
+        LinearLayout individualSpeedRow = dialogView.findViewById(R.id.mixerIndividualSpeedRow);
+        Button primarySpeedButton = dialogView.findViewById(R.id.mixerPrimarySpeedButton);
+        Button secondarySpeedButton = dialogView.findViewById(R.id.mixerSecondarySpeedButton);
+        Button clearSecondButton = dialogView.findViewById(R.id.mixerClearSecondButton);
 
-        options.add("Select Second Audio");
-        actions.add(this::selectSecondAudio);
+        final Runnable updateUiState = () -> {
+            mixerModeSwitch.setChecked(mixerModeActive);
 
-        if (secondAudioActive) {
-            options.add("Adjust Volume Balance");
-            actions.add(this::showBalanceDialog);
-
-            options.add(useIndividualPlaybackSpeeds ? "Disable Individual Speeds" : "Enable Individual Speeds");
-            actions.add(this::toggleIndividualPlaybackSpeeds);
-
-            if (useIndividualPlaybackSpeeds) {
-                options.add("Set Primary Speed");
-                actions.add(() -> showIndividualSpeedDialog(true));
-
-                options.add("Set Secondary Speed");
-                actions.add(() -> showIndividualSpeedDialog(false));
+            String secondTrackName = "Not selected";
+            TextView secondFileNameText = findViewById(R.id.secondFileNameText);
+            if (secondAudioActive && secondFileNameText != null && !TextUtils.isEmpty(secondFileNameText.getText())) {
+                secondTrackName = secondFileNameText.getText().toString();
             }
 
-            options.add("Sync Track Positions");
-            actions.add(this::showPositionSyncDialog);
+            if (!mixerModeActive) {
+                mixerStatusText.setText("Mixer is OFF. Enable mixer mode to blend two tracks.");
+            } else if (!secondAudioActive) {
+                mixerStatusText.setText("Mixer is ON. Add a second track to unlock mix controls.");
+            } else {
+                mixerStatusText.setText("Mixer ready. Balance volumes, sync positions, and tune each speed.");
+            }
 
-            options.add("Clear Second Audio");
-            actions.add(this::clearSecondAudio);
-        }
+            mixerSecondTrackText.setText("Second track: " + secondTrackName);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Mixer Options")
-                .setItems(options.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
-                .show();
+            boolean hasSecondTrack = secondAudioActive;
+            balanceButton.setEnabled(hasSecondTrack);
+            syncButton.setEnabled(hasSecondTrack);
+            clearSecondButton.setEnabled(hasSecondTrack);
+            toggleIndividualSpeedButton.setEnabled(hasSecondTrack);
+            toggleIndividualSpeedButton.setText(useIndividualPlaybackSpeeds
+                    ? "Disable Individual Speeds"
+                    : "Enable Individual Speeds");
+
+            boolean showSpeedButtons = hasSecondTrack && useIndividualPlaybackSpeeds;
+            individualSpeedRow.setVisibility(showSpeedButtons ? View.VISIBLE : View.GONE);
+        };
+
+        updateUiState.run();
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Mixer Controls")
+                .setView(dialogView)
+                .setNegativeButton("Close", null)
+                .create();
+
+        mixerModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked != mixerModeActive) {
+                toggleMixerMode();
+                updateUiState.run();
+            }
+        });
+
+        selectSecondButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            selectSecondAudio();
+        });
+
+        balanceButton.setOnClickListener(v -> {
+            if (!secondAudioActive) {
+                Toast.makeText(this, "Select second audio first", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dialog.dismiss();
+            showBalanceDialog();
+        });
+
+        syncButton.setOnClickListener(v -> {
+            if (!secondAudioActive) {
+                Toast.makeText(this, "Select second audio first", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            dialog.dismiss();
+            showPositionSyncDialog();
+        });
+
+        toggleIndividualSpeedButton.setOnClickListener(v -> {
+            if (!secondAudioActive) {
+                Toast.makeText(this, "Select second audio first", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            toggleIndividualPlaybackSpeeds();
+            updateUiState.run();
+        });
+
+        primarySpeedButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            showIndividualSpeedDialog(true);
+        });
+
+        secondarySpeedButton.setOnClickListener(v -> {
+            dialog.dismiss();
+            showIndividualSpeedDialog(false);
+        });
+
+        clearSecondButton.setOnClickListener(v -> {
+            if (!secondAudioActive) {
+                return;
+            }
+            clearSecondAudio();
+            updateUiState.run();
+        });
+
+        dialog.show();
     }
 
     private void showEqualizerPanel() {
@@ -2700,9 +2767,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-                if (syncPositionButton != null) {
-                    syncPositionButton.setVisibility(View.VISIBLE);
-                }
             });
 
             // Error listener with improved error handling
@@ -3088,9 +3152,6 @@ public class MainActivity extends AppCompatActivity {
         
         // Rest of the method remains the same
         prepareSecondMediaPlayer();
-        
-        // Show sync button if both players are active
-        syncPositionButton.setVisibility(mixerModeActive ? View.VISIBLE : View.GONE);
         
         secondAudioActive = true;
         updateMixerIndicator();
@@ -3740,8 +3801,6 @@ public class MainActivity extends AppCompatActivity {
         
         // Show/hide second file name layout
         findViewById(R.id.secondFileNameLayout).setVisibility(mixerModeActive ? View.VISIBLE : View.GONE);
-        
-        syncPositionButton.setVisibility(mixerModeActive && secondAudioActive ? View.VISIBLE : View.GONE);
         
         // Update the mixer indicator
         updateMixerIndicator();
@@ -4528,9 +4587,6 @@ public class MainActivity extends AppCompatActivity {
         secondAudioUri = null;
         secondAudioActive = false;
         
-        // Hide sync button
-        syncPositionButton.setVisibility(View.GONE);
-        
         // Update mixer indicator
         updateMixerIndicator();
         
@@ -4847,6 +4903,12 @@ public class MainActivity extends AppCompatActivity {
                     // Start playing from the first song
                     uriToPlay = currentPlaylistSongs.get(0).getUri();
                     currentPlaylistIndex = 0;
+                }
+
+                // Optionally open just the playlist songs list without auto-playing.
+                if (intent.getBooleanExtra("SHOW_PLAYLIST_ONLY", false)) {
+                    showPlaylistSongs();
+                    return;
                 }
 
                 if (uriToPlay != null) {

@@ -458,18 +458,6 @@
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
 
-                <ImageButton
-                    android:id="@+id/syncPositionButton"
-                    android:layout_width="36dp"
-                    android:layout_height="36dp"
-                    android:layout_marginStart="8dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/position_sync_title"
-                    android:src="@drawable/ic_more"
-                    app:tint="@color/text_secondary"
-                    android:visibility="gone"
-                    android:padding="6dp" />
-
                 <TextView
                     android:id="@+id/mixerToggleButton"
                     android:layout_width="wrap_content"
@@ -493,16 +481,6 @@
                     android:textColor="@color/accent_primary" />
             </LinearLayout>
 
-            <!-- Collapse button -->
-            <ImageButton
-                android:id="@+id/collapsePlayerBtn"
-                android:layout_width="match_parent"
-                android:layout_height="28dp"
-                android:src="@drawable/ic_chevron_down"
-                app:tint="@color/text_tertiary"
-                android:background="?attr/selectableItemBackground"
-                android:contentDescription="Collapse player"
-                android:scaleType="center" />
         </LinearLayout>
     </LinearLayout>
 
