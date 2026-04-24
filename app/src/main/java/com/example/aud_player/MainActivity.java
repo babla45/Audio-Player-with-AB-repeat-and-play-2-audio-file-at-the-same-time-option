@@ -89,6 +89,9 @@ import androidx.documentfile.provider.DocumentFile;
 import android.app.PendingIntent;
 import android.content.IntentSender;
 import android.widget.ScrollView;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -121,6 +124,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
     private static final int PLAYBACK_MODE_RANDOM = 2;
     private static final float MORE_BUTTON_SWIPE_THRESHOLD_DP = 22f;
+    private static final String PREFS_MIXER_PRESETS_KEY = "saved_mixer_presets_v1";
     // Allow swipe gesture only from the small lower area (bottom ~18% of screen).
     private static final float BOTTOM_SWIPE_START_REGION_RATIO = 0.82f;
     private float bottomSwipeStartX = 0f;
@@ -368,6 +372,18 @@ public class MainActivity extends AppCompatActivity {
 
     // Add this as a class field
     private boolean shouldAutoPlay = false;
+
+    private static class SavedMixerPreset {
+        String name;
+        String primaryUri;
+        String secondaryUri;
+        float firstVolume;
+        float secondVolume;
+        boolean useIndividualSpeeds;
+        float globalSpeed;
+        float primarySpeed;
+        float secondarySpeed;
+    }
 
     private BroadcastReceiver playbackStoppedReceiver;
     private BroadcastReceiver timerUpdateReceiver;
@@ -926,6 +942,7 @@ public class MainActivity extends AppCompatActivity {
                         safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                         isPlaying = true;
                         updateSeekBar();
+                        startSecondTrackIfMixerReady();
 
                         // Start the service
                         startPlaybackService("ACTION_PLAY");
@@ -1329,12 +1346,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onPlaybackModeClicked() {
-                // Cycle through modes
-                currentPlaybackMode = (currentPlaybackMode + 1) % 3;
-                savePlaybackMode();
-                String[] modes = {"Repeat Current Song", "Play Next in List", "Random Play"};
-                Toast.makeText(MainActivity.this, "Mode: " + modes[currentPlaybackMode], Toast.LENGTH_SHORT).show();
+            public void onPlaybackModeClicked(View anchorView) {
+                showPlaybackModePopup(anchorView);
             }
 
             @Override
@@ -1383,6 +1396,41 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         menuSheet.show(getSupportFragmentManager(), "MenuBottomSheet");
+    }
+
+    private void showPlaybackModePopup(View anchorView) {
+        if (anchorView == null) {
+            return;
+        }
+
+        PopupMenu popupMenu = new PopupMenu(this, anchorView);
+        popupMenu.getMenu().add(0, PLAYBACK_MODE_REPEAT_CURRENT, 0, "Repeat Current Song");
+        popupMenu.getMenu().add(0, PLAYBACK_MODE_NEXT_IN_LIST, 1, "Play Next in List");
+        popupMenu.getMenu().add(0, PLAYBACK_MODE_RANDOM, 2, "Random Play");
+        popupMenu.getMenu().setGroupCheckable(0, true, true);
+
+        if (currentPlaybackMode >= PLAYBACK_MODE_REPEAT_CURRENT
+                && currentPlaybackMode <= PLAYBACK_MODE_RANDOM) {
+            popupMenu.getMenu().findItem(currentPlaybackMode).setChecked(true);
+        }
+
+        popupMenu.setOnMenuItemClickListener(item -> {
+            applyPlaybackMode(item.getItemId());
+            return true;
+        });
+        popupMenu.show();
+    }
+
+    private void applyPlaybackMode(int selectedMode) {
+        if (selectedMode < PLAYBACK_MODE_REPEAT_CURRENT || selectedMode > PLAYBACK_MODE_RANDOM) {
+            return;
+        }
+
+        currentPlaybackMode = selectedMode;
+        savePlaybackMode();
+
+        String[] modeOptions = {"Repeat Current Song", "Play Next in List", "Random Play"};
+        Toast.makeText(this, "Mode: " + modeOptions[currentPlaybackMode], Toast.LENGTH_SHORT).show();
     }
 
     private void setupMoreButtonSwipeGesture(View moreButton) {
@@ -1604,6 +1652,7 @@ public class MainActivity extends AppCompatActivity {
         Button primarySpeedButton = dialogView.findViewById(R.id.mixerPrimarySpeedButton);
         Button secondarySpeedButton = dialogView.findViewById(R.id.mixerSecondarySpeedButton);
         Button clearSecondButton = dialogView.findViewById(R.id.mixerClearSecondButton);
+        Button savedMixerButton = dialogView.findViewById(R.id.mixerSavedButton);
 
         final Runnable updateUiState = () -> {
             mixerModeSwitch.setChecked(mixerModeActive);
@@ -1701,6 +1750,8 @@ public class MainActivity extends AppCompatActivity {
             clearSecondAudio();
             updateUiState.run();
         });
+
+        savedMixerButton.setOnClickListener(v -> showSavedMixerDialog());
 
         dialog.show();
     }
@@ -2841,6 +2892,21 @@ public class MainActivity extends AppCompatActivity {
             secondMediaPlayer.seekTo(secondPosition);
         } catch (Exception e) {
             Log.e(TAG, "Error syncing second player position", e);
+        }
+    }
+
+    private void startSecondTrackIfMixerReady() {
+        if (mediaPlayer == null || secondMediaPlayer == null || !secondAudioActive) {
+            return;
+        }
+
+        try {
+            if (mediaPlayer.isPlaying() && !secondMediaPlayer.isPlaying()) {
+                syncSecondPlayerPosition();
+                secondMediaPlayer.start();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting second track for mixer", e);
         }
     }
 
@@ -4633,6 +4699,290 @@ public class MainActivity extends AppCompatActivity {
         updateMixerIndicator();
         
         Toast.makeText(this, "Second_audio_cleared", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showSavedMixerDialog() {
+        List<SavedMixerPreset> presets = loadSavedMixerPresets();
+        int padding = (int) (16 * getResources().getDisplayMetrics().density);
+        int itemPadding = (int) (12 * getResources().getDisplayMetrics().density);
+
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setPadding(padding, padding, padding, padding);
+        scrollView.addView(container);
+
+        if (presets.isEmpty()) {
+            TextView emptyText = new TextView(this);
+            emptyText.setText("No saved mixers yet.");
+            emptyText.setTextSize(14f);
+            emptyText.setTextColor(getResources().getColor(R.color.text_secondary, null));
+            container.addView(emptyText);
+        } else {
+            for (int i = 0; i < presets.size(); i++) {
+                SavedMixerPreset preset = presets.get(i);
+                View item = createSavedMixerItemView(preset, itemPadding, i + 1);
+                container.addView(item);
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Saved Mixer")
+                .setView(scrollView)
+                .setPositiveButton("Save New Mixer", (dialog, which) -> promptSaveCurrentMix())
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private View createSavedMixerItemView(SavedMixerPreset preset, int itemPadding, int index) {
+        LinearLayout itemLayout = new LinearLayout(this);
+        itemLayout.setOrientation(LinearLayout.VERTICAL);
+        itemLayout.setPadding(itemPadding, itemPadding, itemPadding, itemPadding);
+        itemLayout.setBackgroundResource(R.drawable.bg_saved_mixer_item);
+        itemLayout.setMinimumHeight((int) (76 * getResources().getDisplayMetrics().density));
+
+        LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        int bottomMargin = (int) (10 * getResources().getDisplayMetrics().density);
+        itemParams.bottomMargin = bottomMargin;
+        itemLayout.setLayoutParams(itemParams);
+
+        String firstSongName = "Unknown primary track";
+        String secondSongName = "Unknown secondary track";
+        try {
+            if (!TextUtils.isEmpty(preset.primaryUri)) {
+                firstSongName = getFileNameFromUri(Uri.parse(preset.primaryUri));
+            }
+            if (!TextUtils.isEmpty(preset.secondaryUri)) {
+                secondSongName = getFileNameFromUri(Uri.parse(preset.secondaryUri));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to parse saved mixer track uri", e);
+        }
+
+        TextView indexView = new TextView(this);
+        indexView.setText("Mixer " + index);
+        indexView.setSingleLine(true);
+        indexView.setTextSize(11.5f);
+        indexView.setTextColor(getResources().getColor(R.color.accent_primary, null));
+        LinearLayout.LayoutParams indexParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        indexParams.bottomMargin = (int) (4 * getResources().getDisplayMetrics().density);
+        indexView.setLayoutParams(indexParams);
+        itemLayout.addView(indexView);
+
+        TextView firstLine = new TextView(this);
+        firstLine.setText(firstSongName);
+        firstLine.setSingleLine(true);
+        firstLine.setEllipsize(TextUtils.TruncateAt.END);
+        firstLine.setTextSize(15.5f);
+        firstLine.setTextColor(getResources().getColor(R.color.text_primary, null));
+        firstLine.setTypeface(firstLine.getTypeface(), android.graphics.Typeface.BOLD);
+        itemLayout.addView(firstLine);
+
+        View divider = new View(this);
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (int) (1 * getResources().getDisplayMetrics().density)
+        );
+        dividerParams.topMargin = (int) (6 * getResources().getDisplayMetrics().density);
+        dividerParams.bottomMargin = (int) (6 * getResources().getDisplayMetrics().density);
+        divider.setLayoutParams(dividerParams);
+        divider.setBackgroundColor(getResources().getColor(R.color.divider, null));
+        itemLayout.addView(divider);
+
+        TextView secondLine = new TextView(this);
+        secondLine.setText(secondSongName);
+        secondLine.setSingleLine(true);
+        secondLine.setEllipsize(TextUtils.TruncateAt.END);
+        secondLine.setTextSize(14f);
+        secondLine.setTextColor(getResources().getColor(R.color.text_secondary, null));
+        itemLayout.addView(secondLine);
+
+        itemLayout.setClickable(true);
+        itemLayout.setFocusable(true);
+        itemLayout.setOnClickListener(v -> applySavedMixerPreset(preset));
+
+        return itemLayout;
+    }
+
+    private void promptSaveCurrentMix() {
+        if (selectedAudioUri == null || secondAudioUri == null) {
+            Toast.makeText(this, "Select primary and second audio first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String primaryName = getFileNameFromUri(selectedAudioUri);
+        String secondaryName = getFileNameFromUri(secondAudioUri);
+        String defaultName = "Mix: " + primaryName + " + " + secondaryName;
+
+        EditText input = new EditText(this);
+        input.setText(defaultName);
+        input.setSelection(defaultName.length());
+
+        new AlertDialog.Builder(this)
+                .setTitle("Save Mixer")
+                .setView(input)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    String name = input.getText() != null ? input.getText().toString().trim() : "";
+                    if (TextUtils.isEmpty(name)) {
+                        name = defaultName;
+                    }
+                    saveCurrentMixerPreset(name);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void saveCurrentMixerPreset(String name) {
+        if (selectedAudioUri == null || secondAudioUri == null) {
+            Toast.makeText(this, "Select both tracks before saving", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        SavedMixerPreset preset = new SavedMixerPreset();
+        preset.name = name;
+        preset.primaryUri = selectedAudioUri.toString();
+        preset.secondaryUri = secondAudioUri.toString();
+        preset.firstVolume = firstAudioVolume;
+        preset.secondVolume = secondAudioVolume;
+        preset.useIndividualSpeeds = useIndividualPlaybackSpeeds;
+        preset.globalSpeed = currentPlaybackSpeed;
+        preset.primarySpeed = primaryPlaybackSpeed;
+        preset.secondarySpeed = secondaryPlaybackSpeed;
+
+        List<SavedMixerPreset> presets = loadSavedMixerPresets();
+        presets.add(0, preset);
+        if (presets.size() > 20) {
+            presets = presets.subList(0, 20);
+        }
+        persistSavedMixerPresets(presets);
+        Toast.makeText(this, "Mixer saved", Toast.LENGTH_SHORT).show();
+    }
+
+    private void applySavedMixerPreset(SavedMixerPreset preset) {
+        if (preset == null || TextUtils.isEmpty(preset.primaryUri) || TextUtils.isEmpty(preset.secondaryUri)) {
+            Toast.makeText(this, "Saved mixer is invalid", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            selectedAudioUri = Uri.parse(preset.primaryUri);
+            secondAudioUri = Uri.parse(preset.secondaryUri);
+        } catch (Exception e) {
+            Toast.makeText(this, "Unable to load saved mixer", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (!mixerModeActive) {
+            toggleMixerMode();
+        }
+
+        currentPlaybackSpeed = preset.globalSpeed;
+        useIndividualPlaybackSpeeds = preset.useIndividualSpeeds;
+        primaryPlaybackSpeed = preset.primarySpeed;
+        secondaryPlaybackSpeed = preset.secondarySpeed;
+
+        fileNameText.setText(getFileNameFromUri(selectedAudioUri));
+        TextView secondFileNameText = findViewById(R.id.secondFileNameText);
+        if (secondFileNameText != null) {
+            secondFileNameText.setText(getFileNameFromUri(secondAudioUri));
+        }
+        updateMiniPlayer();
+
+        shouldAutoPlay = true;
+        prepareMediaPlayer();
+        prepareSecondMediaPlayer();
+        secondAudioActive = true;
+
+        applyAudioVolumes(preset.firstVolume, preset.secondVolume);
+
+        if (useIndividualPlaybackSpeeds) {
+            applyPrimarySpeed(primaryPlaybackSpeed);
+            applySecondarySpeed(secondaryPlaybackSpeed);
+        } else {
+            setPlaybackSpeed(currentPlaybackSpeed);
+        }
+
+        updateMixerIndicator();
+        Toast.makeText(this, "Playing saved mixer: " + preset.name, Toast.LENGTH_SHORT).show();
+    }
+
+    private List<SavedMixerPreset> loadSavedMixerPresets() {
+        List<SavedMixerPreset> presets = new ArrayList<>();
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        String raw = prefs.getString(PREFS_MIXER_PRESETS_KEY, "[]");
+
+        // Primary format: JSON array of presets.
+        try {
+            JSONArray array = new JSONArray(raw);
+            for (int i = 0; i < array.length(); i++) {
+                appendPresetFromJsonObject(presets, array.optJSONObject(i));
+            }
+            return presets;
+        } catch (JSONException ignored) {
+            // Legacy/invalid format handling below.
+        }
+
+        // Backward compatibility: old single-object format.
+        try {
+            JSONObject obj = new JSONObject(raw);
+            appendPresetFromJsonObject(presets, obj);
+            // Migrate to the new array format so next saves keep multiple entries.
+            persistSavedMixerPresets(presets);
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to parse saved mixer presets", e);
+        }
+        return presets;
+    }
+
+    private void appendPresetFromJsonObject(List<SavedMixerPreset> presets, JSONObject obj) {
+        if (obj == null) {
+            return;
+        }
+
+        SavedMixerPreset preset = new SavedMixerPreset();
+        preset.name = obj.optString("name", "Saved Mix");
+        preset.primaryUri = obj.optString("primaryUri", "");
+        preset.secondaryUri = obj.optString("secondaryUri", "");
+        preset.firstVolume = (float) obj.optDouble("firstVolume", 1.0);
+        preset.secondVolume = (float) obj.optDouble("secondVolume", 1.0);
+        preset.useIndividualSpeeds = obj.optBoolean("useIndividualSpeeds", false);
+        preset.globalSpeed = (float) obj.optDouble("globalSpeed", 1.0);
+        preset.primarySpeed = (float) obj.optDouble("primarySpeed", 1.0);
+        preset.secondarySpeed = (float) obj.optDouble("secondarySpeed", 1.0);
+
+        if (!TextUtils.isEmpty(preset.primaryUri) && !TextUtils.isEmpty(preset.secondaryUri)) {
+            presets.add(preset);
+        }
+    }
+
+    private void persistSavedMixerPresets(List<SavedMixerPreset> presets) {
+        JSONArray array = new JSONArray();
+        for (SavedMixerPreset preset : presets) {
+            JSONObject obj = new JSONObject();
+            try {
+                obj.put("name", preset.name);
+                obj.put("primaryUri", preset.primaryUri);
+                obj.put("secondaryUri", preset.secondaryUri);
+                obj.put("firstVolume", preset.firstVolume);
+                obj.put("secondVolume", preset.secondVolume);
+                obj.put("useIndividualSpeeds", preset.useIndividualSpeeds);
+                obj.put("globalSpeed", preset.globalSpeed);
+                obj.put("primarySpeed", preset.primarySpeed);
+                obj.put("secondarySpeed", preset.secondarySpeed);
+                array.put(obj);
+            } catch (JSONException e) {
+                Log.e(TAG, "Failed to save mixer preset item", e);
+            }
+        }
+
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        prefs.edit().putString(PREFS_MIXER_PRESETS_KEY, array.toString()).apply();
     }
 
     private void setPointA() {

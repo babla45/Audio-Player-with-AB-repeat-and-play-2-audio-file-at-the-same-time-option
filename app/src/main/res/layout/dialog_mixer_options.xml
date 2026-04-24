@@ -113,5 +113,12 @@
             android:layout_marginTop="8dp"
             android:text="Clear Second Audio" />
 
+        <Button
+            android:id="@+id/mixerSavedButton"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="8dp"
+            android:text="Saved Mixer" />
+
     </LinearLayout>
 </ScrollView>

@@ -23,7 +23,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onSortClicked();
         void onTimerClicked();
         void onABRepeatClicked();
-        void onPlaybackModeClicked();
+        void onPlaybackModeClicked(View anchorView);
         void onSpeedClicked();
         void onEqualizerClicked();
         void onSettingsClicked();
@@ -70,8 +70,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         });
 
         view.findViewById(R.id.menu_playback_mode_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onPlaybackModeClicked();
-            dismiss();
+            if (listener != null) listener.onPlaybackModeClicked(v);
         });
 
         view.findViewById(R.id.menu_speed_btn).setOnClickListener(v -> {
