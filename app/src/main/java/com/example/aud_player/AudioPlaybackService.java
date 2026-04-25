@@ -27,6 +27,13 @@ import android.view.KeyEvent;
 import android.content.ComponentName;
 
 import android.telephony.TelephonyManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.Color;
 
 public class AudioPlaybackService extends Service {
     private static final String TAG = "AudioPlaybackService";
@@ -57,6 +64,7 @@ public class AudioPlaybackService extends Service {
     private boolean isForegroundStarted = false;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
+    private Bitmap notificationArtwork;
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -417,21 +425,12 @@ public class AudioPlaybackService extends Service {
         if (mediaSession == null) return;
         try {
             long duration = (mediaPlayer != null) ? mediaPlayer.getDuration() : 0;
+            Bitmap art = getOrCreateNotificationArtwork();
             MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
                     .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
                     .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "AudPlayer")
-                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
-
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.R) {
-                try {
-                    // MIUI 14 dark mode bug: If we pass no album art, it extracts white from the app icon.
-                    // Passing a solid dark gray 1x1 bitmap forces the system media notification to be dark,
-                    // fixing the unreadable white text issue.
-                    android.graphics.Bitmap art = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888);
-                    art.eraseColor(0xFF202020);
-                    metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
-                } catch (Exception ignored) {}
-            }
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
 
             mediaSession.setMetadata(metadataBuilder.build());
         } catch (Exception e) {
@@ -575,12 +574,18 @@ public class AudioPlaybackService extends Service {
         // many Android 11 devices (including Itel Vision 3).
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(currentTitle)
-            .setContentText(isPlaying ? "Playing" : "Paused")
+            .setContentText(isPlaying ? "Now playing" : "Playback paused")
+            .setSubText("AudPlayer Mini Player")
             .setSmallIcon(R.drawable.ic_music_note)
+            .setLargeIcon(getOrCreateNotificationArtwork())
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setColor(0xFF7C4DFF)
+            .setColorized(true)
             // Add prev, play/pause, next
             .addAction(android.R.drawable.ic_media_previous, "Previous", prevPendingIntent)
             .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play,
@@ -599,6 +604,41 @@ public class AudioPlaybackService extends Service {
         }
 
         return builder.build();
+    }
+
+    private Bitmap getOrCreateNotificationArtwork() {
+        if (notificationArtwork != null && !notificationArtwork.isRecycled()) {
+            return notificationArtwork;
+        }
+
+        final int size = 256;
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+
+        Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        Shader gradient = new LinearGradient(
+                0, 0, size, size,
+                new int[]{0xFF7C4DFF, 0xFF00BCD4, 0xFFFF6F91},
+                new float[]{0f, 0.55f, 1f},
+                Shader.TileMode.CLAMP
+        );
+        backgroundPaint.setShader(gradient);
+        canvas.drawRect(0, 0, size, size, backgroundPaint);
+
+        Paint circlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        circlePaint.setColor(0x33FFFFFF);
+        canvas.drawCircle(size / 2f, size / 2f, size * 0.35f, circlePaint);
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTypeface(Typeface.create(Typeface.DEFAULT_BOLD, Typeface.BOLD));
+        textPaint.setTextSize(64f);
+        float textY = (size / 2f) - ((textPaint.descent() + textPaint.ascent()) / 2f);
+        canvas.drawText("BABLA", size / 2f, textY, textPaint);
+
+        notificationArtwork = bitmap;
+        return notificationArtwork;
     }
 
     // Expose current state so the Activity can restore UI after it was killed.
@@ -647,6 +687,10 @@ public class AudioPlaybackService extends Service {
                 mediaSession.setActive(false);
                 mediaSession.release();
                 mediaSession = null;
+            }
+            if (notificationArtwork != null && !notificationArtwork.isRecycled()) {
+                notificationArtwork.recycle();
+                notificationArtwork = null;
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
