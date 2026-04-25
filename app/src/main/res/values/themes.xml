@@ -20,7 +20,7 @@
         <!-- Status bar -->
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/bottom_nav_bg</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
 
         <!-- Text colors -->
         <item name="android:textColorPrimary">@color/text_primary</item>

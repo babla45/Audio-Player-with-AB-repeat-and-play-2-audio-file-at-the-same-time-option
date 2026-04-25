@@ -10,9 +10,11 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.text.TextUtils;
+import android.content.res.ColorStateList;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
@@ -242,10 +244,13 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             for (int i = 0; i < tileLayout.getChildCount(); i++) {
                 View child = tileLayout.getChildAt(i);
                 if (child instanceof ImageView) {
+                    ImageView icon = (ImageView) child;
                     ViewGroup.LayoutParams lp = child.getLayoutParams();
                     lp.width = iconSize;
                     lp.height = iconSize;
                     child.setLayoutParams(lp);
+                    icon.setImageTintList(ColorStateList.valueOf(
+                            ContextCompat.getColor(requireContext(), R.color.text_primary)));
                 } else if (child instanceof TextView) {
                     TextView label = (TextView) child;
                     label.setSingleLine(true);

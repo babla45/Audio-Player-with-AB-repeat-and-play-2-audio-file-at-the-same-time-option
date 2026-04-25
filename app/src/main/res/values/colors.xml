@@ -12,12 +12,12 @@
     <!-- ═══ NEW DESIGN SYSTEM ═══ -->
 
     <!-- Backgrounds -->
-    <color name="background">#0F0F1A</color>
-    <color name="surface_900">#141428</color>
-    <color name="surface_800">#1A1A2E</color>
-    <color name="surface_700">#252540</color>
-    <color name="surface_600">#363650</color>
-    <color name="surface_500">#484868</color>
+    <color name="background">#FFFFFFFF</color>
+    <color name="surface_900">#FFFFFFFF</color>
+    <color name="surface_800">#FFFFFFFF</color>
+    <color name="surface_700">#FFF7F7F7</color>
+    <color name="surface_600">#FFEFEFEF</color>
+    <color name="surface_500">#FFE5E5E5</color>
 
     <!-- Accent Colors -->
     <color name="accent_primary">#6C63FF</color>
@@ -26,9 +26,9 @@
     <color name="accent_surface">#1A6C63FF</color>
 
     <!-- Text Colors -->
-    <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#B0B0C0</color>
-    <color name="text_tertiary">#6E6E80</color>
+    <color name="text_primary">#FF111111</color>
+    <color name="text_secondary">#FF4A4A4A</color>
+    <color name="text_tertiary">#FF7A7A7A</color>
     <color name="text_on_accent">#FFFFFF</color>
 
     <!-- Semantic Colors -->
@@ -37,35 +37,35 @@
     <color name="error">#EF5350</color>
 
     <!-- Component Colors -->
-    <color name="search_bar_bg">#252540</color>
+    <color name="search_bar_bg">#FFF3F3F3</color>
     <color name="chip_selected_bg">#6C63FF</color>
-    <color name="chip_unselected_bg">#252540</color>
-    <color name="mini_player_bg">#1E1E38</color>
+    <color name="chip_unselected_bg">#FFF1F1F1</color>
+    <color name="mini_player_bg">#FFFFFFFF</color>
     <!-- Slightly darker than surface_900 so bottom nav is distinct -->
-    <color name="bottom_nav_bg">#101022</color>
+    <color name="bottom_nav_bg">#FFFFFFFF</color>
     <!-- Slightly darker than song list items (surface_800) for better separation -->
-    <color name="bottom_sheet_bg">#16162B</color>
-    <color name="menu_grid_item_bg">#252540</color>
-    <color name="divider">#2A2A45</color>
+    <color name="bottom_sheet_bg">#FFFFFFFF</color>
+    <color name="menu_grid_item_bg">#FFF5F5F5</color>
+    <color name="divider">#FFE3E3E3</color>
     <!-- Subtle card outline used for list items -->
-    <color name="card_stroke">#332A2A45</color>
+    <color name="card_stroke">#1F000000</color>
     <!-- Separate the player panel from the list area -->
-    <color name="player_panel_bg">#121226</color>
-    <color name="ripple_light">#20FFFFFF</color>
-    <color name="icon_container_bg">#20888888</color>
+    <color name="player_panel_bg">#FFFFFFFF</color>
+    <color name="ripple_light">#14000000</color>
+    <color name="icon_container_bg">#12000000</color>
     <color name="now_playing_glow">#806C63FF</color>
-    <color name="seekbar_inactive">#363650</color>
+    <color name="seekbar_inactive">#FFD4D4D4</color>
 
     <!-- Player Colors (updated, kept old names for Java compatibility) -->
-    <color name="player_button_bg">#252540</color>
-    <color name="player_button_icon">#FFFFFF</color>
+    <color name="player_button_bg">#FFF2F2F2</color>
+    <color name="player_button_icon">#FF111111</color>
     <color name="player_primary_button_bg">#6C63FF</color>
-    <color name="player_background">#0F0F1A</color>
-    <color name="player_text">#FFFFFF</color>
+    <color name="player_background">#FFFFFFFF</color>
+    <color name="player_text">#FF111111</color>
     <color name="player_seekbar_progress">#6C63FF</color>
-    <color name="player_seekbar_background">#363650</color>
+    <color name="player_seekbar_background">#FFD4D4D4</color>
     <color name="colorPlayingHighlight">#6C63FF</color>
-    <color name="colorCardBackground">#1A1A2E</color>
+    <color name="colorCardBackground">#FFFFFFFF</color>
 
     <!-- Material Theme Overrides -->
     <color name="design_default_color_primary">#6C63FF</color>

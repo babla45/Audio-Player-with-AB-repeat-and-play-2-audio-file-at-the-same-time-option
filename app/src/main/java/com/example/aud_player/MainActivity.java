@@ -58,6 +58,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
@@ -182,6 +183,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
     private static final String PREF_ALLOW_AUDIO_MIX = "allow_audio_mix";
     private static final String PREF_AUTO_SLIDE_TO_CURRENT = "auto_slide_to_current_song";
+    private static final String PREF_THEME_MODE = "theme_mode";
+    private static final int THEME_MODE_WHITE = 0;
+    private static final int THEME_MODE_BLUISH_BLACK = 1;
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -416,6 +420,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        applySavedThemeMode();
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -4720,6 +4725,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_auto_slide_current) {
                 showAutoSlideSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_theme) {
+                showThemeSettingsDialog();
+                return true;
             } else if (itemId == R.id.settings_how_to_use) {
                 showHowToUseDialog();
                 return true;
@@ -4728,6 +4736,42 @@ public class MainActivity extends AppCompatActivity {
         });
 
         popup.show();
+    }
+
+    private void applySavedThemeMode() {
+        int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        if (savedThemeMode == THEME_MODE_BLUISH_BLACK) {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
+        } else {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+        }
+    }
+
+    private void showThemeSettingsDialog() {
+        final String[] options = {"White", "Bluish Black"};
+        int currentThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        final int[] selected = {currentThemeMode};
+
+        new AlertDialog.Builder(this)
+                .setTitle("App Theme")
+                .setSingleChoiceItems(options, currentThemeMode, (dialog, which) -> selected[0] = which)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    int newMode = selected[0];
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putInt(PREF_THEME_MODE, newMode)
+                            .apply();
+
+                    if (newMode == THEME_MODE_BLUISH_BLACK) {
+                        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
+                    } else {
+                        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private boolean isAllowAudioMixEnabled() {

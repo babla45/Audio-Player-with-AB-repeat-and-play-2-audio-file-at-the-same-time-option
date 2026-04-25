@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark palette for Bluish Black theme -->
+    <color name="background">#0F0F1A</color>
+    <color name="surface_900">#141428</color>
+    <color name="surface_800">#1A1A2E</color>
+    <color name="surface_700">#252540</color>
+    <color name="surface_600">#363650</color>
+    <color name="surface_500">#484868</color>
+
+    <color name="accent_primary">#6C63FF</color>
+    <color name="accent_secondary">#E040FB</color>
+    <color name="accent_primary_dim">#336C63FF</color>
+    <color name="accent_surface">#1A6C63FF</color>
+
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFB0B0C0</color>
+    <color name="text_tertiary">#FF6E6E80</color>
+    <color name="text_on_accent">#FFFFFFFF</color>
+
+    <color name="success">#4CAF50</color>
+    <color name="warning">#FFB74D</color>
+    <color name="error">#EF5350</color>
+
+    <color name="search_bar_bg">#252540</color>
+    <color name="chip_selected_bg">#6C63FF</color>
+    <color name="chip_unselected_bg">#252540</color>
+    <color name="mini_player_bg">#1E1E38</color>
+    <color name="bottom_nav_bg">#101022</color>
+    <color name="bottom_sheet_bg">#16162B</color>
+    <color name="menu_grid_item_bg">#252540</color>
+    <color name="divider">#2A2A45</color>
+    <color name="card_stroke">#332A2A45</color>
+    <color name="player_panel_bg">#121226</color>
+    <color name="ripple_light">#20FFFFFF</color>
+    <color name="icon_container_bg">#20888888</color>
+    <color name="now_playing_glow">#806C63FF</color>
+    <color name="seekbar_inactive">#363650</color>
+
+    <color name="player_button_bg">#252540</color>
+    <color name="player_button_icon">#FFFFFFFF</color>
+    <color name="player_primary_button_bg">#6C63FF</color>
+    <color name="player_background">#0F0F1A</color>
+    <color name="player_text">#FFFFFFFF</color>
+    <color name="player_seekbar_progress">#6C63FF</color>
+    <color name="player_seekbar_background">#363650</color>
+    <color name="colorPlayingHighlight">#6C63FF</color>
+    <color name="colorCardBackground">#1A1A2E</color>
+
+    <color name="design_default_color_primary">#6C63FF</color>
+    <color name="design_default_color_secondary">#E040FB</color>
+</resources>
