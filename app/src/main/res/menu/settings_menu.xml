@@ -13,6 +13,9 @@
         android:id="@+id/settings_theme"
         android:title="Theme" />
     <item
+        android:id="@+id/settings_mini_player_theme"
+        android:title="Mini player theme" />
+    <item
         android:id="@+id/settings_how_to_use"
         android:title="How to use app" />
 </menu> 

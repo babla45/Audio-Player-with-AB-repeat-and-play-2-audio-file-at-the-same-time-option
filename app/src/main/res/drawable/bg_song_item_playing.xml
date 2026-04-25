@@ -12,12 +12,13 @@
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/radius_lg" />
             <gradient
-                android:startColor="@color/accent_surface"
-                android:endColor="@android:color/system_accent3_600"
+                android:startColor="#226C63FF"
+                android:centerColor="#186C63FF"
+                android:endColor="#0F6C63FF"
                 android:angle="135" />
             <stroke
                 android:width="1dp"
-                android:color="@color/card_stroke" />
+                android:color="#336C63FF" />
         </shape>
     </item>
 </ripple>

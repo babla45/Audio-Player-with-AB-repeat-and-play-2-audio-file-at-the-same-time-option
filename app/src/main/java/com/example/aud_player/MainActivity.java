@@ -184,8 +184,11 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_ALLOW_AUDIO_MIX = "allow_audio_mix";
     private static final String PREF_AUTO_SLIDE_TO_CURRENT = "auto_slide_to_current_song";
     private static final String PREF_THEME_MODE = "theme_mode";
+    private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
+    private static final int MINI_PLAYER_THEME_CURRENT = 0;
+    private static final int MINI_PLAYER_THEME_WHITE = 1;
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -684,6 +687,7 @@ public class MainActivity extends AppCompatActivity {
             miniPlayPauseBtn = findViewById(R.id.miniPlayPauseBtn);
             miniProgressBar = findViewById(R.id.miniProgressBar);
             expandedPlayerControls = findViewById(R.id.expandedPlayerControls);
+            applyMiniPlayerTheme();
 
             // App bar menu button (top-right dots)
             ImageButton appBarMenuButton = findViewById(R.id.appBarMenuButton);
@@ -4728,6 +4732,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_theme) {
                 showThemeSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_mini_player_theme) {
+                showMiniPlayerThemeSettingsDialog();
+                return true;
             } else if (itemId == R.id.settings_how_to_use) {
                 showHowToUseDialog();
                 return true;
@@ -4772,6 +4779,78 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void showMiniPlayerThemeSettingsDialog() {
+        final String[] options = {"Current", "White"};
+        int currentMiniTheme = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
+        if (currentMiniTheme < MINI_PLAYER_THEME_CURRENT || currentMiniTheme > MINI_PLAYER_THEME_WHITE) {
+            currentMiniTheme = MINI_PLAYER_THEME_CURRENT;
+        }
+        final int[] selected = {currentMiniTheme};
+
+        new AlertDialog.Builder(this)
+                .setTitle("Mini Player Theme")
+                .setSingleChoiceItems(options, currentMiniTheme, (dialog, which) -> selected[0] = which)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putInt(PREF_MINI_PLAYER_THEME, selected[0])
+                            .apply();
+                    applyMiniPlayerTheme();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void applyMiniPlayerTheme() {
+        if (miniPlayerBar == null) return;
+
+        int miniTheme = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
+        if (miniTheme < MINI_PLAYER_THEME_CURRENT || miniTheme > MINI_PLAYER_THEME_WHITE) {
+            miniTheme = MINI_PLAYER_THEME_CURRENT;
+        }
+
+        ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
+        if (miniTheme == MINI_PLAYER_THEME_WHITE) {
+            miniPlayerBar.setBackgroundResource(R.drawable.bg_mini_player_white);
+            miniPlayerBar.setElevation(dpToPx(6));
+
+            if (miniPlayerTitle != null) {
+                miniPlayerTitle.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+            }
+            if (miniPlayerSubtitle != null) {
+                miniPlayerSubtitle.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+            }
+            if (miniPlayPauseBtn != null) {
+                miniPlayPauseBtn.setColorFilter(ContextCompat.getColor(this, R.color.accent_primary));
+            }
+            if (expandBtn != null) {
+                expandBtn.setColorFilter(ContextCompat.getColor(this, R.color.text_secondary));
+            }
+        } else {
+            miniPlayerBar.setBackgroundResource(R.drawable.gradient_accent);
+            miniPlayerBar.setElevation(dpToPx(2));
+
+            if (miniPlayerTitle != null) {
+                miniPlayerTitle.setTextColor(ContextCompat.getColor(this, R.color.white));
+            }
+            if (miniPlayerSubtitle != null) {
+                miniPlayerSubtitle.setTextColor(ContextCompat.getColor(this, R.color.white));
+            }
+            if (miniPlayPauseBtn != null) {
+                miniPlayPauseBtn.setColorFilter(ContextCompat.getColor(this, R.color.white));
+            }
+            if (expandBtn != null) {
+                expandBtn.setColorFilter(ContextCompat.getColor(this, R.color.white));
+            }
+        }
+    }
+
+    private float dpToPx(int dp) {
+        return dp * getResources().getDisplayMetrics().density;
     }
 
     private boolean isAllowAudioMixEnabled() {
