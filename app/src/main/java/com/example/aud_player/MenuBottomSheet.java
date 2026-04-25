@@ -7,7 +7,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -141,6 +143,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             mixerToggleIcon.setImageResource(mixerEnabled ? R.drawable.ic_mixer_on : R.drawable.ic_mixer_off);
         }
 
+        normalizeMenuGridAppearance(view);
+
         return view;
     }
 
@@ -204,5 +208,57 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                     return false;
             }
         });
+    }
+
+    private void normalizeMenuGridAppearance(View root) {
+        final int tileMinHeight = dpToPx(54);
+        final int iconSize = dpToPx(24);
+        final int[] tileIds = new int[] {
+                R.id.menu_sort_btn,
+                R.id.menu_timer_btn,
+                R.id.menu_ab_repeat_btn,
+                R.id.menu_playback_mode_btn,
+                R.id.menu_speed_btn,
+                R.id.menu_equalizer_btn,
+                R.id.menu_settings_btn,
+                R.id.menu_refresh_btn,
+                R.id.menu_add_to_playlist_btn,
+                R.id.menu_exit_btn,
+                R.id.menu_browse_btn,
+                R.id.menu_mixer_toggle_btn
+        };
+
+        for (int tileId : tileIds) {
+            View tile = root.findViewById(tileId);
+            if (!(tile instanceof LinearLayout)) {
+                continue;
+            }
+            LinearLayout tileLayout = (LinearLayout) tile;
+            tileLayout.setMinimumHeight(tileMinHeight);
+            int compactPadding = dpToPx(10);
+            tileLayout.setPadding(compactPadding, compactPadding, compactPadding, compactPadding);
+            tileLayout.setGravity(android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.CENTER_VERTICAL);
+
+            for (int i = 0; i < tileLayout.getChildCount(); i++) {
+                View child = tileLayout.getChildAt(i);
+                if (child instanceof ImageView) {
+                    ViewGroup.LayoutParams lp = child.getLayoutParams();
+                    lp.width = iconSize;
+                    lp.height = iconSize;
+                    child.setLayoutParams(lp);
+                } else if (child instanceof TextView) {
+                    TextView label = (TextView) child;
+                    label.setSingleLine(true);
+                    label.setMaxLines(1);
+                    label.setEllipsize(TextUtils.TruncateAt.END);
+                    label.setGravity(android.view.Gravity.CENTER);
+                    label.setTextSize(12f);
+                }
+            }
+        }
+    }
+
+    private int dpToPx(int dp) {
+        return Math.round(dp * requireContext().getResources().getDisplayMetrics().density);
     }
 }
