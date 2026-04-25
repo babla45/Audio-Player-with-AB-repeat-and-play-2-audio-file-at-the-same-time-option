@@ -4819,10 +4819,10 @@ public class MainActivity extends AppCompatActivity {
             miniPlayerBar.setElevation(dpToPx(6));
 
             if (miniPlayerTitle != null) {
-                miniPlayerTitle.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+                miniPlayerTitle.setTextColor(ContextCompat.getColor(this, R.color.mini_player_text_primary));
             }
             if (miniPlayerSubtitle != null) {
-                miniPlayerSubtitle.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+                miniPlayerSubtitle.setTextColor(ContextCompat.getColor(this, R.color.mini_player_text_secondary));
             }
             if (miniPlayPauseBtn != null) {
                 miniPlayPauseBtn.setColorFilter(ContextCompat.getColor(this, R.color.accent_primary));

@@ -41,6 +41,8 @@
     <color name="chip_selected_bg">#6C63FF</color>
     <color name="chip_unselected_bg">#FFF1F1F1</color>
     <color name="mini_player_bg">#FFFFFFFF</color>
+    <color name="mini_player_text_primary">#FF111111</color>
+    <color name="mini_player_text_secondary">#FF4A4A4A</color>
     <!-- Slightly darker than surface_900 so bottom nav is distinct -->
     <color name="bottom_nav_bg">#FFFFFFFF</color>
     <!-- Slightly darker than song list items (surface_800) for better separation -->
