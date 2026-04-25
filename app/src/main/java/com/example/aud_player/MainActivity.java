@@ -259,6 +259,10 @@ public class MainActivity extends AppCompatActivity {
     // Guards async MediaPlayer callbacks so stale events from a previous
     // quick tap do not interrupt the newly selected song.
     private int prepareRequestVersion = 0;
+    // Some devices/providers intermittently fail on first prepare for a URI.
+    // Track one short auto-retry per URI to avoid forcing the user to tap twice.
+    private Uri lastAutoRetriedUri = null;
+    private long lastAutoRetryAtMs = 0L;
 
     // Add these declarations with your other class variables
     private CountDownTimer sleepTimer;
@@ -1069,7 +1073,7 @@ public class MainActivity extends AppCompatActivity {
             autoScrollToCurrentSongIfEnabled();
 
             // Set data source from URI
-            mediaPlayer.setDataSource(getApplicationContext(), selectedAudioUri);
+            mediaPlayer.setDataSource(getApplicationContext(), requestUri);
 
             // Set listeners before preparing
             mediaPlayer.setOnPreparedListener(mp -> {
@@ -1094,11 +1098,13 @@ public class MainActivity extends AppCompatActivity {
                     // Check if we should auto-play
                     if (shouldAutoPlay) {
                         // Start playing automatically
-                        mediaPlayer.start();
+                        mp.start();
                         safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                         isPlaying = true;
                         updateSeekBar();
                         startSecondTrackIfMixerReady();
+                        lastAutoRetriedUri = null;
+                        lastAutoRetryAtMs = 0L;
 
                         // Start the service
                         startPlaybackService("ACTION_PLAY");
@@ -1138,6 +1144,17 @@ public class MainActivity extends AppCompatActivity {
                     Log.w(TAG, "Ignoring stale MediaPlayer error callback: what=" + what + ", extra=" + extra);
                     return true;
                 }
+
+                if (shouldAttemptPrepareRetry(requestUri)) {
+                    Log.w(TAG, "Transient MediaPlayer error, auto-retrying once: what=" + what + ", extra=" + extra);
+                    markPrepareRetry(requestUri);
+                    releaseMediaPlayer();
+                    initMediaPlayer();
+                    shouldAutoPlay = true;
+                    handler.postDelayed(this::prepareMediaPlayer, 140);
+                    return true;
+                }
+
                 Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
                 Toast.makeText(MainActivity.this,
                         "Error playing this file", Toast.LENGTH_SHORT).show();
@@ -1164,6 +1181,18 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
             shouldAutoPlay = false; // Reset flag on error
         }
+    }
+
+    private boolean shouldAttemptPrepareRetry(Uri uri) {
+        if (uri == null) return false;
+        if (!uri.equals(selectedAudioUri)) return false;
+        if (lastAutoRetriedUri == null || !uri.equals(lastAutoRetriedUri)) return true;
+        return (System.currentTimeMillis() - lastAutoRetryAtMs) > 3000L;
+    }
+
+    private void markPrepareRetry(Uri uri) {
+        lastAutoRetriedUri = uri;
+        lastAutoRetryAtMs = System.currentTimeMillis();
     }
 
     private void handleSongCompletion() {
