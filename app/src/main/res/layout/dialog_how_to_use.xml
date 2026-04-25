@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Quick manual"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:lineSpacingExtra="2dp"
+            android:text="1) Select and play\nTap any song in the list to play it. Use play/pause, next/previous, and seek controls in the player.\n\n2) Gestures and quick actions\n- Swipe up/down on the mini player area to expand/collapse now-playing controls.\n- Swipe up from the bottom navigation area to open More options quickly.\n- Tap the expand arrow to open/close the full player controls.\n\n3) Search, sort, and list behavior\nUse search to quickly filter songs. Use sort options to order by name, date, size, or duration. Turn on Auto slide to current song in Settings to keep the current track visible in the list.\n\n4) Mixer mode (dual track)\nEnable Mixer mode to play a second track with the primary track. You can select second audio, adjust balance, sync tracks, and save/load mixer presets.\n\n5) Playlists\nCreate playlists, add songs from file options, and open playlist details to play in sequence.\n\n6) Sleep timer\nSet a timer to pause playback or close the app automatically.\n\n7) Playback behavior setting\nPlay alongside other apps lets AudPlayer continue playback when other apps start audio/video.\n\n8) Useful tips\n- If no song appears, refresh permissions and verify local media access.\n- If a selected song is not visible in list, clear search filter.\n- Use saved mixers for quick repeat setups."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+    </LinearLayout>
+
+</ScrollView>

@@ -6,4 +6,10 @@
     <item
         android:id="@+id/settings_audio_focus"
         android:title="Play alongside other apps" />
+    <item
+        android:id="@+id/settings_auto_slide_current"
+        android:title="Auto slide to current song" />
+    <item
+        android:id="@+id/settings_how_to_use"
+        android:title="How to use app" />
 </menu> 

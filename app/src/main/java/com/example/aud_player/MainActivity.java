@@ -181,6 +181,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_NOW_PLAYING_URI = "now_playing_uri";
     private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
     private static final String PREF_ALLOW_AUDIO_MIX = "allow_audio_mix";
+    private static final String PREF_AUTO_SLIDE_TO_CURRENT = "auto_slide_to_current_song";
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -1016,6 +1017,7 @@ public class MainActivity extends AppCompatActivity {
             if (audioAdapter != null) {
                 audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
             }
+            autoScrollToCurrentSongIfEnabled();
 
             // Set data source from URI
             mediaPlayer.setDataSource(getApplicationContext(), selectedAudioUri);
@@ -3397,6 +3399,7 @@ public class MainActivity extends AppCompatActivity {
         if (audioAdapter != null && audioFile != null) {
             audioAdapter.setCurrentlyPlayingUri(audioFile.getUri());
         }
+        autoScrollToCurrentSongIfEnabled();
     }
 
     private void onSecondAudioSelected(AudioFile audioFile) {
@@ -3785,6 +3788,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 setupAudioAdapter();
             }
+            autoScrollToCurrentSongIfEnabled();
         }
     }
 
@@ -4606,6 +4610,12 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_audio_focus) {
                 showAudioFocusSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_auto_slide_current) {
+                showAutoSlideSettingsDialog();
+                return true;
+            } else if (itemId == R.id.settings_how_to_use) {
+                showHowToUseDialog();
+                return true;
             }
             return false;
         });
@@ -4659,6 +4669,64 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to apply audio mix preference change", e);
+        }
+    }
+
+    private boolean isAutoSlideToCurrentSongEnabled() {
+        try {
+            return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getBoolean(PREF_AUTO_SLIDE_TO_CURRENT, false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void showAutoSlideSettingsDialog() {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_auto_slide_current, null);
+        Switch autoSlideSwitch = dialogView.findViewById(R.id.switch_auto_slide_current);
+        autoSlideSwitch.setChecked(isAutoSlideToCurrentSongEnabled());
+
+        new AlertDialog.Builder(this)
+                .setTitle("List behavior")
+                .setView(dialogView)
+                .setPositiveButton("Save", (d, which) -> {
+                    boolean enabled = autoSlideSwitch.isChecked();
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putBoolean(PREF_AUTO_SLIDE_TO_CURRENT, enabled)
+                            .apply();
+                    if (enabled) {
+                        autoScrollToCurrentSongIfEnabled();
+                    }
+                    Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showHowToUseDialog() {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_how_to_use, null);
+        new AlertDialog.Builder(this)
+                .setTitle("How to use AudPlayer")
+                .setView(dialogView)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void autoScrollToCurrentSongIfEnabled() {
+        if (!isAutoSlideToCurrentSongEnabled()) return;
+        if (audioRecyclerView == null || audioAdapter == null || filteredAudioFiles == null || filteredAudioFiles.isEmpty()) {
+            return;
+        }
+
+        int currentIndex = getCurrentSongIndexInList(filteredAudioFiles);
+        if (currentIndex < 0) return;
+
+        RecyclerView.LayoutManager lm = audioRecyclerView.getLayoutManager();
+        if (lm instanceof LinearLayoutManager) {
+            ((LinearLayoutManager) lm).scrollToPositionWithOffset(currentIndex, 120);
+        } else {
+            audioRecyclerView.scrollToPosition(currentIndex);
         }
     }
 
