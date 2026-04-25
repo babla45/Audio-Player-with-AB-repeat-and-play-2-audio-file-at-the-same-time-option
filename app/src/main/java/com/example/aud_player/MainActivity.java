@@ -256,6 +256,9 @@ public class MainActivity extends AppCompatActivity {
     // Make sure these are properly declared in your class
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable runnable;
+    // Guards async MediaPlayer callbacks so stale events from a previous
+    // quick tap do not interrupt the newly selected song.
+    private int prepareRequestVersion = 0;
 
     // Add these declarations with your other class variables
     private CountDownTimer sleepTimer;
@@ -1047,6 +1050,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         try {
+            final int requestVersion = ++prepareRequestVersion;
+            final Uri requestUri = selectedAudioUri;
+
             // Request audio focus before preparing to play
             requestAudioFocus();
 
@@ -1068,6 +1074,10 @@ public class MainActivity extends AppCompatActivity {
             // Set listeners before preparing
             mediaPlayer.setOnPreparedListener(mp -> {
                 try {
+                    if (requestVersion != prepareRequestVersion || !requestUri.equals(selectedAudioUri)) {
+                        Log.d(TAG, "Ignoring stale onPrepared callback for previous audio selection");
+                        return;
+                    }
                     ensureEqualizerInitialized();
                     openAudioEffectSession(mp.getAudioSessionId());
 
@@ -1124,6 +1134,10 @@ public class MainActivity extends AppCompatActivity {
             });
 
             mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                if (requestVersion != prepareRequestVersion || !requestUri.equals(selectedAudioUri)) {
+                    Log.w(TAG, "Ignoring stale MediaPlayer error callback: what=" + what + ", extra=" + extra);
+                    return true;
+                }
                 Log.e(TAG, "MediaPlayer error: " + what + ", " + extra);
                 Toast.makeText(MainActivity.this,
                         "Error playing this file", Toast.LENGTH_SHORT).show();
