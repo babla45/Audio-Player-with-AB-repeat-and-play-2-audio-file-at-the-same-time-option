@@ -456,6 +456,7 @@
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
+                    android:visibility="gone"
                     android:text="📂 BROWSE"
                     android:textSize="11sp"
                     android:textColor="@color/text_secondary" />
@@ -468,6 +469,7 @@
                     android:background="@drawable/bg_icon_container"
                     android:gravity="center"
                     android:paddingHorizontal="14dp"
+                    android:visibility="gone"
                     android:text="🎛 MIX"
                     android:textColor="@color/text_tertiary"
                     android:textSize="12sp" />
@@ -478,6 +480,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="36dp"
                     android:layout_marginStart="8dp"
+                    android:visibility="gone"
                     android:text="⚡ MORE"
                     android:textSize="11sp"
                     android:textColor="@color/accent_primary" />
@@ -492,12 +495,13 @@
         android:layout_width="match_parent"
         android:layout_height="80dp"
         android:background="@color/bottom_nav_bg"
-        app:menu="@menu/bottom_nav_menu"
-        app:labelVisibilityMode="labeled"
+        app:itemBackground="@android:color/transparent"
         app:itemIconTint="@color/text_tertiary"
-        app:itemTextColor="@color/text_tertiary"
-        app:itemPaddingTop="16dp"
         app:itemPaddingBottom="16dp"
-        app:itemActiveIndicatorStyle="@style/Widget.Material3.BottomNavigationView.ActiveIndicator" />
+        app:itemPaddingTop="16dp"
+        app:itemRippleColor="@android:color/transparent"
+        app:itemTextColor="@color/text_tertiary"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
 
 </LinearLayout>

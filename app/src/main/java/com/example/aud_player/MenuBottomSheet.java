@@ -6,6 +6,7 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -29,7 +30,10 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onRefreshClicked();
         void onExitAppClicked();
         void onAddToPlaylistClicked();
+        void onBrowseClicked();
+        void onMixerToggleClicked();
         boolean hasSongSelected();
+        boolean isMixerEnabled();
         float getCurrentSpeed();
         int getCurrentPlaybackMode();
     }
@@ -97,6 +101,16 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
+        view.findViewById(R.id.menu_browse_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onBrowseClicked();
+            dismiss();
+        });
+
+        view.findViewById(R.id.menu_mixer_toggle_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onMixerToggleClicked();
+            dismiss();
+        });
+
         View addToPlaylistButton = view.findViewById(R.id.menu_add_to_playlist_btn);
         boolean canAddToPlaylist = listener != null && listener.hasSongSelected();
         addToPlaylistButton.setEnabled(canAddToPlaylist);
@@ -119,6 +133,12 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             if (mode == 0) modeLabel.setText("Repeat");
             else if (mode == 1) modeLabel.setText("Next");
             else modeLabel.setText("Shuffle");
+
+            TextView mixerToggleLabel = view.findViewById(R.id.menu_mixer_toggle_label);
+            ImageView mixerToggleIcon = view.findViewById(R.id.menu_mixer_toggle_icon);
+            boolean mixerEnabled = listener.isMixerEnabled();
+            mixerToggleLabel.setText(mixerEnabled ? "Mixer On" : "Mixer Off");
+            mixerToggleIcon.setImageResource(mixerEnabled ? R.drawable.ic_mixer_on : R.drawable.ic_mixer_off);
         }
 
         return view;

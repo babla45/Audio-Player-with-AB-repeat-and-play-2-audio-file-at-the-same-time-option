@@ -12,4 +12,8 @@
         android:id="@+id/nav_mixer"
         android:icon="@drawable/ic_tune"
         android:title="Mixer" />
+    <item
+        android:id="@+id/nav_more"
+        android:icon="@drawable/ic_more_vert"
+        android:title="More" />
 </menu>

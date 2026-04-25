@@ -443,8 +443,6 @@ public class MainActivity extends AppCompatActivity {
         // Check mixer button - add this debug code
         if (mixerToggleButton != null) {
             Log.d(TAG, "Mixer button initialized successfully");
-            // Force visibility
-            mixerToggleButton.setVisibility(View.VISIBLE);
         } else {
             Log.e(TAG, "Failed to initialize mixer button");
         }
@@ -709,23 +707,31 @@ public class MainActivity extends AppCompatActivity {
             bottomNavigation = findViewById(R.id.bottomNavigation);
             setupBottomNavSwipeGesture(bottomNavigation);
             if (bottomNavigation != null) {
+                // Treat bottom nav as quick actions, not persistent tabs.
+                // This prevents any item (e.g., More) from staying checked/gray.
+                bottomNavigation.getMenu().setGroupCheckable(0, false, true);
                 bottomNavigation.setOnItemSelectedListener(item -> {
                     int id = item.getItemId();
                     if (id == R.id.nav_library) {
                         // Show all songs view
                         if (inPlaylistView) toggleToAllSongsView();
-                        return true;
+                        return false;
                     } else if (id == R.id.nav_playlists) {
                         // Open playlists
                         Intent intent = new Intent(this, PlaylistActivity.class);
                         startActivity(intent);
-                        return true;
+                        return false;
                     } else if (id == R.id.nav_mixer) {
                         showMixerOptionsDialog();
-                        return true;
+                        return false;
+                    } else if (id == R.id.nav_more) {
+                        showBottomSheetMenu();
+                        return false;
                     }
                     return false;
                 });
+                // Prevent first item (Library) from staying selected by default.
+                clearBottomNavSelectionSoon();
             }
 
             // Start with player collapsed
@@ -737,6 +743,43 @@ public class MainActivity extends AppCompatActivity {
             Log.e(TAG, "Error initializing views", e);
             Toast.makeText(this, "Error initializing app", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void clearBottomNavSelectionSoon2() {
+        if (bottomNavigation == null) return;
+        bottomNavigation.postDelayed(() -> {
+            try {
+                Menu menu = bottomNavigation.getMenu();
+                for (int i = 0; i < menu.size(); i++) {
+                    menu.getItem(i).setChecked(false);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to clear bottom nav selection", e);
+            }
+        }, 0);
+    }
+
+    private void clearBottomNavSelectionSoon() {
+        if (bottomNavigation == null) return;
+
+        bottomNavigation.post(() -> {
+            try {
+                Menu menu = bottomNavigation.getMenu();
+
+                // IMPORTANT: allow no selection temporarily
+                menu.setGroupCheckable(0, true, false);
+
+                for (int i = 0; i < menu.size(); i++) {
+                    menu.getItem(i).setChecked(false);
+                }
+
+                // re-enable single selection mode
+                menu.setGroupCheckable(0, true, true);
+
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to clear bottom nav selection", e);
+            }
+        });
     }
 
     private void setupListeners() {
@@ -1484,8 +1527,29 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onBrowseClicked() {
+                if (isPermissionGranted) {
+                    pickAudioFile();
+                } else {
+                    checkPermissions();
+                    Toast.makeText(MainActivity.this,
+                            "Permission required to access files", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onMixerToggleClicked() {
+                toggleMixerMode();
+            }
+
+            @Override
             public boolean hasSongSelected() {
                 return selectedAudioUri != null;
+            }
+
+            @Override
+            public boolean isMixerEnabled() {
+                return mixerModeActive;
             }
 
             @Override
@@ -5623,6 +5687,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        clearBottomNavSelectionSoon();
 
         // If we're returning from another activity and in playlist view,
         // reload the playlist in case songs were added/removed

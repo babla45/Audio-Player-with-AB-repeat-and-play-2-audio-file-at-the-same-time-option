@@ -391,19 +391,66 @@
                         android:textSize="12sp" />
                 </LinearLayout>
 
-                <View
+                <!-- Browse -->
+                <LinearLayout
+                    android:id="@+id/menu_browse_btn"
                     android:layout_width="0dp"
-                    android:layout_height="1dp"
+                    android:layout_height="wrap_content"
                     android:layout_margin="4dp"
                     android:layout_weight="1"
-                    android:visibility="invisible" />
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
 
-                <View
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Browse"
+                        android:src="@drawable/ic_library_music"
+                        app:tint="@color/white" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Browse"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Mixer Toggle -->
+                <LinearLayout
+                    android:id="@+id/menu_mixer_toggle_btn"
                     android:layout_width="0dp"
-                    android:layout_height="1dp"
+                    android:layout_height="wrap_content"
                     android:layout_margin="4dp"
                     android:layout_weight="1"
-                    android:visibility="invisible" />
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:id="@+id/menu_mixer_toggle_icon"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Mixer toggle"
+                        android:src="@drawable/ic_mixer_off" />
+
+                    <TextView
+                        android:id="@+id/menu_mixer_toggle_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Mixer Off"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
             </LinearLayout>
 
         </LinearLayout>
