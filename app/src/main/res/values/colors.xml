@@ -43,6 +43,10 @@
     <color name="mini_player_bg">#FFFFFFFF</color>
     <color name="mini_player_text_primary">#FF111111</color>
     <color name="mini_player_text_secondary">#FF4A4A4A</color>
+    <color name="milky_background">#FFF9F6EE</color>
+    <color name="milky_surface">#FFF5F1E7</color>
+    <color name="milky_bottom_nav_bg">#FFF3EFE4</color>
+    <color name="milky_search_bg">#FFF1ECE1</color>
     <!-- Slightly darker than surface_900 so bottom nav is distinct -->
     <color name="bottom_nav_bg">#FFFFFFFF</color>
     <!-- Slightly darker than song list items (surface_800) for better separation -->

@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
 import android.telephony.TelephonyManager;
 import android.database.Cursor;
 import android.media.MediaPlayer;
@@ -37,6 +38,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.SubMenu;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -187,6 +189,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
+    private static final int THEME_MODE_MILKY = 2;
     private static final int MINI_PLAYER_THEME_CURRENT = 0;
     private static final int MINI_PLAYER_THEME_WHITE = 1;
 
@@ -442,6 +445,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize views
         initializeViews();
+        applyCustomThemeOverlays();
         
         // Audio focus
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
@@ -4748,6 +4752,9 @@ public class MainActivity extends AppCompatActivity {
     private void applySavedThemeMode() {
         int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_MILKY) {
+            savedThemeMode = THEME_MODE_WHITE;
+        }
         if (savedThemeMode == THEME_MODE_BLUISH_BLACK) {
             AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
         } else {
@@ -4756,9 +4763,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showThemeSettingsDialog() {
-        final String[] options = {"White", "Bluish Black"};
-        int currentThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        final String[] options = {"White", "Bluish Black", "Milky"};
+        int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_MILKY) {
+            savedThemeMode = THEME_MODE_WHITE;
+        }
+        final int currentThemeMode = savedThemeMode;
         final int[] selected = {currentThemeMode};
 
         new AlertDialog.Builder(this)
@@ -4776,9 +4787,51 @@ public class MainActivity extends AppCompatActivity {
                     } else {
                         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
                     }
+
+                    if (newMode != currentThemeMode) {
+                        recreate();
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private boolean isMilkyThemeActive() {
+        int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        return mode == THEME_MODE_MILKY;
+    }
+
+    private void applyCustomThemeOverlays() {
+        if (!isMilkyThemeActive()) return;
+
+        View contentRoot = findViewById(android.R.id.content);
+        if (contentRoot instanceof ViewGroup) {
+            ViewGroup rootGroup = (ViewGroup) contentRoot;
+            if (rootGroup.getChildCount() > 0) {
+                View rootLayout = rootGroup.getChildAt(0);
+                rootLayout.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_background));
+            }
+        }
+
+        View playerPanel = findViewById(R.id.playerPanel);
+        if (playerPanel != null) {
+            playerPanel.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_surface));
+        }
+
+        if (bottomNavigation != null) {
+            bottomNavigation.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_bottom_nav_bg));
+        }
+
+        if (searchEditText != null && searchEditText.getParent() instanceof View) {
+            View searchContainer = (View) searchEditText.getParent();
+            Drawable searchBg = searchContainer.getBackground();
+            if (searchBg != null) {
+                searchBg = searchBg.mutate();
+                searchBg.setTint(ContextCompat.getColor(this, R.color.milky_search_bg));
+                searchContainer.setBackground(searchBg);
+            }
+        }
     }
 
     private void showMiniPlayerThemeSettingsDialog() {

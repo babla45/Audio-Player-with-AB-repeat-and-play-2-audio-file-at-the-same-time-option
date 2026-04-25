@@ -28,6 +28,10 @@
     <color name="mini_player_bg">#1E1E38</color>
     <color name="mini_player_text_primary">#FF111111</color>
     <color name="mini_player_text_secondary">#FF4A4A4A</color>
+    <color name="milky_background">#FFF9F6EE</color>
+    <color name="milky_surface">#FFF5F1E7</color>
+    <color name="milky_bottom_nav_bg">#FFF3EFE4</color>
+    <color name="milky_search_bg">#FFF1ECE1</color>
     <color name="bottom_nav_bg">#101022</color>
     <color name="bottom_sheet_bg">#16162B</color>
     <color name="menu_grid_item_bg">#252540</color>
