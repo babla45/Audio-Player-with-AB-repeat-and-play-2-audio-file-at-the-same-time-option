@@ -3,8 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
     android:background="@drawable/bg_bottom_sheet"
+    android:orientation="vertical"
     android:paddingBottom="16dp">
 
     <!-- Top bar (tap small header area to close) -->
@@ -12,10 +12,10 @@
         android:id="@+id/menu_top_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center_horizontal"
         android:clickable="true"
         android:focusable="true"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
         android:paddingTop="12dp"
         android:paddingBottom="8dp">
 
@@ -32,12 +32,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center"
-        android:text="Options"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:textColor="@color/text_primary"
         android:paddingHorizontal="10dp"
-        android:paddingBottom="16dp" />
+        android:paddingBottom="10dp"
+        android:text="Options"
+        android:textColor="@color/text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
 
     <!-- Keep menu at two visible rows; scroll if more rows are added -->
     <ScrollView
@@ -46,344 +46,367 @@
         android:fillViewport="true"
         android:overScrollMode="ifContentScrolls">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical">
-
-    <!-- Icon Grid: Row 1 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:gravity="center">
-
-        <!-- Sort -->
         <LinearLayout
-            android:id="@+id/menu_sort_btn"
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_sort"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Sort" />
-            <TextView
-                android:layout_width="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Icon Grid: Row 1 -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Sort"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
 
-        <!-- Timer -->
-        <LinearLayout
-            android:id="@+id/menu_timer_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/menu_timer_icon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_bedtime"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Sleep Timer" />
-            <TextView
-                android:id="@+id/menu_timer_label"
-                android:layout_width="wrap_content"
+                <!-- Sort -->
+                <LinearLayout
+                    android:id="@+id/menu_sort_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Sort"
+                        android:src="@drawable/ic_sort"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Sort"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Timer -->
+                <LinearLayout
+                    android:id="@+id/menu_timer_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:id="@+id/menu_timer_icon"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Sleep Timer"
+                        android:src="@drawable/ic_timer"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:id="@+id/menu_timer_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Timer"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- A-B Repeat -->
+                <LinearLayout
+                    android:id="@+id/menu_ab_repeat_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="35dp"
+                        android:layout_height="35dp"
+                        android:contentDescription="A-B Repeat"
+                        android:src="@drawable/ic_ab_repeat"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="0dp"
+                        android:text="AB Repeat"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11sp" />
+                </LinearLayout>
+
+                <!-- Playback Mode -->
+                <LinearLayout
+                    android:id="@+id/menu_playback_mode_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:id="@+id/menu_mode_icon"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Playback Mode"
+                        android:src="@drawable/ic_repeat"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:id="@+id/menu_mode_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Mode"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Spacer -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="4dp" />
+
+            <!-- Icon Grid: Row 2 -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Timer"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
 
-        <!-- A-B Repeat -->
-        <LinearLayout
-            android:id="@+id/menu_ab_repeat_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_ab_repeat"
-                app:tint="@color/accent_primary"
-                android:contentDescription="A-B Repeat" />
-            <TextView
-                android:layout_width="wrap_content"
+                <!-- Speed -->
+                <LinearLayout
+                    android:id="@+id/menu_speed_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Speed"
+                        android:src="@drawable/ic_speed"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:id="@+id/menu_speed_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Equalizer -->
+                <LinearLayout
+                    android:id="@+id/menu_equalizer_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Equalizer"
+                        android:src="@drawable/ic_tune"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Equalizer"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Settings -->
+                <LinearLayout
+                    android:id="@+id/menu_settings_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Settings"
+                        android:src="@drawable/ic_settings"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Settings"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Refresh -->
+                <LinearLayout
+                    android:id="@+id/menu_refresh_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Refresh"
+                        android:src="@drawable/ic_refresh"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Refresh"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Spacer -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="4dp" />
+
+            <!-- Icon Grid: Row 3 -->
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="A-B Loop"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
+                <!-- Add to playlist -->
+                <LinearLayout
+                    android:id="@+id/menu_add_to_playlist_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="wrap_content"
+                        android:contentDescription="Add to playlist"
+                        android:src="@drawable/ic_queue_music"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Playlist"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <!-- Exit App -->
+                <LinearLayout
+                    android:id="@+id/menu_exit_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Exit App"
+                        android:src="@drawable/ic_exit_app"
+                        app:tint="@color/accent_primary" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Exit App"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:visibility="invisible" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:visibility="invisible" />
+            </LinearLayout>
+
         </LinearLayout>
-
-        <!-- Playback Mode -->
-        <LinearLayout
-            android:id="@+id/menu_playback_mode_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/menu_mode_icon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_repeat"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Playback Mode" />
-            <TextView
-                android:id="@+id/menu_mode_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Mode"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- Spacer -->
-    <View android:layout_width="match_parent" android:layout_height="4dp" />
-
-    <!-- Icon Grid: Row 2 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:gravity="center">
-
-        <!-- Speed -->
-        <LinearLayout
-            android:id="@+id/menu_speed_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_speed"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Speed" />
-            <TextView
-                android:id="@+id/menu_speed_label"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Speed 1.0x"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-
-        <!-- Equalizer -->
-        <LinearLayout
-            android:id="@+id/menu_equalizer_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_tune"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Equalizer" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Equalizer"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-
-        <!-- Settings -->
-        <LinearLayout
-            android:id="@+id/menu_settings_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_settings"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Settings" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Settings"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-
-        <!-- Refresh -->
-        <LinearLayout
-            android:id="@+id/menu_refresh_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_refresh"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Refresh" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Refresh"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- Spacer -->
-    <View android:layout_width="match_parent" android:layout_height="4dp" />
-
-    <!-- Icon Grid: Row 3 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="12dp"
-        android:gravity="center">
-
-        <!-- Add to playlist -->
-        <LinearLayout
-            android:id="@+id/menu_add_to_playlist_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_queue_music"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Add to playlist" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Playlist"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-
-        <!-- Exit App -->
-        <LinearLayout
-            android:id="@+id/menu_exit_btn"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_menu_grid_item"
-            android:padding="14dp"
-            android:layout_margin="4dp"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/ic_close"
-                app:tint="@color/accent_primary"
-                android:contentDescription="Exit App" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Exit App"
-                android:textSize="12sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="6dp" />
-        </LinearLayout>
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:visibility="invisible" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1"
-            android:layout_margin="4dp"
-            android:visibility="invisible" />
-    </LinearLayout>
-
-    </LinearLayout>
     </ScrollView>
 
 </LinearLayout>

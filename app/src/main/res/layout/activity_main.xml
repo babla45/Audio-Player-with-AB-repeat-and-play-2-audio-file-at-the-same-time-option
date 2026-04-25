@@ -85,7 +85,7 @@
                     android:layout_width="28dp"
                     android:layout_height="28dp"
                     android:padding="4dp"
-                    android:src="@drawable/ic_close"
+                    android:src="@drawable/ic_exit_app"
                     app:tint="@color/text_tertiary"
                     android:visibility="gone"
                     android:clickable="true"

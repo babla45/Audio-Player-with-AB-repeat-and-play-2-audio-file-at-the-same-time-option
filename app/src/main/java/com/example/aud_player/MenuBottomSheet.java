@@ -111,7 +111,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         // Speed label
         if (listener != null) {
             TextView speedLabel = view.findViewById(R.id.menu_speed_label);
-            speedLabel.setText(String.format("Speed %.1fx", listener.getCurrentSpeed()));
+            speedLabel.setText(String.format("%.1fx", listener.getCurrentSpeed()));
 
             // Playback mode icon & label
             TextView modeLabel = view.findViewById(R.id.menu_mode_label);

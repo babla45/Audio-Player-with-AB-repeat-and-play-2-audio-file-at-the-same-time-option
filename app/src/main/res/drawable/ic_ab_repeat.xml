@@ -4,7 +4,59 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+
+    <!-- Loop arrows -->
     <path
         android:fillColor="@color/text_primary"
-        android:pathData="M7,7l3,-3v2h4V4l3,3h-2v4h2l-3,3v-2h-4v2l-3,-3h2V7H7zM7,21h2v-6H7V21zM15,15v6h2v-6H15z" />
+        android:pathData="
+            M17,13.6v3c0,1.5 -1.1,2.5 -2.5,2.5h-5.5l1.3,1.3l-1.1,1.1l-3.1,-3.1l3.2,-3.1l1.2,1.1l-1.3,1.3h5.4c0.6,0 1,-0.4 1,-2v-5H17z
+
+            M9.5,8c-0.6,0 -1,0.4 -1,2v5H7V9c0,-1.6 1.1,-2.5 2.5,-2.5h5.5l-1.2,-1.3l1.1,-1.1l3.1,3.1l-3.1,3.1l-1.1,-1.1l1.3,-1.3H9.6z" />
+
+    <!-- Letter A -->
+    <path
+        android:fillColor="@color/text_primary"
+        android:pathData="
+            M9.2,15
+            L10.3,10.5
+            H11.2
+            L12.3,15
+            H11.4
+            L11.1,13.8
+            H10.4
+            L10.1,15
+            Z
+
+            M10.6,13.1
+            H10.9
+            L10.75,12.2
+            Z" />
+
+    <!-- Letter B -->
+    <path
+        android:fillColor="@color/text_primary"
+        android:pathData="
+            M12.8,10.5
+            H14
+            C14.7,10.5 15.2,10.9 15.2,11.5
+            C15.2,12 14.9,12.3 14.5,12.4
+            C15,12.5 15.3,12.9 15.3,13.5
+            C15.3,14.2 14.8,15 13.9,15
+            H12.8
+            Z
+
+            M13.7,12.1
+            C14.1,12.1 14.3,11.9 14.3,11.6
+            C14.3,11.3 14.1,11.1 13.7,11.1
+            H13.5
+            V12.1
+            Z
+
+            M13.8,14.3
+            C14.2,14.3 14.5,14.1 14.5,13.7
+            C14.5,13.3 14.2,13.1 13.8,13.1
+            H13.5
+            V14.3
+            Z" />
+
 </vector>
