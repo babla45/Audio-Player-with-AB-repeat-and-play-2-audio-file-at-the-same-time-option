@@ -90,15 +90,17 @@ public class AudioPlaybackService extends Service {
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                 try {
-                    if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    if (!isAllowAudioMixEnabled() && mediaPlayer != null && mediaPlayer.isPlaying()) {
                         pausedByAudioFocusLoss = true;
                         mediaPlayer.pause();
                     }
-                    if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                    if (!isAllowAudioMixEnabled() && secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
                         secondMediaPlayer.pause();
                     }
-                    isPlaying = false;
-                    updateNotification();
+                    if (!isAllowAudioMixEnabled()) {
+                        isPlaying = false;
+                        updateNotification();
+                    }
                 } catch (Exception e) {
                     Log.e(TAG, "Error handling audio focus loss", e);
                 }
@@ -124,6 +126,33 @@ public class AudioPlaybackService extends Service {
                 break;
         }
     };
+
+    private boolean isAllowAudioMixEnabled() {
+        try {
+            return getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                    .getBoolean("allow_audio_mix", false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Apply updated audio-mix preference immediately without requiring app restart.
+     */
+    public void onAudioMixPreferenceChanged(boolean enabled) {
+        try {
+            if (enabled) {
+                // In mix mode we should not hold exclusive focus.
+                abandonAudioFocus();
+            } else if ((mediaPlayer != null && mediaPlayer.isPlaying())
+                    || (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying())) {
+                // In non-mix mode, re-acquire focus right away while playback is active.
+                requestAudioFocus();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply audio mix preference change", e);
+        }
+    }
 
 
     public static final int TIMER_ACTION_PAUSE = 0;
@@ -626,6 +655,7 @@ public class AudioPlaybackService extends Service {
 
     private boolean requestAudioFocus() {
         try {
+            if (isAllowAudioMixEnabled()) return true;
             if (audioManager == null) return true;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (audioFocusRequest == null) {

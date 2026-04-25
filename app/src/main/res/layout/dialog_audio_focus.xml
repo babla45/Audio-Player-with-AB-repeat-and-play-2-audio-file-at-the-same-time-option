@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="18dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Playback behavior"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="If enabled, AudPlayer will keep playing even when other apps start audio/video. If disabled, it will pause when another app takes audio focus."
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <Switch
+        android:id="@+id/switch_allow_mix"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="Continue playing with other apps"
+        android:textColor="@color/text_primary" />
+
+</LinearLayout>
+

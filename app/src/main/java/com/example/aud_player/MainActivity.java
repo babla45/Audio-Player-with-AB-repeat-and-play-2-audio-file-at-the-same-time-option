@@ -42,6 +42,7 @@ import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.PopupMenu;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.RadioGroup;
@@ -179,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "audio_player_prefs";
     private static final String PREF_NOW_PLAYING_URI = "now_playing_uri";
     private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
+    private static final String PREF_ALLOW_AUDIO_MIX = "allow_audio_mix";
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -227,7 +229,7 @@ public class MainActivity extends AppCompatActivity {
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_LOSS:
                 // Permanent loss of audio focus: pause playback
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                if (!isAllowAudioMixEnabled() && mediaPlayer != null && mediaPlayer.isPlaying()) {
                     pausedByAudioFocusLoss = true;
                     pausePlayback();
                 }
@@ -235,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
             case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
                 // Transient loss (e.g., call): pause
-                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                if (!isAllowAudioMixEnabled() && mediaPlayer != null && mediaPlayer.isPlaying()) {
                     pausedByAudioFocusLoss = true;
                     pausePlayback();
                 }
@@ -4601,11 +4603,63 @@ public class MainActivity extends AppCompatActivity {
             if (itemId == R.id.settings_seek_time) {
                 showSeekTimeSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_audio_focus) {
+                showAudioFocusSettingsDialog();
+                return true;
             }
             return false;
         });
 
         popup.show();
+    }
+
+    private boolean isAllowAudioMixEnabled() {
+        try {
+            return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getBoolean(PREF_ALLOW_AUDIO_MIX, false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void showAudioFocusSettingsDialog() {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_audio_focus, null);
+        Switch allowMixSwitch = dialogView.findViewById(R.id.switch_allow_mix);
+        allowMixSwitch.setChecked(isAllowAudioMixEnabled());
+
+        new AlertDialog.Builder(this)
+                .setTitle("Audio focus")
+                .setView(dialogView)
+                .setPositiveButton("Save", (d, which) -> {
+                    boolean enabled = allowMixSwitch.isChecked();
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putBoolean(PREF_ALLOW_AUDIO_MIX, enabled)
+                            .apply();
+                    applyAudioMixPreferenceImmediately(enabled);
+                    Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void applyAudioMixPreferenceImmediately(boolean enabled) {
+        try {
+            if (enabled) {
+                // Mix mode should not hold exclusive focus.
+                abandonAudioFocus();
+            } else if ((mediaPlayer != null && mediaPlayer.isPlaying())
+                    || (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying())) {
+                // Non-mix mode should re-acquire focus while currently playing.
+                requestAudioFocus();
+            }
+
+            if (serviceBound && audioService != null) {
+                audioService.onAudioMixPreferenceChanged(enabled);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply audio mix preference change", e);
+        }
     }
 
     private void showSeekTimeSettingsDialog() {
@@ -5674,6 +5728,7 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean requestAudioFocus() {
         try {
+            if (isAllowAudioMixEnabled()) return true;
             if (audioManager == null) return true; // fallback
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 if (audioFocusRequest == null) {

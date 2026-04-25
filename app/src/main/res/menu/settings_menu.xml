@@ -3,4 +3,7 @@
     <item
         android:id="@+id/settings_seek_time"
         android:title="@string/seek_time_settings" />
+    <item
+        android:id="@+id/settings_audio_focus"
+        android:title="Play alongside other apps" />
 </menu> 
