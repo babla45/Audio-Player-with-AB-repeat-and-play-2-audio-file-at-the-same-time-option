@@ -78,7 +78,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Sort"
                         android:src="@drawable/ic_sort"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -109,7 +109,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Sleep Timer"
                         android:src="@drawable/ic_timer"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:id="@+id/menu_timer_label"
@@ -140,7 +140,7 @@
                         android:layout_height="35dp"
                         android:contentDescription="A-B Repeat"
                         android:src="@drawable/ic_ab_repeat"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -171,7 +171,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Playback Mode"
                         android:src="@drawable/ic_repeat"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:id="@+id/menu_mode_label"
@@ -216,7 +216,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Speed"
                         android:src="@drawable/ic_speed"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:id="@+id/menu_speed_label"
@@ -246,7 +246,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Equalizer"
                         android:src="@drawable/ic_tune"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -276,7 +276,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Settings"
                         android:src="@drawable/ic_settings"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -306,7 +306,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Refresh"
                         android:src="@drawable/ic_refresh"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -350,7 +350,7 @@
                         android:layout_height="wrap_content"
                         android:contentDescription="Add to playlist"
                         android:src="@drawable/ic_queue_music"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"
@@ -380,7 +380,7 @@
                         android:layout_height="24dp"
                         android:contentDescription="Exit App"
                         android:src="@drawable/ic_exit_app"
-                        app:tint="@color/accent_primary" />
+                        app:tint="@color/white" />
 
                     <TextView
                         android:layout_width="wrap_content"

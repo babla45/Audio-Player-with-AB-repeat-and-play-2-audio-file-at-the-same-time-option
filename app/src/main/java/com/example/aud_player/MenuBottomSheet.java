@@ -134,8 +134,10 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         super.onStart();
         Dialog dialog = getDialog();
         if (dialog != null) {
-            dialog.setCanceledOnTouchOutside(false);
+            // Standard behavior: tapping outside the sheet dismisses it.
+            dialog.setCanceledOnTouchOutside(true);
         }
+        setCancelable(true);
         if (!(dialog instanceof BottomSheetDialog)) {
             return;
         }

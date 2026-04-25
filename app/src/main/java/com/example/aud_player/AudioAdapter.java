@@ -104,10 +104,8 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         boolean isCurrentlyPlaying = currentlyPlayingUri != null && currentlyPlayingUri.equals(audioFile.getUri());
         
         if (isCurrentlyPlaying) {
-            // Show accent bar on the left edge
-            if (holder.nowPlayingBar != null) {
-                holder.nowPlayingBar.setVisibility(View.VISIBLE);
-            }
+            // Remove the left vertical "now playing" bar (user requested).
+            if (holder.nowPlayingBar != null) holder.nowPlayingBar.setVisibility(View.GONE);
             // Gradient background for the currently playing row (keeps rounded corners + ripple)
             holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item_playing);
             // Show equalizer icon overlay
