@@ -193,18 +193,14 @@ public class AudioPlaybackService extends Service {
         // On Android 11 and below, delaying this call can cause the notification
         // to never appear (the system silently drops it). On Android 12+ it can
         // cause a ForegroundServiceDidNotStartInTimeException crash.
-        // For ACTION_STOP we still need to call it first, then remove it.
-        String action = (intent != null) ? intent.getAction() : null;
-        boolean isStopAction = ACTION_STOP.equals(action);
-
-        if (!isStopAction) {
-            try {
-                startForeground(NOTIFICATION_ID, createNotification());
-                isForegroundStarted = true;
-            } catch (Exception e) {
-                Log.e(TAG, "startForeground failed in onStartCommand", e);
-            }
+        try {
+            startForeground(NOTIFICATION_ID, createNotification());
+            isForegroundStarted = true;
+        } catch (Exception e) {
+            Log.e(TAG, "startForeground failed in onStartCommand", e);
         }
+
+        String action = (intent != null) ? intent.getAction() : null;
 
         if (action != null) {
             switch (action) {
@@ -531,9 +527,9 @@ public class AudioPlaybackService extends Service {
         // will recreate it. CLEAR_TOP helps reuse an existing instance if present.
         notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
-        // Use FLAG_IMMUTABLE on API 31+; FLAG_UPDATE_CURRENT alone on older APIs
+        // Use FLAG_IMMUTABLE on API 23+; FLAG_UPDATE_CURRENT alone on older APIs
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
         }
 
