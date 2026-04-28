@@ -5108,38 +5108,163 @@ public class MainActivity extends AppCompatActivity {
                                           ColorPreviewCallback previewCallback,
                                           ColorSelectionCallback applyCallback,
                                           Runnable cancelCallback) {
-        final int[] rgb = {
-                Color.red(initialColor),
-                Color.green(initialColor),
-                Color.blue(initialColor)
-        };
+        final float[] hsv = new float[3];
+        Color.colorToHSV(initialColor, hsv);
+        final int[] alpha = {Color.alpha(initialColor)};
+        final boolean[] programmaticUpdate = {false};
 
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
         int padding = (int) dpToPx(16);
-        container.setPadding(padding, padding, padding, 0);
+        root.setPadding(padding, padding, padding, 0);
 
-        TextView hexView = new TextView(this);
-        View preview = new View(this);
-        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+        View satValPanel = new View(this);
+        LinearLayout.LayoutParams svParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                (int) dpToPx(48)
+                (int) dpToPx(180)
         );
-        previewParams.bottomMargin = (int) dpToPx(12);
-        preview.setLayoutParams(previewParams);
-        container.addView(preview);
-        container.addView(hexView);
+        svParams.bottomMargin = (int) dpToPx(12);
+        satValPanel.setLayoutParams(svParams);
+        satValPanel.setOnTouchListener((v, event) -> {
+            if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
+            float x = Math.max(0f, Math.min(event.getX(), v.getWidth()));
+            float y = Math.max(0f, Math.min(event.getY(), v.getHeight()));
+            hsv[1] = x / (float) v.getWidth();
+            hsv[2] = 1f - (y / (float) v.getHeight());
+            refreshPickerUi(satValPanel, hsv, alpha[0], null, null, null, null, null, programmaticUpdate, previewCallback);
+            return true;
+        });
+        root.addView(satValPanel);
 
-        addColorChannelSlider(container, "Red", rgb, 0, preview, hexView, previewCallback);
-        addColorChannelSlider(container, "Green", rgb, 1, preview, hexView, previewCallback);
-        addColorChannelSlider(container, "Blue", rgb, 2, preview, hexView, previewCallback);
-        updateColorPreview(preview, hexView, rgb, previewCallback);
+        SeekBar hueSeek = new SeekBar(this);
+        hueSeek.setMax(360);
+        hueSeek.setProgress(Math.round(hsv[0]));
+        root.addView(hueSeek);
+
+        SeekBar alphaSeek = new SeekBar(this);
+        alphaSeek.setMax(100);
+        alphaSeek.setProgress(Math.round(alpha[0] * 100f / 255f));
+        root.addView(alphaSeek);
+
+        LinearLayout fieldsRow = new LinearLayout(this);
+        fieldsRow.setOrientation(LinearLayout.HORIZONTAL);
+        fieldsRow.setWeightSum(5f);
+        fieldsRow.setPadding(0, (int) dpToPx(8), 0, 0);
+        EditText rField = createColorField("R", fieldsRow);
+        EditText gField = createColorField("G", fieldsRow);
+        EditText bField = createColorField("B", fieldsRow);
+        EditText aField = createColorField("A%", fieldsRow);
+        EditText hexField = createColorField("Hex", fieldsRow);
+        root.addView(fieldsRow);
+
+        TextView hexInfo = new TextView(this);
+        hexInfo.setPadding(0, (int) dpToPx(8), 0, (int) dpToPx(8));
+        root.addView(hexInfo);
+
+        LinearLayout swatchRow = new LinearLayout(this);
+        swatchRow.setOrientation(LinearLayout.HORIZONTAL);
+        swatchRow.setPadding(0, 0, 0, (int) dpToPx(8));
+        root.addView(swatchRow);
+
+        int[] swatches = {
+                0xFFFF5252, 0xFFE91E63, 0xFF9C27B0, 0xFF673AB7,
+                0xFF3F51B5, 0xFF2196F3, 0xFF03A9F4, 0xFF00BCD4,
+                0xFF4CAF50, 0xFF8BC34A, 0xFFCDDC39, 0xFFFFEB3B,
+                0xFFFF9800, 0xFFFF5722
+        };
+        for (int swatchColor : swatches) {
+            View swatch = new View(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams((int) dpToPx(20), (int) dpToPx(20));
+            lp.rightMargin = (int) dpToPx(6);
+            swatch.setLayoutParams(lp);
+            GradientDrawable circle = new GradientDrawable();
+            circle.setShape(GradientDrawable.OVAL);
+            circle.setColor(swatchColor);
+            swatch.setBackground(circle);
+            swatch.setOnClickListener(v -> {
+                Color.colorToHSV(swatchColor, hsv);
+                alpha[0] = 255;
+                hueSeek.setProgress(Math.round(hsv[0]));
+                alphaSeek.setProgress(100);
+                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+            });
+            swatchRow.addView(swatch);
+        }
+
+        hueSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                hsv[0] = progress;
+                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                alpha[0] = Math.round(progress * 255f / 100f);
+                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        TextWatcher fieldWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (programmaticUpdate[0]) return;
+                Integer r = parseIntOrNull(rField.getText().toString());
+                Integer g = parseIntOrNull(gField.getText().toString());
+                Integer b = parseIntOrNull(bField.getText().toString());
+                Integer a = parseIntOrNull(aField.getText().toString());
+                if (r == null || g == null || b == null || a == null) return;
+                int rr = clampColorValue(r);
+                int gg = clampColorValue(g);
+                int bb = clampColorValue(b);
+                int aaPercent = Math.max(0, Math.min(100, a));
+                alpha[0] = Math.round(aaPercent * 255f / 100f);
+                Color.colorToHSV(Color.rgb(rr, gg, bb), hsv);
+                hueSeek.setProgress(Math.round(hsv[0]));
+                alphaSeek.setProgress(aaPercent);
+                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+            }
+        };
+        rField.addTextChangedListener(fieldWatcher);
+        gField.addTextChangedListener(fieldWatcher);
+        bField.addTextChangedListener(fieldWatcher);
+        aField.addTextChangedListener(fieldWatcher);
+
+        hexField.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (programmaticUpdate[0]) return;
+                Integer parsed = parseHexColorOrNull(s.toString());
+                if (parsed == null) return;
+                alpha[0] = Color.alpha(parsed);
+                Color.colorToHSV(parsed, hsv);
+                hueSeek.setProgress(Math.round(hsv[0]));
+                alphaSeek.setProgress(Math.round(alpha[0] * 100f / 255f));
+                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+            }
+        });
+
+        programmaticUpdate[0] = true;
+        refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
+        hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+        programmaticUpdate[0] = false;
 
         new AlertDialog.Builder(this)
                 .setTitle(title)
-                .setView(container)
+                .setView(root)
                 .setPositiveButton("Apply", (dialog, which) ->
-                        applyCallback.onColorSelected(Color.rgb(rgb[0], rgb[1], rgb[2])))
+                        applyCallback.onColorSelected(buildColor(alpha[0], hsv)))
                 .setNegativeButton("Cancel", (dialog, which) -> {
                     if (cancelCallback != null) {
                         cancelCallback.run();
@@ -5148,39 +5273,81 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
-    private void addColorChannelSlider(LinearLayout container, String label, int[] rgb, int channelIndex,
-                                       View preview, TextView hexView,
-                                       ColorPreviewCallback previewCallback) {
-        TextView channelLabel = new TextView(this);
-        channelLabel.setText(label);
-        container.addView(channelLabel);
-
-        SeekBar seekBar = new SeekBar(this);
-        seekBar.setMax(255);
-        seekBar.setProgress(rgb[channelIndex]);
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                rgb[channelIndex] = progress;
-                updateColorPreview(preview, hexView, rgb, previewCallback);
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        container.addView(seekBar);
+    private EditText createColorField(String hint, LinearLayout parent) {
+        EditText field = new EditText(this);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        params.rightMargin = (int) dpToPx(6);
+        field.setLayoutParams(params);
+        field.setHint(hint);
+        if ("Hex".equals(hint)) {
+            field.setInputType(InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        } else {
+            field.setInputType(InputType.TYPE_CLASS_NUMBER);
+        }
+        parent.addView(field);
+        return field;
     }
 
-    private void updateColorPreview(View preview, TextView hexView, int[] rgb,
-                                    ColorPreviewCallback previewCallback) {
-        int selectedColor = Color.rgb(rgb[0], rgb[1], rgb[2]);
-        preview.setBackgroundColor(selectedColor);
-        hexView.setText(String.format(Locale.US, "Selected: #%06X", (0xFFFFFF & selectedColor)));
+    private void refreshPickerUi(View satValPanel, float[] hsv, int alpha,
+                                 EditText rField, EditText gField, EditText bField, EditText aField, EditText hexField,
+                                 boolean[] programmaticUpdate,
+                                 ColorPreviewCallback previewCallback) {
+        int color = buildColor(alpha, hsv);
+        updateSatValPanel(satValPanel, hsv[0]);
+        if (programmaticUpdate != null) {
+            programmaticUpdate[0] = true;
+        }
+        if (rField != null) rField.setText(String.valueOf(Color.red(color)));
+        if (gField != null) gField.setText(String.valueOf(Color.green(color)));
+        if (bField != null) bField.setText(String.valueOf(Color.blue(color)));
+        if (aField != null) aField.setText(String.valueOf(Math.round(alpha * 100f / 255f)));
+        if (hexField != null) hexField.setText(String.format(Locale.US, "%08X", color));
+        if (programmaticUpdate != null) {
+            programmaticUpdate[0] = false;
+        }
         if (previewCallback != null) {
-            previewCallback.onColorPreview(selectedColor);
+            previewCallback.onColorPreview(color);
+        }
+    }
+
+    private void updateSatValPanel(View panel, float hue) {
+        int hueColor = Color.HSVToColor(new float[]{hue, 1f, 1f});
+        GradientDrawable satGradient = new GradientDrawable(
+                GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.WHITE, hueColor}
+        );
+        GradientDrawable valGradient = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0x00FFFFFF, 0xFF000000}
+        );
+        panel.setBackground(new android.graphics.drawable.LayerDrawable(new Drawable[]{satGradient, valGradient}));
+    }
+
+    private int buildColor(int alpha, float[] hsv) {
+        return Color.HSVToColor(alpha, hsv);
+    }
+
+    private Integer parseIntOrNull(String value) {
+        if (TextUtils.isEmpty(value)) return null;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private Integer parseHexColorOrNull(String value) {
+        if (TextUtils.isEmpty(value)) return null;
+        String clean = value.trim().replace("#", "");
+        if (clean.length() != 6 && clean.length() != 8) return null;
+        try {
+            long parsed = Long.parseLong(clean, 16);
+            if (clean.length() == 6) {
+                return (int) (0xFF000000L | parsed);
+            }
+            return (int) parsed;
+        } catch (NumberFormatException ignored) {
+            return null;
         }
     }
 
