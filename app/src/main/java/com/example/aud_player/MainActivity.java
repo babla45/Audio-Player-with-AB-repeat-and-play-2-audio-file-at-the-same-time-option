@@ -860,8 +860,23 @@ public class MainActivity extends AppCompatActivity {
 
                 } catch (IllegalStateException e) {
                     Log.e(TAG, "Error with play/pause", e);
+                    shouldAutoPlay = true;
                     prepareMediaPlayer();
                 }
+            } else if (selectedAudioUri != null) {
+                // App can be relaunched with restored now-playing metadata but no active MediaPlayer instance.
+                // In that case, rebuild and prepare the player so play works from mini player/main button.
+                try {
+                    shouldAutoPlay = true;
+                    initMediaPlayer();
+                    prepareMediaPlayer();
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to restore playback from saved selection", e);
+                    shouldAutoPlay = false;
+                    Toast.makeText(this, "Unable to resume this file", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                Toast.makeText(this, "No song selected", Toast.LENGTH_SHORT).show();
             }
         });
 
