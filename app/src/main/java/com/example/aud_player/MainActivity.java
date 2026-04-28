@@ -95,7 +95,9 @@ import android.content.IntentSender;
 import android.widget.ScrollView;
 import android.view.Window;
 import android.view.WindowManager;
+import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -187,11 +189,17 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_AUTO_SLIDE_TO_CURRENT = "auto_slide_to_current_song";
     private static final String PREF_THEME_MODE = "theme_mode";
     private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
+    private static final String PREF_CUSTOM_APP_COLOR = "custom_app_color";
+    private static final String PREF_CUSTOM_MINI_PLAYER_COLOR = "custom_mini_player_color";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
     private static final int THEME_MODE_MILKY = 2;
+    private static final int THEME_MODE_CUSTOM = 3;
     private static final int MINI_PLAYER_THEME_CURRENT = 0;
     private static final int MINI_PLAYER_THEME_WHITE = 1;
+    private static final int MINI_PLAYER_THEME_CUSTOM = 2;
+    private static final int DEFAULT_CUSTOM_APP_COLOR = 0xFF5C719A;
+    private static final int DEFAULT_CUSTOM_MINI_PLAYER_COLOR = 0xFF4A5D87;
 
     // Add these constants near the top of your MainActivity class
     private static final int SEEK_FORWARD_MS = 10000; // 10 seconds
@@ -4736,9 +4744,6 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_theme) {
                 showThemeSettingsDialog();
                 return true;
-            } else if (itemId == R.id.settings_mini_player_theme) {
-                showMiniPlayerThemeSettingsDialog();
-                return true;
             } else if (itemId == R.id.settings_how_to_use) {
                 showHowToUseDialog();
                 return true;
@@ -4752,7 +4757,7 @@ public class MainActivity extends AppCompatActivity {
     private void applySavedThemeMode() {
         int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
-        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_MILKY) {
+        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_CUSTOM) {
             savedThemeMode = THEME_MODE_WHITE;
         }
         if (savedThemeMode == THEME_MODE_BLUISH_BLACK) {
@@ -4763,37 +4768,175 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showThemeSettingsDialog() {
-        final String[] options = {"White", "Bluish Black", "Milky"};
-        int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        final String[] appLabels = {"White", "Bluish Black", "Milky", "Custom"};
+        final int[] appValues = {
+                THEME_MODE_WHITE, THEME_MODE_BLUISH_BLACK, THEME_MODE_MILKY, THEME_MODE_CUSTOM
+        };
+        final String[] miniLabels = {"Bluish Gradient", "White", "Custom"};
+        final int[] miniValues = {
+                MINI_PLAYER_THEME_CURRENT, MINI_PLAYER_THEME_WHITE, MINI_PLAYER_THEME_CUSTOM
+        };
+
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        int savedThemeMode = prefs
                 .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
-        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_MILKY) {
+        if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_CUSTOM) {
             savedThemeMode = THEME_MODE_WHITE;
         }
+        int savedMiniTheme = prefs.getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
+        if (savedMiniTheme < MINI_PLAYER_THEME_CURRENT || savedMiniTheme > MINI_PLAYER_THEME_CUSTOM) {
+            savedMiniTheme = MINI_PLAYER_THEME_CURRENT;
+        }
         final int currentThemeMode = savedThemeMode;
-        final int[] selected = {currentThemeMode};
+        final int currentMiniTheme = savedMiniTheme;
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) dpToPx(16);
+        container.setPadding(pad, pad, pad, 0);
+
+        TextView appHeader = new TextView(this);
+        appHeader.setText("App Theme");
+        appHeader.setTextSize(16f);
+        container.addView(appHeader);
+
+        RadioGroup appGroup = new RadioGroup(this);
+        appGroup.setOrientation(RadioGroup.VERTICAL);
+        int checkedAppId = View.NO_ID;
+        for (int i = 0; i < appLabels.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(View.generateViewId());
+            rb.setText(appLabels[i]);
+            rb.setTag(appValues[i]);
+            appGroup.addView(rb);
+            if (appValues[i] == savedThemeMode) {
+                checkedAppId = rb.getId();
+            }
+        }
+        if (checkedAppId != View.NO_ID) {
+            appGroup.check(checkedAppId);
+        }
+        container.addView(appGroup);
+
+        TextView miniHeader = new TextView(this);
+        miniHeader.setText("Mini Player Theme");
+        miniHeader.setTextSize(16f);
+        miniHeader.setPadding(0, (int) dpToPx(12), 0, 0);
+        container.addView(miniHeader);
+
+        RadioGroup miniGroup = new RadioGroup(this);
+        miniGroup.setOrientation(RadioGroup.VERTICAL);
+        int checkedMiniId = View.NO_ID;
+        for (int i = 0; i < miniLabels.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(View.generateViewId());
+            rb.setText(miniLabels[i]);
+            rb.setTag(miniValues[i]);
+            miniGroup.addView(rb);
+            if (miniValues[i] == savedMiniTheme) {
+                checkedMiniId = rb.getId();
+            }
+        }
+        if (checkedMiniId != View.NO_ID) {
+            miniGroup.check(checkedMiniId);
+        }
+        container.addView(miniGroup);
+
+        TextView helper = new TextView(this);
+        helper.setText("Tip: Custom lets you choose any color with live preview.");
+        helper.setPadding(0, (int) dpToPx(12), 0, (int) dpToPx(4));
+        helper.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+        container.addView(helper);
 
         new AlertDialog.Builder(this)
-                .setTitle("App Theme")
-                .setSingleChoiceItems(options, currentThemeMode, (dialog, which) -> selected[0] = which)
+                .setTitle("Theme")
+                .setView(container)
                 .setPositiveButton("Apply", (dialog, which) -> {
-                    int newMode = selected[0];
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .edit()
-                            .putInt(PREF_THEME_MODE, newMode)
-                            .apply();
-
-                    if (newMode == THEME_MODE_BLUISH_BLACK) {
-                        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
-                    } else {
-                        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+                    int checkedApp = appGroup.getCheckedRadioButtonId();
+                    int checkedMini = miniGroup.getCheckedRadioButtonId();
+                    if (checkedApp == View.NO_ID || checkedMini == View.NO_ID) {
+                        return;
                     }
+                    RadioButton appButton = appGroup.findViewById(checkedApp);
+                    RadioButton miniButton = miniGroup.findViewById(checkedMini);
+                    if (appButton == null || miniButton == null) {
+                        return;
+                    }
+                    int newThemeMode = (int) appButton.getTag();
+                    int newMiniTheme = (int) miniButton.getTag();
+                    Runnable applySelection = () -> applyThemeSelection(
+                            prefs,
+                            newThemeMode,
+                            newMiniTheme,
+                            currentThemeMode,
+                            currentMiniTheme
+                    );
 
-                    if (newMode != currentThemeMode) {
-                        recreate();
+                    if (newThemeMode == THEME_MODE_CUSTOM) {
+                        showRgbColorPickerDialog(
+                                "Custom App Color",
+                                getSavedCustomAppColor(),
+                                this::applyCustomAppColorPreview,
+                                selectedAppColor -> {
+                            prefs.edit().putInt(PREF_CUSTOM_APP_COLOR, selectedAppColor).apply();
+                            if (newMiniTheme == MINI_PLAYER_THEME_CUSTOM) {
+                                showRgbColorPickerDialog(
+                                        "Custom Mini Player Color",
+                                        getSavedCustomMiniPlayerColor(),
+                                        this::applyCustomMiniPlayerColorPreview,
+                                        selectedMiniColor -> {
+                                    prefs.edit().putInt(PREF_CUSTOM_MINI_PLAYER_COLOR, selectedMiniColor).apply();
+                                    applySelection.run();
+                                        },
+                                        this::restoreThemePreview
+                                );
+                            } else {
+                                applySelection.run();
+                            }
+                                },
+                                this::restoreThemePreview
+                        );
+                    } else if (newMiniTheme == MINI_PLAYER_THEME_CUSTOM) {
+                        showRgbColorPickerDialog(
+                                "Custom Mini Player Color",
+                                getSavedCustomMiniPlayerColor(),
+                                this::applyCustomMiniPlayerColorPreview,
+                                selectedMiniColor -> {
+                            prefs.edit().putInt(PREF_CUSTOM_MINI_PLAYER_COLOR, selectedMiniColor).apply();
+                            applySelection.run();
+                                },
+                                this::restoreThemePreview
+                        );
+                    } else {
+                        applySelection.run();
                     }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void applyThemeSelection(SharedPreferences prefs, int newThemeMode, int newMiniTheme,
+                                     int currentThemeMode, int currentMiniTheme) {
+        prefs.edit()
+                .putInt(PREF_THEME_MODE, newThemeMode)
+                .putInt(PREF_MINI_PLAYER_THEME, newMiniTheme)
+                .apply();
+
+        if (newThemeMode == THEME_MODE_BLUISH_BLACK) {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
+        } else {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+        }
+
+        if (newThemeMode != currentThemeMode) {
+            recreate();
+            return;
+        }
+
+        if (newMiniTheme != currentMiniTheme || newMiniTheme == MINI_PLAYER_THEME_CUSTOM) {
+            applyMiniPlayerTheme();
+        }
+        applyCustomThemeOverlays();
     }
 
     private boolean isMilkyThemeActive() {
@@ -4802,25 +4945,58 @@ public class MainActivity extends AppCompatActivity {
         return mode == THEME_MODE_MILKY;
     }
 
+    private boolean isCustomAppThemeActive() {
+        int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+        return mode == THEME_MODE_CUSTOM;
+    }
+
+    private int getSavedCustomAppColor() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_CUSTOM_APP_COLOR, DEFAULT_CUSTOM_APP_COLOR);
+    }
+
+    private int getSavedCustomMiniPlayerColor() {
+        return getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .getInt(PREF_CUSTOM_MINI_PLAYER_COLOR, DEFAULT_CUSTOM_MINI_PLAYER_COLOR);
+    }
+
     private void applyCustomThemeOverlays() {
-        if (!isMilkyThemeActive()) return;
+        int backgroundColor;
+        int panelColor;
+        int navColor;
+        int searchColor;
+        if (isMilkyThemeActive()) {
+            backgroundColor = ContextCompat.getColor(this, R.color.milky_background);
+            panelColor = ContextCompat.getColor(this, R.color.milky_surface);
+            navColor = ContextCompat.getColor(this, R.color.milky_bottom_nav_bg);
+            searchColor = ContextCompat.getColor(this, R.color.milky_search_bg);
+        } else if (isCustomAppThemeActive()) {
+            int base = getSavedCustomAppColor();
+            backgroundColor = lightenColor(base, 0.80f);
+            panelColor = lightenColor(base, 0.70f);
+            navColor = lightenColor(base, 0.74f);
+            searchColor = lightenColor(base, 0.64f);
+        } else {
+            return;
+        }
 
         View contentRoot = findViewById(android.R.id.content);
         if (contentRoot instanceof ViewGroup) {
             ViewGroup rootGroup = (ViewGroup) contentRoot;
             if (rootGroup.getChildCount() > 0) {
                 View rootLayout = rootGroup.getChildAt(0);
-                rootLayout.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_background));
+                rootLayout.setBackgroundColor(backgroundColor);
             }
         }
 
         View playerPanel = findViewById(R.id.playerPanel);
         if (playerPanel != null) {
-            playerPanel.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_surface));
+            playerPanel.setBackgroundColor(panelColor);
         }
 
         if (bottomNavigation != null) {
-            bottomNavigation.setBackgroundColor(ContextCompat.getColor(this, R.color.milky_bottom_nav_bg));
+            bottomNavigation.setBackgroundColor(navColor);
         }
 
         if (searchEditText != null && searchEditText.getParent() instanceof View) {
@@ -4828,33 +5004,45 @@ public class MainActivity extends AppCompatActivity {
             Drawable searchBg = searchContainer.getBackground();
             if (searchBg != null) {
                 searchBg = searchBg.mutate();
-                searchBg.setTint(ContextCompat.getColor(this, R.color.milky_search_bg));
+                searchBg.setTint(searchColor);
                 searchContainer.setBackground(searchBg);
             }
         }
     }
 
-    private void showMiniPlayerThemeSettingsDialog() {
-        final String[] options = {"Current", "White"};
-        int currentMiniTheme = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
-        if (currentMiniTheme < MINI_PLAYER_THEME_CURRENT || currentMiniTheme > MINI_PLAYER_THEME_WHITE) {
-            currentMiniTheme = MINI_PLAYER_THEME_CURRENT;
-        }
-        final int[] selected = {currentMiniTheme};
+    private void applyBaseThemeDefaults() {
+        int backgroundColor = ContextCompat.getColor(this, R.color.background);
+        int panelColor = ContextCompat.getColor(this, R.color.player_panel_bg);
+        int navColor = ContextCompat.getColor(this, R.color.bottom_nav_bg);
+        int searchColor = ContextCompat.getColor(this, R.color.search_bar_bg);
 
-        new AlertDialog.Builder(this)
-                .setTitle("Mini Player Theme")
-                .setSingleChoiceItems(options, currentMiniTheme, (dialog, which) -> selected[0] = which)
-                .setPositiveButton("Apply", (dialog, which) -> {
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .edit()
-                            .putInt(PREF_MINI_PLAYER_THEME, selected[0])
-                            .apply();
-                    applyMiniPlayerTheme();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        View contentRoot = findViewById(android.R.id.content);
+        if (contentRoot instanceof ViewGroup) {
+            ViewGroup rootGroup = (ViewGroup) contentRoot;
+            if (rootGroup.getChildCount() > 0) {
+                View rootLayout = rootGroup.getChildAt(0);
+                rootLayout.setBackgroundColor(backgroundColor);
+            }
+        }
+
+        View playerPanel = findViewById(R.id.playerPanel);
+        if (playerPanel != null) {
+            playerPanel.setBackgroundColor(panelColor);
+        }
+
+        if (bottomNavigation != null) {
+            bottomNavigation.setBackgroundColor(navColor);
+        }
+
+        if (searchEditText != null && searchEditText.getParent() instanceof View) {
+            View searchContainer = (View) searchEditText.getParent();
+            Drawable searchBg = searchContainer.getBackground();
+            if (searchBg != null) {
+                searchBg = searchBg.mutate();
+                searchBg.setTint(searchColor);
+                searchContainer.setBackground(searchBg);
+            }
+        }
     }
 
     private void applyMiniPlayerTheme() {
@@ -4862,7 +5050,7 @@ public class MainActivity extends AppCompatActivity {
 
         int miniTheme = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
-        if (miniTheme < MINI_PLAYER_THEME_CURRENT || miniTheme > MINI_PLAYER_THEME_WHITE) {
+        if (miniTheme < MINI_PLAYER_THEME_CURRENT || miniTheme > MINI_PLAYER_THEME_CUSTOM) {
             miniTheme = MINI_PLAYER_THEME_CURRENT;
         }
 
@@ -4883,8 +5071,14 @@ public class MainActivity extends AppCompatActivity {
             if (expandBtn != null) {
                 expandBtn.setColorFilter(ContextCompat.getColor(this, R.color.text_secondary));
             }
+        } else if (miniTheme == MINI_PLAYER_THEME_CUSTOM) {
+            applyMiniPlayerCustomGradient(getSavedCustomMiniPlayerColor(), expandBtn);
         } else {
-            miniPlayerBar.setBackgroundResource(R.drawable.gradient_accent);
+            if (isMilkyThemeActive()) {
+                miniPlayerBar.setBackgroundResource(R.drawable.bg_mini_player_milky_bluish_dark);
+            } else {
+                miniPlayerBar.setBackgroundResource(R.drawable.gradient_accent);
+            }
             miniPlayerBar.setElevation(dpToPx(2));
 
             if (miniPlayerTitle != null) {
@@ -4900,6 +5094,193 @@ public class MainActivity extends AppCompatActivity {
                 expandBtn.setColorFilter(ContextCompat.getColor(this, R.color.white));
             }
         }
+    }
+
+    private interface ColorSelectionCallback {
+        void onColorSelected(int color);
+    }
+
+    private interface ColorPreviewCallback {
+        void onColorPreview(int color);
+    }
+
+    private void showRgbColorPickerDialog(String title, int initialColor,
+                                          ColorPreviewCallback previewCallback,
+                                          ColorSelectionCallback applyCallback,
+                                          Runnable cancelCallback) {
+        final int[] rgb = {
+                Color.red(initialColor),
+                Color.green(initialColor),
+                Color.blue(initialColor)
+        };
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) dpToPx(16);
+        container.setPadding(padding, padding, padding, 0);
+
+        TextView hexView = new TextView(this);
+        View preview = new View(this);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) dpToPx(48)
+        );
+        previewParams.bottomMargin = (int) dpToPx(12);
+        preview.setLayoutParams(previewParams);
+        container.addView(preview);
+        container.addView(hexView);
+
+        addColorChannelSlider(container, "Red", rgb, 0, preview, hexView, previewCallback);
+        addColorChannelSlider(container, "Green", rgb, 1, preview, hexView, previewCallback);
+        addColorChannelSlider(container, "Blue", rgb, 2, preview, hexView, previewCallback);
+        updateColorPreview(preview, hexView, rgb, previewCallback);
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(container)
+                .setPositiveButton("Apply", (dialog, which) ->
+                        applyCallback.onColorSelected(Color.rgb(rgb[0], rgb[1], rgb[2])))
+                .setNegativeButton("Cancel", (dialog, which) -> {
+                    if (cancelCallback != null) {
+                        cancelCallback.run();
+                    }
+                })
+                .show();
+    }
+
+    private void addColorChannelSlider(LinearLayout container, String label, int[] rgb, int channelIndex,
+                                       View preview, TextView hexView,
+                                       ColorPreviewCallback previewCallback) {
+        TextView channelLabel = new TextView(this);
+        channelLabel.setText(label);
+        container.addView(channelLabel);
+
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(255);
+        seekBar.setProgress(rgb[channelIndex]);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                rgb[channelIndex] = progress;
+                updateColorPreview(preview, hexView, rgb, previewCallback);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        container.addView(seekBar);
+    }
+
+    private void updateColorPreview(View preview, TextView hexView, int[] rgb,
+                                    ColorPreviewCallback previewCallback) {
+        int selectedColor = Color.rgb(rgb[0], rgb[1], rgb[2]);
+        preview.setBackgroundColor(selectedColor);
+        hexView.setText(String.format(Locale.US, "Selected: #%06X", (0xFFFFFF & selectedColor)));
+        if (previewCallback != null) {
+            previewCallback.onColorPreview(selectedColor);
+        }
+    }
+
+    private void applyCustomAppColorPreview(int selectedColor) {
+        int backgroundColor = lightenColor(selectedColor, 0.80f);
+        int panelColor = lightenColor(selectedColor, 0.70f);
+        int navColor = lightenColor(selectedColor, 0.74f);
+        int searchColor = lightenColor(selectedColor, 0.64f);
+
+        View contentRoot = findViewById(android.R.id.content);
+        if (contentRoot instanceof ViewGroup) {
+            ViewGroup rootGroup = (ViewGroup) contentRoot;
+            if (rootGroup.getChildCount() > 0) {
+                View rootLayout = rootGroup.getChildAt(0);
+                rootLayout.setBackgroundColor(backgroundColor);
+            }
+        }
+
+        View playerPanel = findViewById(R.id.playerPanel);
+        if (playerPanel != null) {
+            playerPanel.setBackgroundColor(panelColor);
+        }
+
+        if (bottomNavigation != null) {
+            bottomNavigation.setBackgroundColor(navColor);
+        }
+
+        if (searchEditText != null && searchEditText.getParent() instanceof View) {
+            View searchContainer = (View) searchEditText.getParent();
+            Drawable searchBg = searchContainer.getBackground();
+            if (searchBg != null) {
+                searchBg = searchBg.mutate();
+                searchBg.setTint(searchColor);
+                searchContainer.setBackground(searchBg);
+            }
+        }
+    }
+
+    private void applyCustomMiniPlayerColorPreview(int selectedColor) {
+        ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
+        applyMiniPlayerCustomGradient(selectedColor, expandBtn);
+    }
+
+    private void applyMiniPlayerCustomGradient(int startColor, ImageView expandBtn) {
+        if (miniPlayerBar == null) return;
+
+        int end = darkenColor(startColor, 0.22f);
+        GradientDrawable gradientDrawable = new GradientDrawable(
+                GradientDrawable.Orientation.BL_TR,
+                new int[]{startColor, end}
+        );
+        gradientDrawable.setCornerRadius(dpToPx(8));
+        miniPlayerBar.setBackground(gradientDrawable);
+        miniPlayerBar.setElevation(dpToPx(2));
+
+        int contentColor = isColorDark(startColor) ? Color.WHITE : Color.BLACK;
+        if (miniPlayerTitle != null) {
+            miniPlayerTitle.setTextColor(contentColor);
+        }
+        if (miniPlayerSubtitle != null) {
+            miniPlayerSubtitle.setTextColor(contentColor);
+        }
+        if (miniPlayPauseBtn != null) {
+            miniPlayPauseBtn.setColorFilter(contentColor);
+        }
+        if (expandBtn != null) {
+            expandBtn.setColorFilter(contentColor);
+        }
+    }
+
+    private void restoreThemePreview() {
+        applyBaseThemeDefaults();
+        applyCustomThemeOverlays();
+        applyMiniPlayerTheme();
+    }
+
+    private int lightenColor(int color, float ratio) {
+        int r = Color.red(color);
+        int g = Color.green(color);
+        int b = Color.blue(color);
+        r += Math.round((255 - r) * ratio);
+        g += Math.round((255 - g) * ratio);
+        b += Math.round((255 - b) * ratio);
+        return Color.rgb(clampColorValue(r), clampColorValue(g), clampColorValue(b));
+    }
+
+    private int darkenColor(int color, float ratio) {
+        int r = Math.round(Color.red(color) * (1f - ratio));
+        int g = Math.round(Color.green(color) * (1f - ratio));
+        int b = Math.round(Color.blue(color) * (1f - ratio));
+        return Color.rgb(clampColorValue(r), clampColorValue(g), clampColorValue(b));
+    }
+
+    private int clampColorValue(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private boolean isColorDark(int color) {
+        double luminance = (0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color)) / 255d;
+        return luminance < 0.55d;
     }
 
     private float dpToPx(int dp) {

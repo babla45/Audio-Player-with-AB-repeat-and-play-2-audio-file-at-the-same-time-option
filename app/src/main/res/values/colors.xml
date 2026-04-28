@@ -47,6 +47,8 @@
     <color name="milky_surface">#FFF5F1E7</color>
     <color name="milky_bottom_nav_bg">#FFF3EFE4</color>
     <color name="milky_search_bg">#FFF1ECE1</color>
+    <color name="milky_bluish_dark_gradient_start">#FF4C5D87</color>
+    <color name="milky_bluish_dark_gradient_end">#FF27344E</color>
     <!-- Slightly darker than surface_900 so bottom nav is distinct -->
     <color name="bottom_nav_bg">#FFFFFFFF</color>
     <!-- Slightly darker than song list items (surface_800) for better separation -->
