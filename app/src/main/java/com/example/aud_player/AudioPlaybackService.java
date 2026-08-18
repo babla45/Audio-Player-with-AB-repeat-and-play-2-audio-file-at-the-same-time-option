@@ -29,6 +29,7 @@ import android.content.ComponentName;
 import android.telephony.TelephonyManager;
 import android.graphics.Bitmap;
 import android.media.PlaybackParams;
+import android.media.audiofx.LoudnessEnhancer;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -65,6 +66,8 @@ public class AudioPlaybackService extends Service {
     private boolean isForegroundStarted = false;
     private float currentPitch = 1.0f;
     private float currentBoost = 1.0f;
+    private LoudnessEnhancer loudnessEnhancerMain;
+    private LoudnessEnhancer loudnessEnhancerSecond;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private Bitmap notificationArtwork;
@@ -481,6 +484,9 @@ public class AudioPlaybackService extends Service {
     }
 
     public void setMediaPlayers(MediaPlayer main, MediaPlayer second, String title) {
+        // release any previous loudness enhancers before switching players
+        try { releaseLoudnessEnhancers(); } catch (Exception ignored) {}
+
         this.mediaPlayer = main;
         this.secondMediaPlayer = second;
         this.currentTitle = title != null ? title : "Audio Player";
@@ -508,13 +514,85 @@ public class AudioPlaybackService extends Service {
         }
         // Apply saved pitch to any passed MediaPlayers
         applyPitchToPlayers();
-        // Apply saved boost to players (best-effort)
+        // Initialize loudness enhancers for players and apply saved boost
         try {
-            float vol = Math.min(1.0f, currentBoost / 5.0f);
-            if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
-            if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
-        } catch (Exception ignored) {}
+            if (mediaPlayer != null) initLoudnessEnhancerForPlayer(mediaPlayer, false);
+            if (secondMediaPlayer != null) initLoudnessEnhancerForPlayer(secondMediaPlayer, true);
+            applyBoostToEnhancers();
+        } catch (Exception e) {
+            Log.w(TAG, "LoudnessEnhancer initialization failed", e);
+            // fallback: ensure volume not muted
+            try {
+                float v = Math.min(1.0f, currentBoost / 5.0f);
+                if (mediaPlayer != null) mediaPlayer.setVolume(v, v);
+                if (secondMediaPlayer != null) secondMediaPlayer.setVolume(v, v);
+            } catch (Exception ignored) {}
+        }
         updatePlaybackState();
+    }
+
+    private void initLoudnessEnhancerForPlayer(MediaPlayer mp, boolean isSecond) {
+        if (mp == null) return;
+        try {
+            int session = mp.getAudioSessionId();
+            if (session <= 0) return;
+            LoudnessEnhancer le = new LoudnessEnhancer(session);
+            le.setEnabled(false);
+            if (isSecond) {
+                loudnessEnhancerSecond = le;
+            } else {
+                loudnessEnhancerMain = le;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to create LoudnessEnhancer", e);
+        }
+    }
+
+    private void applyBoostToEnhancers() {
+        try {
+            // convert boost factor to millibels (100 * dB). dB = 20*log10(factor)
+            float factor = Math.max(0.01f, currentBoost);
+            double db = 20.0 * Math.log10(factor);
+            int millibels = (int) Math.round(db * 100.0);
+            // clamp to safe range
+            if (millibels > 2000) millibels = 2000;
+            if (millibels < -1000) millibels = -1000;
+
+            if (loudnessEnhancerMain != null) {
+                try {
+                    loudnessEnhancerMain.setTargetGain(millibels);
+                    loudnessEnhancerMain.setEnabled(millibels != 0);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to apply gain to main LoudnessEnhancer", e);
+                }
+            }
+
+            if (loudnessEnhancerSecond != null) {
+                try {
+                    loudnessEnhancerSecond.setTargetGain(millibels);
+                    loudnessEnhancerSecond.setEnabled(millibels != 0);
+                } catch (Exception e) {
+                    Log.w(TAG, "Failed to apply gain to second LoudnessEnhancer", e);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error computing/applying loudness boost", e);
+        }
+    }
+
+    private void releaseLoudnessEnhancers() {
+        try {
+            if (loudnessEnhancerMain != null) {
+                try { loudnessEnhancerMain.release(); } catch (Exception ignored) {}
+                loudnessEnhancerMain = null;
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (loudnessEnhancerSecond != null) {
+                try { loudnessEnhancerSecond.release(); } catch (Exception ignored) {}
+                loudnessEnhancerSecond = null;
+            }
+        } catch (Exception ignored) {}
     }
 
     private void applyPitchToPlayers() {
@@ -614,13 +692,18 @@ public class AudioPlaybackService extends Service {
             } catch (Exception ignored) {}
 
             // Apply best-effort: Android MediaPlayer.setVolume expects 0..1.0, so we scale down
-            // to avoid throwing errors; final loudness may be limited by hardware/OS.
+            // Use LoudnessEnhancer where available to apply actual gain in millibels.
             try {
-                float vol = Math.min(1.0f, currentBoost / 5.0f);
-                if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
-                if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+                applyBoostToEnhancers();
             } catch (Exception e) {
-                Log.e(TAG, "Failed to apply boost to players", e);
+                Log.w(TAG, "LoudnessEnhancer apply failed, falling back to setVolume", e);
+                try {
+                    float vol = Math.min(1.0f, currentBoost / 5.0f);
+                    if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
+                    if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+                } catch (Exception ex) {
+                    Log.e(TAG, "Failed to apply boost to players", ex);
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to set boost", e);
@@ -825,6 +908,8 @@ public class AudioPlaybackService extends Service {
                 notificationArtwork.recycle();
                 notificationArtwork = null;
             }
+            // Release loudness enhancers
+            try { releaseLoudnessEnhancers(); } catch (Exception ignored) {}
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
         }
