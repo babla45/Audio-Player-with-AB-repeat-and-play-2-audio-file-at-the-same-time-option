@@ -93,6 +93,7 @@ import androidx.documentfile.provider.DocumentFile;
 import android.app.PendingIntent;
 import android.content.IntentSender;
 import android.widget.ScrollView;
+import android.widget.HorizontalScrollView;
 import android.view.Window;
 import android.view.WindowManager;
 import android.graphics.Color;
@@ -2160,51 +2161,34 @@ public class MainActivity extends AppCompatActivity {
             titleInfo.setTextSize(14);
             container.addView(titleInfo);
 
+            // Horizontal, scrollable preset row with multiple presets
+            HorizontalScrollView presetScroll = new HorizontalScrollView(this);
+            presetScroll.setHorizontalScrollBarEnabled(false);
             LinearLayout presetRow = new LinearLayout(this);
             presetRow.setOrientation(LinearLayout.HORIZONTAL);
             presetRow.setPadding(0, padding / 2, 0, padding / 2);
 
-            Button rockBtn = new Button(this);
-            rockBtn.setText("Rock");
-            rockBtn.setOnClickListener(v -> {
-                applyCustomEqualizerPreset("Rock");
-                syncEqualizerSeekBars(scrollView);
-            });
-            presetRow.addView(rockBtn);
+            String[] morePresets = new String[]{"Rock", "Soft", "Pop", "Jazz", "Classical", "Dance", "HipHop", "Blues", "Electronic", "Acoustic", "Flat"};
+            for (String p : morePresets) {
+                final String presetName = p;
+                Button b = new Button(this);
+                b.setText(presetName);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                lp.setMargins(padding/6, 0, padding/6, 0);
+                b.setLayoutParams(lp);
+                b.setOnClickListener(v -> {
+                    if ("Flat".equals(presetName)) {
+                        resetEqualizerLevels();
+                    } else {
+                        applyCustomEqualizerPreset(presetName);
+                    }
+                    syncEqualizerSeekBars(scrollView);
+                });
+                presetRow.addView(b);
+            }
 
-            Button softBtn = new Button(this);
-            softBtn.setText("Soft");
-            softBtn.setOnClickListener(v -> {
-                applyCustomEqualizerPreset("Soft");
-                syncEqualizerSeekBars(scrollView);
-            });
-            presetRow.addView(softBtn);
-
-            Button popBtn = new Button(this);
-            popBtn.setText("Pop");
-            popBtn.setOnClickListener(v -> {
-                applyCustomEqualizerPreset("Pop");
-                syncEqualizerSeekBars(scrollView);
-            });
-            presetRow.addView(popBtn);
-
-            Button jazzBtn = new Button(this);
-            jazzBtn.setText("Jazz");
-            jazzBtn.setOnClickListener(v -> {
-                applyCustomEqualizerPreset("Jazz");
-                syncEqualizerSeekBars(scrollView);
-            });
-            presetRow.addView(jazzBtn);
-
-            Button flatBtn = new Button(this);
-            flatBtn.setText("Flat");
-            flatBtn.setOnClickListener(v -> {
-                resetEqualizerLevels();
-                syncEqualizerSeekBars(scrollView);
-            });
-            presetRow.addView(flatBtn);
-
-            container.addView(presetRow);
+            presetScroll.addView(presetRow);
+            container.addView(presetScroll);
 
             if (equalizer.getNumberOfPresets() > 0) {
                 Button devicePresetBtn = new Button(this);
