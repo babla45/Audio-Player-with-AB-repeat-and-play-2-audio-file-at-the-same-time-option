@@ -62,6 +62,86 @@
         android:progressTint="@color/accent_primary"
         android:thumbTint="@color/accent_primary" />
 
+    <!-- Quick preset chips -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="12dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_150"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1.5x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_200"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2.0x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_250"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2.5x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_300"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3.0x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_350"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3.5x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_400"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="4.0x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_450"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="4.5x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/boost_chip_500"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="5.0x"
+                android:layout_marginEnd="8dp"
+                android:checkable="true" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
