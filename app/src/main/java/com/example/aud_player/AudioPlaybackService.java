@@ -64,6 +64,7 @@ public class AudioPlaybackService extends Service {
     private boolean noisyReceiverRegistered = false;
     private boolean isForegroundStarted = false;
     private float currentPitch = 1.0f;
+    private float currentBoost = 1.0f;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private Bitmap notificationArtwork;
@@ -185,6 +186,10 @@ public class AudioPlaybackService extends Service {
         try {
             currentPitch = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
                     .getFloat("playback_pitch", 1.0f);
+        } catch (Exception ignored) {}
+        try {
+            currentBoost = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                    .getFloat("volume_boost_factor", 1.0f);
         } catch (Exception ignored) {}
     }
 
@@ -503,6 +508,12 @@ public class AudioPlaybackService extends Service {
         }
         // Apply saved pitch to any passed MediaPlayers
         applyPitchToPlayers();
+        // Apply saved boost to players (best-effort)
+        try {
+            float vol = Math.min(1.0f, currentBoost / 5.0f);
+            if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
+            if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+        } catch (Exception ignored) {}
         updatePlaybackState();
     }
 
@@ -587,6 +598,37 @@ public class AudioPlaybackService extends Service {
         } catch (Exception e) {
             Log.e(TAG, "Failed to set pitch", e);
         }
+    }
+
+    public void setBoost(float boost) {
+        try {
+            if (boost <= 0f) boost = 1.0f;
+            // constrain to 1.0 - 5.0
+            boost = Math.max(1.0f, Math.min(5.0f, boost));
+            currentBoost = boost;
+
+            // Persist preference
+            try {
+                getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                        .edit().putFloat("volume_boost_factor", currentBoost).apply();
+            } catch (Exception ignored) {}
+
+            // Apply best-effort: Android MediaPlayer.setVolume expects 0..1.0, so we scale down
+            // to avoid throwing errors; final loudness may be limited by hardware/OS.
+            try {
+                float vol = Math.min(1.0f, currentBoost / 5.0f);
+                if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
+                if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to apply boost to players", e);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to set boost", e);
+        }
+    }
+
+    public float getCurrentBoost() {
+        return currentBoost;
     }
 
     public float getCurrentPitch() {

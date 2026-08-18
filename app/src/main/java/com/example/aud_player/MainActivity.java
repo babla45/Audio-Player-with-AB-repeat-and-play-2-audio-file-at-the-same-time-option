@@ -298,6 +298,7 @@ public class MainActivity extends AppCompatActivity {
     private float secondaryPlaybackSpeed = 1.0f;
     private boolean useIndividualPlaybackSpeeds = false;
     private float currentPitch = 1.0f;
+    private float currentBoost = 1.0f;
 
     // Add PlaylistDatabaseHelper as a class field
     private PlaylistDatabaseHelper playlistDbHelper;
@@ -451,6 +452,8 @@ public class MainActivity extends AppCompatActivity {
         seekBackwardMs = backwardSeconds * 1000;
         // Load saved pitch
         currentPitch = prefs.getFloat("playback_pitch", 1.0f);
+        // Load saved boost
+        currentBoost = prefs.getFloat("volume_boost_factor", 1.0f);
         
         // Load saved playback mode
         loadPlaybackMode();
@@ -1597,6 +1600,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onBoostClicked() {
+                showBoostBottomSheet();
+            }
+
+            @Override
             public void onEqualizerClicked() {
                 showEqualizerPanel();
             }
@@ -2000,6 +2008,38 @@ public class MainActivity extends AppCompatActivity {
         });
 
         pitchSheet.show(getSupportFragmentManager(), "PitchBottomSheet");
+    }
+
+    private void showBoostBottomSheet() {
+        BoostBottomSheet boostSheet = new BoostBottomSheet();
+        boostSheet.setBoostListener(new BoostBottomSheet.BoostListener() {
+            @Override
+            public void onBoostChanged(float boost) {
+                // Update service if available
+                if (serviceBound && audioService != null) {
+                    audioService.setBoost(boost);
+                }
+
+                // Best-effort apply to local media players via setVolume (clamped)
+                try {
+                    float left = 1.0f;
+                    float right = 1.0f;
+                    float applied = Math.max(1.0f, boost);
+                    // clamp to max 5.0f here logically; setVolume expects 0..1 so we scale down when >1
+                    float vol = Math.min(1.0f, applied / 5.0f);
+                    if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
+                    if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+                } catch (Exception ignored) {}
+            }
+
+            @Override
+            public float getCurrentBoost() {
+                if (serviceBound && audioService != null) return audioService.getCurrentBoost();
+                return currentBoost;
+            }
+        });
+
+        boostSheet.show(getSupportFragmentManager(), "BoostBottomSheet");
     }
 
     private void showMixerOptionsDialog() {

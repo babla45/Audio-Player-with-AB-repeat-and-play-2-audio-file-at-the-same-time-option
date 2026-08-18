@@ -39,6 +39,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onPlaybackModeClicked(View anchorView);
         void onSpeedClicked();
         void onPitchClicked();
+            void onBoostClicked();
         void onEqualizerClicked();
         void onSettingsClicked();
         void onRefreshClicked();
@@ -98,6 +99,18 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
 
         view.findViewById(R.id.menu_pitch_btn).setOnClickListener(v -> {
             if (listener != null) listener.onPitchClicked();
+            dismiss();
+        });
+
+        view.findViewById(R.id.menu_boost_btn).setOnClickListener(v -> {
+            if (listener != null) {
+                listener.onBoostClicked();
+            } else {
+                try {
+                    BoostBottomSheet sheet = new BoostBottomSheet();
+                    sheet.show(getParentFragmentManager(), "BoostBottomSheet");
+                } catch (Exception ignored) {}
+            }
             dismiss();
         });
 
@@ -238,6 +251,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 R.id.menu_playback_mode_btn,
                 R.id.menu_speed_btn,
                 R.id.menu_pitch_btn,
+                R.id.menu_boost_btn,
                 R.id.menu_equalizer_btn,
                 R.id.menu_settings_btn,
                 R.id.menu_refresh_btn,
@@ -426,6 +440,28 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 if (id == 0) continue;
                 View v = root.findViewById(id);
                 if (v != null) ordered.add(v);
+            }
+            // Ensure any new tiles (not present in saved list) are appended so they are not lost
+            int[] allTileIds = new int[] {
+                    R.id.menu_sort_btn,
+                    R.id.menu_timer_btn,
+                    R.id.menu_ab_repeat_btn,
+                    R.id.menu_playback_mode_btn,
+                    R.id.menu_speed_btn,
+                    R.id.menu_pitch_btn,
+                    R.id.menu_boost_btn,
+                    R.id.menu_equalizer_btn,
+                    R.id.menu_settings_btn,
+                    R.id.menu_refresh_btn,
+                    R.id.menu_add_to_playlist_btn,
+                    R.id.menu_exit_btn,
+                    R.id.menu_browse_btn,
+                    R.id.menu_mixer_toggle_btn
+            };
+            for (int tid : allTileIds) {
+                View v = root.findViewById(tid);
+                if (v == null) continue;
+                if (!ordered.contains(v)) ordered.add(v);
             }
             if (ordered.isEmpty()) return;
 
