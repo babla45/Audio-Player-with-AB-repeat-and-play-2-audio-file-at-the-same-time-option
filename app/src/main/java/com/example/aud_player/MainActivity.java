@@ -1121,8 +1121,9 @@ public class MainActivity extends AppCompatActivity {
                         Log.d(TAG, "Ignoring stale onPrepared callback for previous audio selection");
                         return;
                     }
-                    ensureEqualizerInitialized();
+                    // Open audio effect session first to request control from system
                     openAudioEffectSession(mp.getAudioSessionId());
+                    ensureEqualizerInitialized();
 
                     // Set the seekbar maximum to the total duration
                     int duration = mp.getDuration();
@@ -2369,17 +2370,17 @@ public class MainActivity extends AppCompatActivity {
             }
 
             releaseEqualizerEffects();
-            equalizer = new Equalizer(0, sessionId);
+            // Use non-zero priority to improve compatibility on devices that reserve
+            // audio effect control for system-level equalizers (e.g., some MIUI builds).
+            equalizer = new Equalizer(1, sessionId);
             equalizer.setEnabled(true);
             Log.d(TAG, "Equalizer init: session=" + sessionId + ", bands=" + equalizer.getNumberOfBands());
             if (!equalizer.hasControl()) {
                 Log.w(TAG, "Equalizer initialized without control for session " + sessionId);
             }
-
-            bassBoost = new BassBoost(0, sessionId);
+            bassBoost = new BassBoost(1, sessionId);
             bassBoost.setEnabled(true);
-
-            virtualizer = new Virtualizer(0, sessionId);
+            virtualizer = new Virtualizer(1, sessionId);
             virtualizer.setEnabled(true);
 
             equalizerSessionId = sessionId;
