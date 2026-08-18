@@ -5,6 +5,15 @@ import android.app.Dialog;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.DragEvent;
+import android.content.ClipData;
+import android.content.ClipDescription;
+import android.content.Context;
+import android.content.SharedPreferences;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Arrays;
+import android.animation.Animator;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -53,6 +62,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.bottom_sheet_menu, container, false);
+        this.menuRoot = view;
 
         View topBar = view.findViewById(R.id.menu_top_bar);
         View title = view.findViewById(R.id.menu_title);
@@ -268,6 +278,184 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 }
             }
         }
+
+        // Apply saved order (if any) before setting up drag handlers
+        applySavedOrder(root);
+
+        // Enable long-press drag to swap tiles without changing their click behavior
+        for (int tileId : tileIds) {
+            View tile = root.findViewById(tileId);
+            if (tile == null) continue;
+
+            // Long press starts drag; pass the view as local state
+            tile.setOnLongClickListener(v -> {
+                CharSequence label = "menu_tile";
+                ClipData.Item item = new ClipData.Item(String.valueOf(tileId));
+                String[] mimeTypes = {ClipDescription.MIMETYPE_TEXT_PLAIN};
+                ClipData dragData = new ClipData(label, mimeTypes, item);
+                View.DragShadowBuilder shadow = new View.DragShadowBuilder(v);
+                // animate to indicate lift
+                v.animate().scaleX(1.06f).scaleY(1.06f).alpha(0.95f).setDuration(120).start();
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                    v.startDragAndDrop(dragData, shadow, v, 0);
+                } else {
+                    v.startDrag(dragData, shadow, v, 0);
+                }
+                return true;
+            });
+
+            // Allow swapping when another tile is dropped onto this one
+            tile.setOnDragListener((view, event) -> {
+                switch (event.getAction()) {
+                    case DragEvent.ACTION_DRAG_STARTED:
+                        return true;
+                    case DragEvent.ACTION_DRAG_ENTERED:
+                        view.setAlpha(0.7f);
+                        view.animate().scaleX(1.03f).scaleY(1.03f).setDuration(80).start();
+                        return true;
+                    case DragEvent.ACTION_DRAG_EXITED:
+                        view.setAlpha(1f);
+                        view.animate().scaleX(1f).scaleY(1f).setDuration(80).start();
+                        return true;
+                    case DragEvent.ACTION_DROP: {
+                        Object localState = event.getLocalState();
+                        if (localState instanceof View) {
+                            View dragged = (View) localState;
+                            View target = (View) view;
+                            if (dragged != target) {
+                                swapTiles(dragged, target);
+                                // persist new ordering
+                                saveCurrentOrder(root);
+                            }
+                            // restore animated dragged view
+                            dragged.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(120).start();
+                        }
+                        view.setAlpha(1f);
+                        return true;
+                    }
+                    case DragEvent.ACTION_DRAG_ENDED: {
+                        view.setAlpha(1f);
+                        // reset any view that was dragged (localState may be present)
+                        Object localState = event.getLocalState();
+                        if (localState instanceof View) {
+                            View dragged = (View) localState;
+                            dragged.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(120).start();
+                        }
+                        view.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            });
+        }
+    }
+
+    private void swapTiles(View a, View b) {
+        try {
+            if (a == null || b == null) return;
+            ViewGroup parentA = (ViewGroup) a.getParent();
+            ViewGroup parentB = (ViewGroup) b.getParent();
+            if (parentA == null || parentB == null) return;
+
+            int indexA = parentA.indexOfChild(a);
+            int indexB = parentB.indexOfChild(b);
+
+            // Remove both first to avoid index shifts
+            parentA.removeView(a);
+            parentB.removeView(b);
+
+            if (parentA == parentB) {
+                // Same parent: insert in swapped order
+                if (indexA < indexB) {
+                    parentA.addView(b, indexA);
+                    parentA.addView(a, indexB);
+                } else {
+                    parentA.addView(a, indexB);
+                    parentA.addView(b, indexA);
+                }
+            } else {
+                // Different parents: restore each at the other's index
+                parentA.addView(b, indexA);
+                parentB.addView(a, indexB);
+            }
+        } catch (Exception e) {
+            // Fail silently to avoid breaking menu
+        }
+        // After a swap, persist the new order if we have the root reference
+        if (this.menuRoot != null) {
+            saveCurrentOrder(this.menuRoot);
+        }
+    }
+
+    private View menuRoot;
+
+    private void saveCurrentOrder(View root) {
+        try {
+            if (root == null) return;
+            SharedPreferences prefs = root.getContext().getSharedPreferences("audio_player_prefs", Context.MODE_PRIVATE);
+            List<String> names = new ArrayList<>();
+            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4 };
+            for (int rowId : rowIds) {
+                ViewGroup row = root.findViewById(rowId);
+                if (row == null) continue;
+                for (int i = 0; i < row.getChildCount(); i++) {
+                    View child = row.getChildAt(i);
+                    if (child == null) continue;
+                    int cid = child.getId();
+                    if (cid == View.NO_ID) continue;
+                    String name = root.getContext().getResources().getResourceEntryName(cid);
+                    names.add(name);
+                }
+            }
+            String joined = TextUtils.join(",", names);
+            prefs.edit().putString("menu_tile_order", joined).apply();
+        } catch (Exception ignored) {}
+    }
+
+    private void applySavedOrder(View root) {
+        try {
+            SharedPreferences prefs = root.getContext().getSharedPreferences("audio_player_prefs", Context.MODE_PRIVATE);
+            String saved = prefs.getString("menu_tile_order", null);
+            if (saved == null) return;
+
+            List<String> names = Arrays.asList(saved.split(","));
+            List<View> ordered = new ArrayList<>();
+            for (String name : names) {
+                int id = root.getContext().getResources().getIdentifier(name, "id", root.getContext().getPackageName());
+                if (id == 0) continue;
+                View v = root.findViewById(id);
+                if (v != null) ordered.add(v);
+            }
+            if (ordered.isEmpty()) return;
+
+            // Clear rows and re-add in saved order, 4 items per row
+            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4 };
+            int perRow = 4;
+            int idx = 0;
+            for (int rowId : rowIds) {
+                ViewGroup row = root.findViewById(rowId);
+                if (row == null) continue;
+                row.removeAllViews();
+                for (int i = 0; i < perRow && idx < ordered.size(); i++, idx++) {
+                    View v = ordered.get(idx);
+                    // Detach from old parent if necessary
+                    ViewGroup old = (ViewGroup) v.getParent();
+                    if (old != null) old.removeView(v);
+                    row.addView(v);
+                }
+            }
+            // Any remaining tiles append to last row
+            while (idx < ordered.size()) {
+                View v = ordered.get(idx++);
+                ViewGroup lastRow = root.findViewById(rowIds[rowIds.length - 1]);
+                if (lastRow != null) {
+                    ViewGroup old = (ViewGroup) v.getParent();
+                    if (old != null) old.removeView(v);
+                    lastRow.addView(v);
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private int dpToPx(int dp) {
