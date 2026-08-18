@@ -2643,7 +2643,7 @@ public class MainActivity extends AppCompatActivity {
             // Show feedback if at least one player was updated
             if (speedApplied) {
                 // Display toast with the new speed
-                Toast.makeText(this, "Playback speed: " + String.format("%.2fx", speed), Toast.LENGTH_SHORT).show();
+                //Toast.makeText(this, "Playback speed: " + String.format("%.2fx", speed), Toast.LENGTH_SHORT).show();
                 Log.d(TAG, "Playback speed set to " + speed);
             } else {
                 // Still update the preference even if no player is active

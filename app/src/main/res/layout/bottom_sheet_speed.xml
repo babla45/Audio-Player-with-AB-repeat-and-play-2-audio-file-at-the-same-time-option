@@ -59,9 +59,9 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingHorizontal="20dp"
-        android:min="1"
-        android:max="16"
-        android:progress="4"
+        android:min="25"
+        android:max="400"
+        android:progress="100"
         android:progressTint="@color/accent_primary"
         android:thumbTint="@color/accent_primary" />
 
