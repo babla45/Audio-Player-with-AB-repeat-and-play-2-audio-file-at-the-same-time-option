@@ -29,6 +29,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onABRepeatClicked();
         void onPlaybackModeClicked(View anchorView);
         void onSpeedClicked();
+        void onPitchClicked();
         void onEqualizerClicked();
         void onSettingsClicked();
         void onRefreshClicked();
@@ -82,6 +83,11 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
 
         view.findViewById(R.id.menu_speed_btn).setOnClickListener(v -> {
             if (listener != null) listener.onSpeedClicked();
+            dismiss();
+        });
+
+        view.findViewById(R.id.menu_pitch_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onPitchClicked();
             dismiss();
         });
 
@@ -212,7 +218,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         });
     }
 
-    private void normalizeMenuGridAppearance(View root) {
+        private void normalizeMenuGridAppearance(View root) {
         final int tileMinHeight = dpToPx(54);
         final int iconSize = dpToPx(24);
         final int[] tileIds = new int[] {
@@ -221,6 +227,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 R.id.menu_ab_repeat_btn,
                 R.id.menu_playback_mode_btn,
                 R.id.menu_speed_btn,
+                R.id.menu_pitch_btn,
                 R.id.menu_equalizer_btn,
                 R.id.menu_settings_btn,
                 R.id.menu_refresh_btn,

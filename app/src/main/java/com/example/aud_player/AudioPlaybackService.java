@@ -28,6 +28,7 @@ import android.content.ComponentName;
 
 import android.telephony.TelephonyManager;
 import android.graphics.Bitmap;
+import android.media.PlaybackParams;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
@@ -62,6 +63,7 @@ public class AudioPlaybackService extends Service {
     private boolean pausedByAudioFocusLoss = false;
     private boolean noisyReceiverRegistered = false;
     private boolean isForegroundStarted = false;
+    private float currentPitch = 1.0f;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private Bitmap notificationArtwork;
@@ -180,6 +182,10 @@ public class AudioPlaybackService extends Service {
         createNotificationChannel();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         setupMediaSession();
+        try {
+            currentPitch = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                    .getFloat("playback_pitch", 1.0f);
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -495,7 +501,96 @@ public class AudioPlaybackService extends Service {
         } else {
             updateNotification();
         }
+        // Apply saved pitch to any passed MediaPlayers
+        applyPitchToPlayers();
         updatePlaybackState();
+    }
+
+    private void applyPitchToPlayers() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (mediaPlayer != null) {
+                    try {
+                        PlaybackParams params = mediaPlayer.getPlaybackParams();
+                        params.setPitch(currentPitch);
+                        mediaPlayer.setPlaybackParams(params);
+                    } catch (Exception e) {
+                        // Some players may not support querying params yet — try setting fresh params
+                        try {
+                            PlaybackParams p2 = new PlaybackParams();
+                            p2.setPitch(currentPitch);
+                            mediaPlayer.setPlaybackParams(p2);
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (secondMediaPlayer != null) {
+                    try {
+                        PlaybackParams params2 = secondMediaPlayer.getPlaybackParams();
+                        params2.setPitch(currentPitch);
+                        secondMediaPlayer.setPlaybackParams(params2);
+                    } catch (Exception e) {
+                        try {
+                            PlaybackParams p3 = new PlaybackParams();
+                            p3.setPitch(currentPitch);
+                            secondMediaPlayer.setPlaybackParams(p3);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error applying pitch to players", e);
+        }
+    }
+
+    public void setPitch(float pitch) {
+        try {
+            if (pitch <= 0f) pitch = 1.0f;
+            // Constrain sensible range
+            pitch = Math.max(0.5f, Math.min(2.0f, pitch));
+            currentPitch = pitch;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (mediaPlayer != null) {
+                    try {
+                        PlaybackParams params = mediaPlayer.getPlaybackParams();
+                        params.setPitch(pitch);
+                        mediaPlayer.setPlaybackParams(params);
+                    } catch (Exception e) {
+                        try {
+                            PlaybackParams p2 = new PlaybackParams();
+                            p2.setPitch(pitch);
+                            mediaPlayer.setPlaybackParams(p2);
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (secondMediaPlayer != null) {
+                    try {
+                        PlaybackParams params2 = secondMediaPlayer.getPlaybackParams();
+                        params2.setPitch(pitch);
+                        secondMediaPlayer.setPlaybackParams(params2);
+                    } catch (Exception e) {
+                        try {
+                            PlaybackParams p3 = new PlaybackParams();
+                            p3.setPitch(pitch);
+                            secondMediaPlayer.setPlaybackParams(p3);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+
+            // Persist preference
+            try {
+                getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                        .edit().putFloat("playback_pitch", currentPitch).apply();
+            } catch (Exception ignored) {}
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to set pitch", e);
+        }
+    }
+
+    public float getCurrentPitch() {
+        return currentPitch;
     }
 
     /**

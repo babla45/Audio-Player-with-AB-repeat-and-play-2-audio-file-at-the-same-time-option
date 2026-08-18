@@ -296,6 +296,7 @@ public class MainActivity extends AppCompatActivity {
     private float primaryPlaybackSpeed = 1.0f;
     private float secondaryPlaybackSpeed = 1.0f;
     private boolean useIndividualPlaybackSpeeds = false;
+    private float currentPitch = 1.0f;
 
     // Add PlaylistDatabaseHelper as a class field
     private PlaylistDatabaseHelper playlistDbHelper;
@@ -447,6 +448,8 @@ public class MainActivity extends AppCompatActivity {
         int backwardSeconds = prefs.getInt("seek_backward_seconds", 10); // Default 10 sec
         seekForwardMs = forwardSeconds * 1000;
         seekBackwardMs = backwardSeconds * 1000;
+        // Load saved pitch
+        currentPitch = prefs.getFloat("playback_pitch", 1.0f);
         
         // Load saved playback mode
         loadPlaybackMode();
@@ -1159,15 +1162,21 @@ public class MainActivity extends AppCompatActivity {
                         isPlaying = false;
                     }
 
-                    // Apply playback speed if not default
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) {
+                    // Apply playback speed and saved pitch if available
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         try {
-                            PlaybackParams params = new PlaybackParams();
-                            params.setSpeed(currentPlaybackSpeed);
+                            PlaybackParams params;
+                            try {
+                                params = mediaPlayer.getPlaybackParams();
+                            } catch (Exception e) {
+                                params = new PlaybackParams();
+                            }
+                            if (Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) params.setSpeed(currentPlaybackSpeed);
+                            if (Math.abs(currentPitch - 1.0f) > 0.001f) params.setPitch(currentPitch);
                             mediaPlayer.setPlaybackParams(params);
-                            Log.d(TAG, "Applied saved playback speed to primary audio: " + currentPlaybackSpeed);
+                            Log.d(TAG, "Applied saved playback speed/pitch to primary audio: " + currentPlaybackSpeed + "/" + currentPitch);
                         } catch (Exception e) {
-                            Log.e(TAG, "Error applying saved playback speed to primary audio", e);
+                            Log.e(TAG, "Error applying saved playback params to primary audio", e);
                         }
                     }
                 } catch (Exception e) {
@@ -1581,6 +1590,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onPitchClicked() {
+                showPitchBottomSheet();
+            }
+
+            @Override
             public void onEqualizerClicked() {
                 showEqualizerPanel();
             }
@@ -1951,6 +1965,39 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         speedSheet.show(getSupportFragmentManager(), "SpeedBottomSheet");
+    }
+
+    private void showPitchBottomSheet() {
+        PitchBottomSheet pitchSheet = new PitchBottomSheet();
+        pitchSheet.setPitchListener(new PitchBottomSheet.PitchListener() {
+            @Override
+            public void onPitchChanged(float pitch) {
+                // Update service if available
+                if (serviceBound && audioService != null) {
+                    audioService.setPitch(pitch);
+                }
+
+                // Apply to local media players as a best-effort
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
+                        PlaybackParams params = mediaPlayer.getPlaybackParams();
+                        params.setPitch(pitch);
+                        mediaPlayer.setPlaybackParams(params);
+                    }
+                } catch (Exception ignored) {}
+
+                // Save locally so future prepares pick it up
+                currentPitch = pitch;
+            }
+
+            @Override
+            public float getCurrentPitch() {
+                if (serviceBound && audioService != null) return audioService.getCurrentPitch();
+                return currentPitch;
+            }
+        });
+
+        pitchSheet.show(getSupportFragmentManager(), "PitchBottomSheet");
     }
 
     private void showMixerOptionsDialog() {
@@ -2556,10 +2603,11 @@ public class MainActivity extends AppCompatActivity {
             boolean speedApplied = false;
 
             // Apply to primary player if active
-            if (mediaPlayer != null) {
+                    if (mediaPlayer != null) {
                 try {
                     PlaybackParams params = new PlaybackParams();
                     params.setSpeed(speed);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                     mediaPlayer.setPlaybackParams(params);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to primary audio");
@@ -2574,10 +2622,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             // Apply to secondary player if active (and not using individual speeds)
-            if (secondMediaPlayer != null && secondAudioActive && !useIndividualPlaybackSpeeds) {
+                    if (secondMediaPlayer != null && secondAudioActive && !useIndividualPlaybackSpeeds) {
                 try {
                     PlaybackParams params = new PlaybackParams();
                     params.setSpeed(speed);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                     secondMediaPlayer.setPlaybackParams(params);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to secondary audio");
@@ -2621,10 +2670,11 @@ public class MainActivity extends AppCompatActivity {
 
             // Apply current speeds to respective players
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (mediaPlayer != null) {
+                    if (mediaPlayer != null) {
                     try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(primaryPlaybackSpeed);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                         mediaPlayer.setPlaybackParams(params);
                         Log.d(TAG, "Applied initial primary speed: " + primaryPlaybackSpeed);
                     } catch (Exception e) {
@@ -2632,10 +2682,11 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-                if (secondMediaPlayer != null && secondAudioActive) {
+                    if (secondMediaPlayer != null && secondAudioActive) {
                     try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(secondaryPlaybackSpeed);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                         secondMediaPlayer.setPlaybackParams(params);
                         Log.d(TAG, "Applied initial secondary speed: " + secondaryPlaybackSpeed);
                     } catch (Exception e) {
@@ -2690,9 +2741,10 @@ public class MainActivity extends AppCompatActivity {
 
                 // Preview the speed change if possible
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && fromUser) {
-                    try {
+                        try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(speed);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
 
                         if (isPrimary && mediaPlayer != null) {
                             mediaPlayer.setPlaybackParams(params);
@@ -2766,6 +2818,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 PlaybackParams params = new PlaybackParams();
                 params.setSpeed(speed);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                 mediaPlayer.setPlaybackParams(params);
                 Log.d(TAG, "Applied primary speed: " + speed);
                 Toast.makeText(this, "Primary audio speed set to " + String.format("%.2fx", speed),
@@ -2783,6 +2836,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 PlaybackParams params = new PlaybackParams();
                 params.setSpeed(speed);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
                 secondMediaPlayer.setPlaybackParams(params);
                 Log.d(TAG, "Applied secondary speed: " + speed);
                 Toast.makeText(this, "Secondary audio speed set to " + String.format("%.2fx", speed),
