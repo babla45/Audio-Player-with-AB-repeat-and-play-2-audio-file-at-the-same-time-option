@@ -97,6 +97,7 @@
     <string name="positions_synced">Track positions synchronized</string>
     <string name="mixer_position_sync">Adjust Track Positions</string>
     <string name="other_settings">Other Settings</string>
+    <string name="pitch">Pitch</string>
     <string name="seek_time_settings">Set Seek Time</string>
     <string name="seek_forward_seconds">Forward Seek Time (seconds)</string>
     <string name="seek_backward_seconds">Backward Seek Time (seconds)</string>
