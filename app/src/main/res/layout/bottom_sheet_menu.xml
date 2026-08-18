@@ -47,12 +47,14 @@
         android:overScrollMode="ifContentScrolls">
 
         <LinearLayout
+            android:id="@+id/menu_grid_root"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
             <!-- Icon Grid: Row 1 -->
             <LinearLayout
+                android:id="@+id/menu_row_1"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
@@ -191,6 +193,7 @@
 
             <!-- Icon Grid: Row 2 -->
             <LinearLayout
+                android:id="@+id/menu_row_2"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
@@ -325,6 +328,7 @@
 
             <!-- Icon Grid: Row 3 -->
             <LinearLayout
+                android:id="@+id/menu_row_3"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
@@ -460,6 +464,7 @@
 
             <!-- Icon Grid: Row 4 (Pitch) -->
             <LinearLayout
+                android:id="@+id/menu_row_4"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"
