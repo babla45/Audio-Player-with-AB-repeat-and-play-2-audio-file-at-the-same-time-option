@@ -98,6 +98,11 @@
     <string name="mixer_position_sync">Adjust Track Positions</string>
     <string name="other_settings">Other Settings</string>
     <string name="pitch">Pitch</string>
+    <string name="voice_controls_title">Voice Controls</string>
+    <string name="voice_formant">Formant</string>
+    <string name="voice_speed">Speed</string>
+    <string name="voice_bass">Bass</string>
+    <string name="voice_reverb">Reverb</string>
     <string name="seek_time_settings">Set Seek Time</string>
     <string name="seek_forward_seconds">Forward Seek Time (seconds)</string>
     <string name="seek_backward_seconds">Backward Seek Time (seconds)</string>

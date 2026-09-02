@@ -18,6 +18,14 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     public interface PitchListener {
         void onPitchChanged(float pitch);
         float getCurrentPitch();
+        void onSpeedChanged(float speed);
+        float getCurrentSpeed();
+        void onFormantChanged(float formant);
+        float getCurrentFormant();
+        void onBassChanged(int strength);
+        int getCurrentBass();
+        void onReverbChanged(int level);
+        int getCurrentReverb();
     }
 
     private PitchListener listener;
@@ -31,60 +39,202 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.bottom_sheet_pitch, container, false);
 
-        TextView currentValue = view.findViewById(R.id.pitch_current_value);
-        SeekBar seekBar = view.findViewById(R.id.pitch_seekbar);
+        SeekBar pitchSeekBar = setupFactorSlider(
+                view.findViewById(R.id.pitch_slider_row),
+                getString(R.string.pitch),
+                "0.05x",
+                "4.00x",
+                5,
+                400,
+                listener != null ? listener.getCurrentPitch() : 1.0f,
+                value -> {
+                    if (listener != null) {
+                        listener.onPitchChanged(value);
+                    }
+                },
+                value -> String.format("%.2fx", value)
+        );
 
-        float currentPitch = listener != null ? listener.getCurrentPitch() : 1.0f;
-        currentValue.setText(String.format("%.2fx", currentPitch));
+        setupFactorSlider(
+                view.findViewById(R.id.formant_slider_row),
+                getString(R.string.voice_formant),
+                "0.50x",
+                "2.00x",
+                50,
+                200,
+                listener != null ? listener.getCurrentFormant() : 1.0f,
+                value -> {
+                    if (listener != null) {
+                        listener.onFormantChanged(value);
+                    }
+                },
+                value -> String.format("%.2fx", value)
+        );
 
-        // SeekBar: 5-400 maps to 0.05x - 4.00x (step 0.01)
-        int progress = Math.round(currentPitch * 100);
-        seekBar.setMin(5);
-        seekBar.setMax(400);
-        seekBar.setProgress(Math.max(5, Math.min(400, progress)));
+        setupFactorSlider(
+                view.findViewById(R.id.speed_slider_row),
+                getString(R.string.voice_speed),
+                "0.25x",
+                "4.00x",
+                25,
+                400,
+                listener != null ? listener.getCurrentSpeed() : 1.0f,
+                value -> {
+                    if (listener != null) {
+                        listener.onSpeedChanged(value);
+                    }
+                },
+                value -> String.format("%.2fx", value)
+        );
 
-        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                float pitch = progress / 100.0f;
-                currentValue.setText(String.format("%.2fx", pitch));
-                if (fromUser && listener != null) {
-                    listener.onPitchChanged(pitch);
+        setupPercentSlider(
+                view.findViewById(R.id.bass_slider_row),
+                getString(R.string.voice_bass),
+                listener != null ? listener.getCurrentBass() : 0,
+                value -> {
+                    if (listener != null) {
+                        listener.onBassChanged(value);
+                    }
                 }
-            }
+        );
 
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                float pitch = seekBar.getProgress() / 100.0f;
-                if (listener != null) {
-                    listener.onPitchChanged(pitch);
+        setupPercentSlider(
+                view.findViewById(R.id.reverb_slider_row),
+                getString(R.string.voice_reverb),
+                listener != null ? listener.getCurrentReverb() : 0,
+                value -> {
+                    if (listener != null) {
+                        listener.onReverbChanged(value);
+                    }
                 }
-            }
-        });
+        );
 
-        // Quick preset chips
-        setupChip(view, R.id.pitch_chip_025, 0.25f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_050, 0.5f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_075, 0.75f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_085, 0.85f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_100, 1.0f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_125, 1.25f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_150, 1.5f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_200, 2.0f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_250, 2.5f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_300, 3.0f, seekBar, currentValue);
-        setupChip(view, R.id.pitch_chip_400, 4.0f, seekBar, currentValue);
-
+        TextView pitchValue = view.findViewById(R.id.pitch_slider_row).findViewById(R.id.voice_slider_value);
+        setupChip(view, R.id.pitch_chip_025, 0.25f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_050, 0.5f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_075, 0.75f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_085, 0.85f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_100, 1.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_125, 1.25f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_150, 1.5f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_200, 2.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_250, 2.5f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_300, 3.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_400, 4.0f, pitchSeekBar, pitchValue);
 
         return view;
     }
 
+    private interface ValueFormatter {
+        String format(float value);
+    }
+
+    private interface FloatValueListener {
+        void onValueChanged(float value);
+    }
+
+    private interface IntValueListener {
+        void onValueChanged(int value);
+    }
+
+    private SeekBar setupFactorSlider(
+            View row,
+            String label,
+            String minLabel,
+            String maxLabel,
+            int minProgress,
+            int maxProgress,
+            float currentValue,
+            FloatValueListener changeListener,
+            ValueFormatter formatter) {
+
+        TextView labelView = row.findViewById(R.id.voice_slider_label);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        TextView minView = row.findViewById(R.id.voice_slider_min);
+        TextView maxView = row.findViewById(R.id.voice_slider_max);
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+
+        labelView.setText(label);
+        minView.setText(minLabel);
+        maxView.setText(maxLabel);
+        valueView.setText(formatter.format(currentValue));
+
+        seekBar.setMin(minProgress);
+        seekBar.setMax(maxProgress);
+        int progress = Math.round(currentValue * 100f);
+        seekBar.setProgress(Math.max(minProgress, Math.min(maxProgress, progress)));
+
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                float value = progress / 100.0f;
+                valueView.setText(formatter.format(value));
+                if (fromUser) {
+                    changeListener.onValueChanged(value);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+                changeListener.onValueChanged(bar.getProgress() / 100.0f);
+            }
+        });
+
+        return seekBar;
+    }
+
+    private void setupPercentSlider(
+            View row,
+            String label,
+            int currentValue,
+            IntValueListener changeListener) {
+
+        TextView labelView = row.findViewById(R.id.voice_slider_label);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        TextView minView = row.findViewById(R.id.voice_slider_min);
+        TextView maxView = row.findViewById(R.id.voice_slider_max);
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+
+        labelView.setText(label);
+        minView.setText("0%");
+        maxView.setText("100%");
+        int clamped = Math.max(0, Math.min(1000, currentValue));
+        valueView.setText(formatPercent(clamped));
+        seekBar.setMin(0);
+        seekBar.setMax(1000);
+        seekBar.setProgress(clamped);
+
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                valueView.setText(formatPercent(progress));
+                if (fromUser) {
+                    changeListener.onValueChanged(progress);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+                changeListener.onValueChanged(bar.getProgress());
+            }
+        });
+    }
+
+    private String formatPercent(int strength) {
+        return Math.round(strength / 10f) + "%";
+    }
+
     private void setupChip(View root, int chipId, float pitch, SeekBar seekBar, TextView display) {
         Chip chip = root.findViewById(chipId);
-        if (chip == null) return;
+        if (chip == null) {
+            return;
+        }
         chip.setOnClickListener(v -> {
             int progress = Math.round(pitch * 100);
             seekBar.setProgress(progress);

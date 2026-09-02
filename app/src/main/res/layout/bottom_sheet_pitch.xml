@@ -3,181 +3,182 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
     android:background="@drawable/bg_bottom_sheet"
-    android:paddingBottom="24dp">
+    android:orientation="vertical"
+    android:paddingBottom="16dp">
 
-    <!-- Drag handle -->
     <View
         android:layout_width="40dp"
         android:layout_height="4dp"
         android:layout_gravity="center_horizontal"
         android:layout_marginTop="12dp"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="12dp"
         android:background="@drawable/bg_icon_container" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:paddingHorizontal="20dp"
-        android:paddingBottom="16dp">
+        android:paddingBottom="8dp">
 
         <ImageView
             android:layout_width="28dp"
             android:layout_height="28dp"
+            android:contentDescription="@string/pitch"
             android:src="@drawable/ic_tune"
-            app:tint="@color/accent_primary"
-            android:contentDescription="Pitch" />
+            app:tint="@color/accent_primary" />
 
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
             android:layout_weight="1"
-            android:text="Pitch"
-            android:textSize="18sp"
-            android:textStyle="bold"
+            android:text="@string/voice_controls_title"
             android:textColor="@color/text_primary"
-            android:layout_marginStart="12dp" />
-
-        <TextView
-            android:id="@+id/pitch_current_value"
-            android:layout_width="wrap_content"
-            android:layout_height="28dp"
-            android:gravity="center"
-            android:paddingHorizontal="12dp"
-            android:background="@drawable/gradient_accent"
-            android:text="1.00x"
-            android:textSize="13sp"
-            android:textColor="@color/text_on_accent" />
+            android:textSize="18sp"
+            android:textStyle="bold" />
     </LinearLayout>
 
-    <!-- Pitch Slider -->
-    <SeekBar
-        android:id="@+id/pitch_seekbar"
+    <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="20dp"
-        android:min="5"
-        android:max="400"
-        android:progress="100"
-        android:progressTint="@color/accent_primary"
-        android:thumbTint="@color/accent_primary" />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingHorizontal="24dp">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="0.05x"
-            android:textSize="11sp"
-            android:textColor="@color/text_tertiary" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="4.00x"
-            android:textSize="11sp"
-            android:textColor="@color/text_tertiary" />
-    </LinearLayout>
-
-    <!-- Quick preset chips -->
-    <HorizontalScrollView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingTop="16dp"
+        android:fillViewport="true"
+        android:overScrollMode="ifContentScrolls"
         android:scrollbars="none">
 
         <LinearLayout
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal">
+            android:orientation="vertical"
+            android:paddingBottom="8dp">
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_025"
-                android:layout_width="wrap_content"
+            <!-- Pitch -->
+            <include
+                android:id="@+id/pitch_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="0.25x"
-                android:layout_marginEnd="8dp" />
+                android:paddingHorizontal="16dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp"
+                android:scrollbars="none">
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_050"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0.50x"
-                android:layout_marginEnd="8dp" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
 
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_025"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="0.25x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_075"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0.75x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_050"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="0.50x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_085"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="0.85x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_075"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="0.75x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_100"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="1.00x" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_085"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="0.85x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_125"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="1.25x" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_100"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="1.00x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_150"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="1.50x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_125"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="1.25x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_200"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="2.00x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_150"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="1.50x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_250"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="2.50x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_200"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="2.00x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_300"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="3.00x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_250"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="2.50x" />
 
-            <com.google.android.material.chip.Chip
-                android:id="@+id/pitch_chip_400"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="4.00x"
-                android:layout_marginEnd="8dp" />
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_300"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="3.00x" />
+
+                    <com.google.android.material.chip.Chip
+                        android:id="@+id/pitch_chip_400"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="4.00x" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="20dp"
+                android:layout_marginVertical="4dp"
+                android:background="@color/text_tertiary"
+                android:alpha="0.25" />
+
+            <!-- Formant -->
+            <include
+                android:id="@+id/formant_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Speed -->
+            <include
+                android:id="@+id/speed_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Bass -->
+            <include
+                android:id="@+id/bass_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Reverb -->
+            <include
+                android:id="@+id/reverb_slider_row"
+                layout="@layout/item_voice_slider" />
 
         </LinearLayout>
-    </HorizontalScrollView>
+    </ScrollView>
 </LinearLayout>
