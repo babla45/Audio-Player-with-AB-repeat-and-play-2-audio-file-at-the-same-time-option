@@ -126,4 +126,7 @@
     <string name="reset_nothing_selected">No reset options selected in Settings</string>
     <string name="reset_to_default">%1$s reset to default</string>
     <string name="reset_to_default_argless">Reset to default</string>
+    <string name="voice_presets_title">Voice Presets</string>
+    <string name="eq_presets_title">EQ Presets</string>
+    <string name="voice_master_reset">Reset All Voice Settings</string>
 </resources>

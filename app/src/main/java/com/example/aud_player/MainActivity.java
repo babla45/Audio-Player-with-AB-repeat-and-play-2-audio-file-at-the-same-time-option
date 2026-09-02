@@ -2098,6 +2098,11 @@ public class MainActivity extends AppCompatActivity {
             public int getCurrentReverb() {
                 return voiceReverbLevel;
             }
+
+            @Override
+            public void onEqPresetSelected(String presetName) {
+                applyVoiceEqPreset(presetName);
+            }
         });
 
         pitchSheet.show(getSupportFragmentManager(), "PitchBottomSheet");
@@ -2537,6 +2542,31 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /** Same as {@link #resetEqualizerLevels()} but without a toast; used by preset selection. */
+    private void resetEqualizerLevelsQuiet() {
+        if (equalizer == null) {
+            return;
+        }
+
+        try {
+            short bands = equalizer.getNumberOfBands();
+            for (short band = 0; band < bands; band++) {
+                equalizer.setBandLevel(band, (short) 0);
+            }
+            if (bassBoost != null) {
+                bassBoost.setStrength((short) 0);
+                bassBoost.setEnabled(false);
+            }
+            if (virtualizer != null) {
+                virtualizer.setStrength((short) 0);
+                virtualizer.setEnabled(false);
+            }
+            Toast.makeText(this, "None EQ preset applied", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to reset equalizer", e);
+        }
+    }
+
     private void resetAudioSettings() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean resetSpeed = prefs.getBoolean(PREF_RESET_SPEED, true);
@@ -2763,6 +2793,75 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, presetName + " preset applied", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Log.e(TAG, "Failed to apply preset: " + presetName, e);
+        }
+    }
+
+    /**
+     * Applies a voice-oriented EQ preset to the equalizer attached to the current
+     * audio session. Curves are shaped by band position (0 = lowest frequency band).
+     */
+    private void applyVoiceEqPreset(String presetName) {
+        if ("None".equals(presetName)) {
+            resetEqualizerLevelsQuiet();
+            return;
+        }
+        if (!ensureEqualizerInitialized() || equalizer == null) {
+            Toast.makeText(this, "Play a song first to use EQ presets", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            short bands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            short max = range[1];
+            short min = range[0];
+            short boost = (short) (max * 0.6f);
+            short lightBoost = (short) (max * 0.35f);
+            short cut = (short) (min * 0.35f);
+            short deepCut = (short) (min * 0.55f);
+
+            for (short band = 0; band < bands; band++) {
+                float pos = bands == 1 ? 0f : (float) band / (float) (bands - 1);
+                short level = 0;
+                switch (presetName) {
+                    case "Male":
+                        // Emphasize low-mids, tame highest bands
+                        if (pos < 0.35f) level = boost;
+                        else if (pos > 0.7f) level = cut;
+                        break;
+                    case "Female":
+                        // Emphasize mids/high-mids, cut lows slightly
+                        if (pos > 0.35f && pos < 0.8f) level = boost;
+                        else if (pos < 0.15f) level = cut;
+                        break;
+                    case "Child":
+                        // Bright: boost highs, cut lows
+                        if (pos > 0.5f) level = boost;
+                        else if (pos < 0.2f) level = cut;
+                        break;
+                    case "Deep":
+                        // Heavy low end
+                        if (pos < 0.25f) level = boost;
+                        else if (pos > 0.6f) level = deepCut;
+                        break;
+                    case "Radio":
+                        // Narrow band: cut lows and highs, boost mids
+                        if (pos > 0.3f && pos < 0.7f) level = lightBoost;
+                        else level = cut;
+                        break;
+                    case "Flat":
+                    default:
+                        level = 0;
+                        break;
+                }
+                if (level > max) level = max;
+                if (level < min) level = min;
+                equalizer.setBandLevel(band, level);
+            }
+            equalizer.setEnabled(true);
+            Toast.makeText(this, presetName + " EQ preset applied", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply voice EQ preset: " + presetName, e);
         }
     }
 

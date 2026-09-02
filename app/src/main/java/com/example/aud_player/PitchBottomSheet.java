@@ -6,6 +6,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -26,9 +27,53 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         int getCurrentBass();
         void onReverbChanged(int level);
         int getCurrentReverb();
+        void onEqPresetSelected(String presetName);
     }
 
     private PitchListener listener;
+
+    /** A named combination of voice-changer settings. */
+    private static class VoicePreset {
+        final String name;
+        final float pitch;
+        final float formant;
+        final float speed;
+        final int bass;      // 0-1000
+        final int reverb;    // 0-1000
+
+        VoicePreset(String name, float pitch, float formant, float speed, int bass, int reverb) {
+            this.name = name;
+            this.pitch = pitch;
+            this.formant = formant;
+            this.speed = speed;
+            this.bass = bass;
+            this.reverb = reverb;
+        }
+    }
+
+    private static final VoicePreset[] VOICE_PRESETS = {
+            new VoicePreset("None", 1.0f, 1.0f, 1.0f, 0, 0),
+            new VoicePreset("Normal", 1.0f, 1.0f, 1.0f, 0, 0),
+            new VoicePreset("Robot", 1.0f, 0.55f, 1.0f, 0, 0),
+            new VoicePreset("Monster", 0.45f, 0.5f, 0.85f, 700, 150),
+            new VoicePreset("Chipmunk", 2.5f, 1.8f, 1.25f, 0, 0),
+            new VoicePreset("Old Man", 0.7f, 0.85f, 0.9f, 100, 0),
+            new VoicePreset("Deep Male", 0.65f, 0.7f, 1.0f, 450, 0),
+            new VoicePreset("Female", 1.6f, 1.25f, 1.0f, 0, 0),
+            new VoicePreset("Child", 2.0f, 1.5f, 1.0f, 0, 0),
+            new VoicePreset("Alien", 1.9f, 0.6f, 1.0f, 0, 250),
+            new VoicePreset("Cave", 0.85f, 1.0f, 1.0f, 0, 900),
+            new VoicePreset("Underwater", 0.75f, 0.8f, 0.85f, 300, 800),
+            new VoicePreset("Radio", 1.1f, 0.9f, 1.0f, 0, 0),
+            new VoicePreset("Telephone", 1.2f, 0.85f, 1.0f, 0, 0),
+            new VoicePreset("Giant", 0.5f, 0.65f, 0.9f, 800, 100),
+            new VoicePreset("Kid", 1.85f, 1.4f, 1.05f, 0, 0),
+            new VoicePreset("Ghost", 0.8f, 1.1f, 0.8f, 0, 1000),
+    };
+
+    private static final String[] EQ_PRESETS = {
+            "None", "Male", "Female", "Child", "Deep", "Radio", "Flat"
+    };
 
     public void setPitchListener(PitchListener listener) {
         this.listener = listener;
@@ -127,7 +172,139 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         setupChip(view, R.id.pitch_chip_300, 3.0f, pitchSeekBar, pitchValue);
         setupChip(view, R.id.pitch_chip_400, 4.0f, pitchSeekBar, pitchValue);
 
+        setupVoicePresets(view);
+
+        setupEqPresets(view);
+
+        View masterReset = view.findViewById(R.id.voice_master_reset);
+        if (masterReset != null) {
+            masterReset.setOnClickListener(v -> {
+                VoicePreset defaults = VOICE_PRESETS[0]; // "None" — all defaults
+                if (listener != null) {
+                    listener.onPitchChanged(defaults.pitch);
+                    listener.onFormantChanged(defaults.formant);
+                    listener.onSpeedChanged(defaults.speed);
+                    listener.onBassChanged(defaults.bass);
+                    listener.onReverbChanged(defaults.reverb);
+                    listener.onEqPresetSelected("None");
+                }
+                syncVoiceSliders(view, defaults);
+                clearChipSelection(view, R.id.voice_preset_row);
+                clearChipSelection(view, R.id.eq_preset_row);
+            });
+        }
+
         return view;
+    }
+
+    private void clearChipSelection(View view, int rowId) {
+        LinearLayout presetRow = view.findViewById(rowId);
+        if (presetRow == null) {
+            return;
+        }
+        for (int i = 0; i < presetRow.getChildCount(); i++) {
+            View child = presetRow.getChildAt(i);
+            if (child instanceof Chip) {
+                ((Chip) child).setChecked(false);
+            }
+        }
+    }
+
+    private void setupVoicePresets(View view) {
+        LinearLayout presetRow = view.findViewById(R.id.voice_preset_row);
+        if (presetRow == null) {
+            return;
+        }
+
+        for (VoicePreset preset : VOICE_PRESETS) {
+            Chip chip = new Chip(requireContext());
+            chip.setText(preset.name);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(v -> {
+                if (listener != null) {
+                    listener.onPitchChanged(preset.pitch);
+                    listener.onFormantChanged(preset.formant);
+                    listener.onSpeedChanged(preset.speed);
+                    listener.onBassChanged(preset.bass);
+                    listener.onReverbChanged(preset.reverb);
+                }
+                syncVoiceSliders(view, preset);
+                highlightSelectedChip(presetRow, chip);
+            });
+            presetRow.addView(chip);
+        }
+    }
+
+    private void setupEqPresets(View view) {
+        LinearLayout presetRow = view.findViewById(R.id.eq_preset_row);
+        if (presetRow == null) {
+            return;
+        }
+
+        for (String name : EQ_PRESETS) {
+            Chip chip = new Chip(requireContext());
+            chip.setText(name);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
+            chip.setLayoutParams(lp);
+            chip.setOnClickListener(v -> {
+                if (listener != null) {
+                    listener.onEqPresetSelected(name);
+                }
+                highlightSelectedChip(presetRow, chip);
+            });
+            presetRow.addView(chip);
+        }
+    }
+
+    /** Updates the slider UI to reflect the preset values. */
+    private void syncVoiceSliders(View view, VoicePreset preset) {
+        setSliderProgress(view, R.id.pitch_slider_row, preset.pitch);
+        setSliderProgress(view, R.id.formant_slider_row, preset.formant);
+        setSliderProgress(view, R.id.speed_slider_row, preset.speed);
+        setSliderProgress(view, R.id.bass_slider_row, preset.bass);
+        setSliderProgress(view, R.id.reverb_slider_row, preset.reverb);
+    }
+
+    private void setSliderProgress(View view, int rowId, float value) {
+        View row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        if (seekBar == null || valueView == null) {
+            return;
+        }
+        int progress;
+        int min;
+        int max;
+        try {
+            min = seekBar.getMin();
+        } catch (NoSuchMethodError e) {
+            min = 0;
+        }
+        max = seekBar.getMax();
+        if (max >= 100) {
+            progress = Math.round(value * 100f);
+        } else {
+            progress = (int) value;
+        }
+        seekBar.setProgress(Math.max(min, Math.min(max, progress)));
+        valueView.setText(max >= 100 ? String.format("%.2fx", value) : formatPercent((int) value));
+    }
+
+    private void highlightSelectedChip(LinearLayout presetRow, Chip selected) {
+        for (int i = 0; i < presetRow.getChildCount(); i++) {
+            View child = presetRow.getChildAt(i);
+            if (child instanceof Chip) {
+                ((Chip) child).setChecked(child == selected);
+            }
+        }
     }
 
     private interface ValueFormatter {
