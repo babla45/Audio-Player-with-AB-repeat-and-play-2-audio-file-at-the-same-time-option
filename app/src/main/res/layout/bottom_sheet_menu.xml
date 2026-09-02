@@ -245,10 +245,10 @@
                     android:padding="14dp">
 
                     <ImageView
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
                         android:contentDescription="Equalizer"
-                        android:src="@drawable/ic_tune"
+                        android:src="@drawable/ic_equalizer"
                         app:tint="@color/white" />
 
                     <TextView
@@ -519,7 +519,7 @@
                         android:layout_width="24dp"
                         android:layout_height="24dp"
                         android:contentDescription="Boost"
-                        android:src="@drawable/ic_speed"
+                        android:src="@drawable/ic_boost"
                         app:tint="@color/white" />
 
                     <TextView
