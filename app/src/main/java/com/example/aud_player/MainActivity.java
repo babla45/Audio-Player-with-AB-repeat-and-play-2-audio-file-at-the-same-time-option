@@ -21,6 +21,7 @@ import android.media.PlaybackParams;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
+import android.media.audiofx.EnvironmentalReverb;
 import android.media.audiofx.Virtualizer;
 import android.net.Uri;
 import android.os.Build;
@@ -197,6 +198,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_RESET_PITCH = "reset_button_pitch";
     private static final String PREF_RESET_EQUALIZER = "reset_button_equalizer";
     private static final String PREF_RESET_BOOST = "reset_button_boost";
+    private static final String PREF_VOICE_FORMANT = "voice_formant";
+    private static final String PREF_VOICE_BASS = "voice_bass";
+    private static final String PREF_VOICE_REVERB = "voice_reverb";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
     private static final int THEME_MODE_MILKY = 2;
@@ -237,6 +241,7 @@ public class MainActivity extends AppCompatActivity {
     private Equalizer equalizer = null;
     private BassBoost bassBoost = null;
     private Virtualizer virtualizer = null;
+    private EnvironmentalReverb environmentalReverb = null;
     private int equalizerSessionId = -1;
     private int[] bandSeekIds = null;
 
@@ -306,6 +311,9 @@ public class MainActivity extends AppCompatActivity {
     private float secondaryPlaybackSpeed = 1.0f;
     private boolean useIndividualPlaybackSpeeds = false;
     private float currentPitch = 1.0f;
+    private float currentFormant = 1.0f;
+    private int voiceBassStrength = 0;
+    private int voiceReverbLevel = 0;
     private float currentBoost = 1.0f;
 
     // Add PlaylistDatabaseHelper as a class field
@@ -460,6 +468,9 @@ public class MainActivity extends AppCompatActivity {
         seekBackwardMs = backwardSeconds * 1000;
         // Load saved pitch
         currentPitch = prefs.getFloat("playback_pitch", 1.0f);
+        currentFormant = prefs.getFloat(PREF_VOICE_FORMANT, 1.0f);
+        voiceBassStrength = prefs.getInt(PREF_VOICE_BASS, 0);
+        voiceReverbLevel = prefs.getInt(PREF_VOICE_REVERB, 0);
         // Load saved boost
         currentBoost = prefs.getFloat("volume_boost_factor", 1.0f);
         
@@ -1181,21 +1192,12 @@ public class MainActivity extends AppCompatActivity {
 
                     // Apply playback speed and saved pitch if available
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        try {
-                            PlaybackParams params;
-                            try {
-                                params = mediaPlayer.getPlaybackParams();
-                            } catch (Exception e) {
-                                params = new PlaybackParams();
-                            }
-                            if (Math.abs(currentPlaybackSpeed - 1.0f) > 0.01f) params.setSpeed(currentPlaybackSpeed);
-                            if (Math.abs(currentPitch - 1.0f) > 0.001f) params.setPitch(currentPitch);
-                            mediaPlayer.setPlaybackParams(params);
-                            Log.d(TAG, "Applied saved playback speed/pitch to primary audio: " + currentPlaybackSpeed + "/" + currentPitch);
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error applying saved playback params to primary audio", e);
-                        }
+                        applyPlaybackParams(mediaPlayer, currentPlaybackSpeed, currentPitch);
+                        Log.d(TAG, "Applied saved playback speed/pitch to primary audio: "
+                                + currentPlaybackSpeed + "/" + currentPitch);
                     }
+                    applyVoiceBass(voiceBassStrength);
+                    applyVoiceReverb(voiceReverbLevel);
                 } catch (Exception e) {
                     Log.e(TAG, "Error in onPrepared", e);
                 }
@@ -2018,28 +2020,83 @@ public class MainActivity extends AppCompatActivity {
         pitchSheet.setPitchListener(new PitchBottomSheet.PitchListener() {
             @Override
             public void onPitchChanged(float pitch) {
-                // Update service if available
+                currentPitch = pitch;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putFloat("playback_pitch", currentPitch).apply();
+
                 if (serviceBound && audioService != null) {
                     audioService.setPitch(pitch);
-                }
-
-                // Apply to local media players as a best-effort
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
-                        PlaybackParams params = mediaPlayer.getPlaybackParams();
-                        params.setPitch(pitch);
-                        mediaPlayer.setPlaybackParams(params);
+                    if (Math.abs(currentFormant - 1.0f) > 0.001f) {
+                        applyVoiceSettingsToActivePlayers();
                     }
-                } catch (Exception ignored) {}
-
-                // Save locally so future prepares pick it up
-                currentPitch = pitch;
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
+                    float speed = secondAudioActive && useIndividualPlaybackSpeeds
+                            ? primaryPlaybackSpeed
+                            : currentPlaybackSpeed;
+                    applyPlaybackParams(mediaPlayer, speed, pitch);
+                }
             }
 
             @Override
             public float getCurrentPitch() {
-                if (serviceBound && audioService != null) return audioService.getCurrentPitch();
+                if (serviceBound && audioService != null) {
+                    return audioService.getCurrentPitch();
+                }
                 return currentPitch;
+            }
+
+            @Override
+            public void onSpeedChanged(float speed) {
+                setPlaybackSpeed(speed);
+            }
+
+            @Override
+            public float getCurrentSpeed() {
+                return currentPlaybackSpeed;
+            }
+
+            @Override
+            public void onFormantChanged(float formant) {
+                currentFormant = Math.max(0.5f, Math.min(2.0f, formant));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putFloat(PREF_VOICE_FORMANT, currentFormant).apply();
+                applyVoiceSettingsToActivePlayers();
+            }
+
+            @Override
+            public float getCurrentFormant() {
+                return currentFormant;
+            }
+
+            @Override
+            public void onBassChanged(int strength) {
+                voiceBassStrength = Math.max(0, Math.min(1000, strength));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_BASS, voiceBassStrength).apply();
+                applyVoiceBass(voiceBassStrength);
+            }
+
+            @Override
+            public int getCurrentBass() {
+                if (bassBoost != null) {
+                    try {
+                        return bassBoost.getRoundedStrength();
+                    } catch (Exception ignored) {}
+                }
+                return voiceBassStrength;
+            }
+
+            @Override
+            public void onReverbChanged(int level) {
+                voiceReverbLevel = Math.max(0, Math.min(1000, level));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_REVERB, voiceReverbLevel).apply();
+                applyVoiceReverb(voiceReverbLevel);
+            }
+
+            @Override
+            public int getCurrentReverb() {
+                return voiceReverbLevel;
             }
         });
 
@@ -2442,8 +2499,12 @@ public class MainActivity extends AppCompatActivity {
             bassBoost.setEnabled(true);
             virtualizer = new Virtualizer(1, sessionId);
             virtualizer.setEnabled(true);
+            environmentalReverb = new EnvironmentalReverb(0, sessionId);
+            environmentalReverb.setEnabled(false);
 
             equalizerSessionId = sessionId;
+            applyVoiceBass(voiceBassStrength);
+            applyVoiceReverb(voiceReverbLevel);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Unable to initialize audio effects", e);
@@ -2586,12 +2647,67 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         try {
+            float formant = currentFormant > 0f ? currentFormant : 1.0f;
             PlaybackParams params = new PlaybackParams();
-            params.setSpeed(speed);
-            params.setPitch(pitch);
+            params.setSpeed(speed / formant);
+            params.setPitch(pitch * formant);
             player.setPlaybackParams(params);
         } catch (Exception e) {
             Log.e(TAG, "Error applying playback params", e);
+        }
+    }
+
+    private void applyVoiceSettingsToActivePlayers() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
+        if (mediaPlayer != null) {
+            float speed = secondAudioActive && useIndividualPlaybackSpeeds
+                    ? primaryPlaybackSpeed
+                    : currentPlaybackSpeed;
+            applyPlaybackParams(mediaPlayer, speed, currentPitch);
+        }
+        if (secondMediaPlayer != null && secondAudioActive) {
+            float speed = useIndividualPlaybackSpeeds
+                    ? secondaryPlaybackSpeed
+                    : currentPlaybackSpeed;
+            applyPlaybackParams(secondMediaPlayer, speed, currentPitch);
+        }
+    }
+
+    private void applyVoiceBass(int strength) {
+        voiceBassStrength = Math.max(0, Math.min(1000, strength));
+        if (!ensureEqualizerInitialized() || bassBoost == null) {
+            return;
+        }
+        try {
+            short value = (short) voiceBassStrength;
+            bassBoost.setStrength(value);
+            bassBoost.setEnabled(value > 0);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply voice bass", e);
+        }
+    }
+
+    private void applyVoiceReverb(int level) {
+        voiceReverbLevel = Math.max(0, Math.min(1000, level));
+        if (!ensureEqualizerInitialized() || environmentalReverb == null) {
+            return;
+        }
+        try {
+            if (voiceReverbLevel <= 0) {
+                environmentalReverb.setEnabled(false);
+                return;
+            }
+            EnvironmentalReverb.Settings settings = new EnvironmentalReverb.Settings();
+            settings.roomLevel = (short) (-9000 + (voiceReverbLevel * 5000 / 1000));
+            settings.reverbLevel = (short) (-9000 + (voiceReverbLevel * 9000 / 1000));
+            settings.decayTime = 400 + voiceReverbLevel;
+            settings.reflectionsLevel = (short) (-9000 + (voiceReverbLevel * 7000 / 1000));
+            environmentalReverb.setProperties(settings);
+            environmentalReverb.setEnabled(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply voice reverb", e);
         }
     }
 
@@ -2717,6 +2833,10 @@ public class MainActivity extends AppCompatActivity {
             if (virtualizer != null) {
                 virtualizer.release();
                 virtualizer = null;
+            }
+            if (environmentalReverb != null) {
+                environmentalReverb.release();
+                environmentalReverb = null;
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to release audio effects", e);
@@ -2847,10 +2967,7 @@ public class MainActivity extends AppCompatActivity {
             // Apply to primary player if active
                     if (mediaPlayer != null) {
                 try {
-                    PlaybackParams params = new PlaybackParams();
-                    params.setSpeed(speed);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
-                    mediaPlayer.setPlaybackParams(params);
+                    applyPlaybackParams(mediaPlayer, speed, currentPitch);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to primary audio");
 
@@ -2866,10 +2983,7 @@ public class MainActivity extends AppCompatActivity {
             // Apply to secondary player if active (and not using individual speeds)
                     if (secondMediaPlayer != null && secondAudioActive && !useIndividualPlaybackSpeeds) {
                 try {
-                    PlaybackParams params = new PlaybackParams();
-                    params.setSpeed(speed);
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
-                    secondMediaPlayer.setPlaybackParams(params);
+                    applyPlaybackParams(secondMediaPlayer, speed, currentPitch);
                     speedApplied = true;
                     Log.d(TAG, "Applied speed " + speed + "x to secondary audio");
 
@@ -3058,10 +3172,7 @@ public class MainActivity extends AppCompatActivity {
     private void applyPrimarySpeed(float speed) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
             try {
-                PlaybackParams params = new PlaybackParams();
-                params.setSpeed(speed);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
-                mediaPlayer.setPlaybackParams(params);
+                applyPlaybackParams(mediaPlayer, speed, currentPitch);
                 Log.d(TAG, "Applied primary speed: " + speed);
                 Toast.makeText(this, "Primary audio speed set to " + String.format("%.2fx", speed),
                         Toast.LENGTH_SHORT).show();
@@ -3076,10 +3187,7 @@ public class MainActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
                 secondMediaPlayer != null && secondAudioActive) {
             try {
-                PlaybackParams params = new PlaybackParams();
-                params.setSpeed(speed);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
-                secondMediaPlayer.setPlaybackParams(params);
+                applyPlaybackParams(secondMediaPlayer, speed, currentPitch);
                 Log.d(TAG, "Applied secondary speed: " + speed);
                 Toast.makeText(this, "Secondary audio speed set to " + String.format("%.2fx", speed),
                         Toast.LENGTH_SHORT).show();
