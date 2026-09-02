@@ -125,4 +125,5 @@
     <string name="reset_option_boost">Volume boost</string>
     <string name="reset_nothing_selected">No reset options selected in Settings</string>
     <string name="reset_to_default">%1$s reset to default</string>
+    <string name="reset_to_default_argless">Reset to default</string>
 </resources>

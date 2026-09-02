@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -32,6 +33,18 @@
             android:paddingHorizontal="10dp"
             android:textColor="@color/text_on_accent"
             android:textSize="12sp" />
+
+        <ImageView
+            android:id="@+id/voice_slider_reset"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="@string/reset_to_default_argless"
+            android:focusable="true"
+            android:src="@drawable/ic_reset"
+            app:tint="@color/text_tertiary" />
     </LinearLayout>
 
     <SeekBar
