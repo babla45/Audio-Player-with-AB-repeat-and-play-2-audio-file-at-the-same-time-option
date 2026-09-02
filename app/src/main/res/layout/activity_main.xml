@@ -244,16 +244,21 @@
                 app:tint="@color/white" />
         </LinearLayout>
 
-        <ProgressBar
+        <SeekBar
             android:id="@+id/miniProgressBar"
-            style="@android:style/Widget.ProgressBar.Horizontal"
             android:layout_width="match_parent"
-            android:layout_height="2dp"
-            android:layout_marginHorizontal="16dp"
+            android:layout_height="20dp"
+            android:layout_marginHorizontal="8dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
             android:progressTint="@color/accent_primary"
             android:progressBackgroundTint="@color/surface_600"
+            android:thumbTint="@color/accent_primary"
+            android:splitTrack="false"
             android:max="100"
-            android:progress="0" />
+            android:progress="0"
+            android:clickable="true"
+            android:focusable="true" />
 
         <!-- ═══ EXPANDED PLAYER CONTROLS ═══ -->
         <LinearLayout
@@ -398,16 +403,37 @@
                     android:src="@android:drawable/ic_media_previous"
                     app:tint="@color/text_primary" />
 
-                <ImageButton
+                <FrameLayout
                     android:id="@+id/seekBackwardButton"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_marginStart="12dp"
                     android:background="@drawable/bg_control_button"
+                    android:clickable="true"
                     android:contentDescription="@string/seek_backward"
-                    android:padding="10dp"
-                    android:src="@drawable/ic_seek_backward_improved"
-                    app:tint="@color/text_primary" />
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:padding="7dp"
+                        android:src="@drawable/ic_skip_back_seconds"
+                        app:tint="@color/text_primary" />
+
+                    <TextView
+                        android:id="@+id/seekBackwardSecondsText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginTop="3dp"
+                        android:includeFontPadding="false"
+                        android:text="10s"
+                        android:textColor="@color/text_primary"
+                        android:textSize="8sp"
+                        android:textStyle="bold" />
+                </FrameLayout>
 
                 <ImageButton
                     android:id="@+id/playPauseButton"
@@ -421,16 +447,37 @@
                     android:src="@drawable/ic_play_improved"
                     app:tint="@color/text_on_accent" />
 
-                <ImageButton
+                <FrameLayout
                     android:id="@+id/seekForwardButton"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_marginEnd="12dp"
                     android:background="@drawable/bg_control_button"
+                    android:clickable="true"
                     android:contentDescription="@string/seek_forward"
-                    android:padding="10dp"
-                    android:src="@drawable/ic_seek_forward_improved"
-                    app:tint="@color/text_primary" />
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@null"
+                        android:padding="7dp"
+                        android:src="@drawable/ic_skip_forward_seconds"
+                        app:tint="@color/text_primary" />
+
+                    <TextView
+                        android:id="@+id/seekForwardSecondsText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginTop="3dp"
+                        android:includeFontPadding="false"
+                        android:text="10s"
+                        android:textColor="@color/text_primary"
+                        android:textSize="8sp"
+                        android:textStyle="bold" />
+                </FrameLayout>
 
                 <ImageButton
                     android:id="@+id/nextButton"

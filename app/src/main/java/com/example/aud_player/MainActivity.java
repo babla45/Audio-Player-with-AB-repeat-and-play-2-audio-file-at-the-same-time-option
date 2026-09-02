@@ -32,6 +32,7 @@ import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -51,7 +52,6 @@ import android.widget.RadioGroup;
 import android.text.InputType;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.view.Gravity;
 import androidx.appcompat.widget.SwitchCompat;
 
@@ -207,8 +207,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int SEEK_BACKWARD_MS = 10000; // 10 seconds
 
     // Add these UI elements as class members
-    private ImageButton seekBackwardButton;
-    private ImageButton seekForwardButton;
+    private View seekBackwardButton;
+    private View seekForwardButton;
+    private TextView seekBackwardSecondsText;
+    private TextView seekForwardSecondsText;
 
     // New redesigned UI elements
     private LinearLayout miniPlayerBar;
@@ -216,7 +218,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView miniPlayerTitle;
     private TextView miniPlayerSubtitle;
     private ImageButton miniPlayPauseBtn;
-    private ProgressBar miniProgressBar;
+    private SeekBar miniProgressBar;
+    private boolean miniProgressSeeking;
     private BottomNavigationView bottomNavigation;
     private boolean playerExpanded = false;
 
@@ -535,12 +538,16 @@ public class MainActivity extends AppCompatActivity {
                     playNextFromContext();
                 } else if ("MEDIA_PREV".equals(action)) {
                     playPreviousFromContext();
+                } else if ("PLAYBACK_SEEKED".equals(action)) {
+                    int position = intent.getIntExtra("position", -1);
+                    applyExternalSeek(position);
                 }
             }
         };
         IntentFilter mediaFilter = new IntentFilter();
         mediaFilter.addAction("MEDIA_NEXT");
         mediaFilter.addAction("MEDIA_PREV");
+        mediaFilter.addAction("PLAYBACK_SEEKED");
         ContextCompat.registerReceiver(this, mediaControlsReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Update UI when playback is paused by service (e.g., headphones unplugged)
@@ -661,6 +668,8 @@ public class MainActivity extends AppCompatActivity {
             ImageButton prevButton = findViewById(R.id.prevButton);
             seekBackwardButton = findViewById(R.id.seekBackwardButton);
             seekForwardButton = findViewById(R.id.seekForwardButton);
+            seekBackwardSecondsText = findViewById(R.id.seekBackwardSecondsText);
+            seekForwardSecondsText = findViewById(R.id.seekForwardSecondsText);
             ImageButton nextButton = findViewById(R.id.nextButton);
 
             // RecyclerView elements
@@ -683,10 +692,7 @@ public class MainActivity extends AppCompatActivity {
             // Log successful initialization
             Log.d(TAG, "Views initialized successfully");
 
-            // Ensure backward icon matches forward style
-            if (seekBackwardButton != null) {
-                seekBackwardButton.setImageResource(R.drawable.ic_seek_backward_improved);
-            }
+            updateSeekSkipButtonLabels();
 
             // Initialize playlist view elements
             playlistInfoContainer = findViewById(R.id.playlistInfoContainer);
@@ -706,6 +712,7 @@ public class MainActivity extends AppCompatActivity {
             miniPlayPauseBtn = findViewById(R.id.miniPlayPauseBtn);
             miniProgressBar = findViewById(R.id.miniProgressBar);
             expandedPlayerControls = findViewById(R.id.expandedPlayerControls);
+            setupMiniProgressSeeking();
             applyMiniPlayerTheme();
 
             // App bar menu button (top-right dots)
@@ -1479,6 +1486,25 @@ public class MainActivity extends AppCompatActivity {
         SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
         currentPlaybackMode = prefs.getInt("playback_mode", PLAYBACK_MODE_NEXT_IN_LIST); // Default to "Play Next in List"
         Log.d(TAG, "Loaded playback mode: " + currentPlaybackMode);
+    }
+
+    private void applyExternalSeek(int position) {
+        if (position < 0 || mediaPlayer == null) {
+            return;
+        }
+        try {
+            int duration = mediaPlayer.getDuration();
+            if (seekBar != null) {
+                if (duration > 0) {
+                    seekBar.setMax(duration);
+                }
+                seekBar.setProgress(position);
+            }
+            updateTimeText(position, duration);
+            updateMiniPlayer();
+        } catch (Exception e) {
+            Log.e(TAG, "Error applying notification seek to UI", e);
+        }
     }
 
     private void updateSeekBar() {
@@ -2574,6 +2600,65 @@ public class MainActivity extends AppCompatActivity {
         setPlayerExpanded(!playerExpanded);
     }
 
+    private void setupMiniProgressSeeking() {
+        if (miniProgressBar == null) {
+            return;
+        }
+        miniProgressBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (!fromUser || mediaPlayer == null) {
+                    return;
+                }
+                try {
+                    mediaPlayer.seekTo(progress);
+                    int duration = mediaPlayer.getDuration();
+                    updateTimeText(progress, duration);
+                    if (seekBar != null) {
+                        if (duration > 0 && seekBar.getMax() != duration) {
+                            seekBar.setMax(duration);
+                        }
+                        seekBar.setProgress(progress);
+                    }
+                    if (miniPlayerSubtitle != null && currentTimeText != null && totalTimeText != null) {
+                        miniPlayerSubtitle.setText(
+                                currentTimeText.getText().toString() + " / " + totalTimeText.getText().toString());
+                    }
+                    if (secondMediaPlayer != null && secondAudioActive) {
+                        syncSecondPlayerPosition();
+                    }
+                } catch (IllegalStateException e) {
+                    Log.e(TAG, "Error seeking from mini player", e);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {
+                miniProgressSeeking = true;
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+                miniProgressSeeking = false;
+            }
+        });
+        miniProgressBar.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_MOVE:
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        });
+    }
+
     private void setPlayerExpanded(boolean expanded) {
         playerExpanded = expanded;
         if (expandedPlayerControls != null) {
@@ -2598,12 +2683,15 @@ public class MainActivity extends AppCompatActivity {
         if (miniPlayPauseBtn != null) {
             miniPlayPauseBtn.setImageResource(isPlaying ? R.drawable.ic_pause_improved : R.drawable.ic_play_improved);
         }
-        if (miniProgressBar != null && mediaPlayer != null) {
+        if (miniProgressBar != null && mediaPlayer != null && !miniProgressSeeking) {
             try {
                 int duration = mediaPlayer.getDuration();
                 int position = mediaPlayer.getCurrentPosition();
                 if (duration > 0) {
-                    miniProgressBar.setProgress((int) (position * 100L / duration));
+                    if (miniProgressBar.getMax() != duration) {
+                        miniProgressBar.setMax(duration);
+                    }
+                    miniProgressBar.setProgress(position);
                 }
             } catch (Exception ignored) {}
         }
@@ -5638,6 +5726,28 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    private void updateSeekSkipButtonLabels() {
+        int backwardSeconds = Math.max(1, seekBackwardMs / 1000);
+        int forwardSeconds = Math.max(1, seekForwardMs / 1000);
+        applySeekSkipLabel(seekBackwardSecondsText, seekBackwardButton, backwardSeconds, true);
+        applySeekSkipLabel(seekForwardSecondsText, seekForwardButton, forwardSeconds, false);
+    }
+
+    private void applySeekSkipLabel(TextView label, View button, int seconds, boolean backward) {
+        if (label != null) {
+            label.setText(formatSeekSecondsLabel(seconds));
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, seconds >= 100 ? 7f : 8f);
+        }
+        if (button != null) {
+            String direction = backward ? getString(R.string.seek_backward) : getString(R.string.seek_forward);
+            button.setContentDescription(direction + " " + seconds + " seconds");
+        }
+    }
+
+    private String formatSeekSecondsLabel(int seconds) {
+        return seconds >= 100 ? String.valueOf(seconds) : seconds + "s";
+    }
+
     private void autoScrollToCurrentSongIfEnabled() {
         if (!isAutoSlideToCurrentSongEnabled()) return;
         if (audioRecyclerView == null || audioAdapter == null || filteredAudioFiles == null || filteredAudioFiles.isEmpty()) {
@@ -5697,6 +5807,7 @@ public class MainActivity extends AppCompatActivity {
                                 .apply();
 
                         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show();
+                        updateSeekSkipButtonLabels();
 
                     } catch (NumberFormatException e) {
                         Toast.makeText(this, "Please enter valid numbers", Toast.LENGTH_SHORT).show();

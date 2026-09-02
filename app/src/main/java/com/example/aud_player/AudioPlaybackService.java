@@ -385,6 +385,11 @@ public class AudioPlaybackService extends Service {
                 }
 
                 @Override
+                public void onSeekTo(long pos) {
+                    seekToPosition(pos);
+                }
+
+                @Override
                 public void onCustomAction(String action, android.os.Bundle extras) {
                     if (ACTION_STOP.equals(action)) {
                         Intent i = new Intent(AudioPlaybackService.this, AudioPlaybackService.class);
@@ -401,7 +406,8 @@ public class AudioPlaybackService extends Service {
                             PlaybackStateCompat.ACTION_PLAY_PAUSE |
                             PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
                             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
-                            PlaybackStateCompat.ACTION_STOP
+                            PlaybackStateCompat.ACTION_STOP |
+                            PlaybackStateCompat.ACTION_SEEK_TO
                     )
                     .addCustomAction(new PlaybackStateCompat.CustomAction.Builder(
                             ACTION_STOP, "Stop", R.drawable.ic_stop).build())
@@ -419,10 +425,48 @@ public class AudioPlaybackService extends Service {
         try {
             mediaSession.setPlaybackState(
                     playbackStateBuilder
+                            .setActions(
+                                    PlaybackStateCompat.ACTION_PLAY |
+                                    PlaybackStateCompat.ACTION_PAUSE |
+                                    PlaybackStateCompat.ACTION_PLAY_PAUSE |
+                                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
+                                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS |
+                                    PlaybackStateCompat.ACTION_STOP |
+                                    PlaybackStateCompat.ACTION_SEEK_TO
+                            )
                             .setState(state, mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0, 1f)
                             .build()
             );
         } catch (Exception ignored) {}
+    }
+
+    private void seekToPosition(long pos) {
+        if (mediaPlayer == null) {
+            return;
+        }
+        try {
+            int duration = mediaPlayer.getDuration();
+            int target = (int) Math.max(0, pos);
+            if (duration > 0) {
+                target = Math.min(target, duration);
+            }
+            mediaPlayer.seekTo(target);
+            if (secondMediaPlayer != null && secondAudioActive && duration > 0) {
+                try {
+                    int secondDuration = secondMediaPlayer.getDuration();
+                    int secondPosition = (int) ((target / (float) duration) * secondDuration);
+                    secondMediaPlayer.seekTo(secondPosition);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error syncing second player after seek", e);
+                }
+            }
+            updatePlaybackState();
+            Intent seekIntent = new Intent("PLAYBACK_SEEKED");
+            seekIntent.putExtra("position", target);
+            sendLocalBroadcast(seekIntent);
+        } catch (Exception e) {
+            Log.e(TAG, "Error seeking from media session", e);
+        }
     }
 
     /**
