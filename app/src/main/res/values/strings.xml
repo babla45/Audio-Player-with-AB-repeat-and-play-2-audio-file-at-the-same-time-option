@@ -111,4 +111,13 @@
     <string name="showing_playlist">Showing playlist: %s</string>
     <string name="now_playing_from_playlist">Now playing from: %s</string>
     <string name="permission_required_for_action">Permission required for action</string>
+    <string name="reset_options_settings">Reset button options</string>
+    <string name="reset_options_title">Reset button options</string>
+    <string name="reset_options_description">Choose which audio settings are restored to default when you tap Reset in the options menu.</string>
+    <string name="reset_option_speed">Playback speed</string>
+    <string name="reset_option_pitch">Pitch</string>
+    <string name="reset_option_equalizer">Equalizer</string>
+    <string name="reset_option_boost">Volume boost</string>
+    <string name="reset_nothing_selected">No reset options selected in Settings</string>
+    <string name="reset_to_default">%1$s reset to default</string>
 </resources>

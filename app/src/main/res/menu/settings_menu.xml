@@ -13,6 +13,9 @@
         android:id="@+id/settings_theme"
         android:title="Theme" />
     <item
+        android:id="@+id/settings_reset_options"
+        android:title="@string/reset_options_settings" />
+    <item
         android:id="@+id/settings_how_to_use"
         android:title="How to use app" />
 </menu> 

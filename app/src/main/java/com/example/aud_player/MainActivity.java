@@ -41,6 +41,7 @@ import android.view.SubMenu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.PopupMenu;
@@ -192,6 +193,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
     private static final String PREF_CUSTOM_APP_COLOR = "custom_app_color";
     private static final String PREF_CUSTOM_MINI_PLAYER_COLOR = "custom_mini_player_color";
+    private static final String PREF_RESET_SPEED = "reset_button_speed";
+    private static final String PREF_RESET_PITCH = "reset_button_pitch";
+    private static final String PREF_RESET_EQUALIZER = "reset_button_equalizer";
+    private static final String PREF_RESET_BOOST = "reset_button_boost";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
     private static final int THEME_MODE_MILKY = 2;
@@ -1672,6 +1677,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onResetClicked() {
+                resetAudioSettings();
+            }
+
+            @Override
             public boolean hasSongSelected() {
                 return selectedAudioUri != null;
             }
@@ -2463,6 +2473,125 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Equalizer reset", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Log.e(TAG, "Failed to reset equalizer", e);
+        }
+    }
+
+    private void resetAudioSettings() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean resetSpeed = prefs.getBoolean(PREF_RESET_SPEED, true);
+        boolean resetPitch = prefs.getBoolean(PREF_RESET_PITCH, true);
+        boolean resetEqualizer = prefs.getBoolean(PREF_RESET_EQUALIZER, true);
+        boolean resetBoost = prefs.getBoolean(PREF_RESET_BOOST, true);
+
+        if (!resetSpeed && !resetPitch && !resetEqualizer && !resetBoost) {
+            Toast.makeText(this, R.string.reset_nothing_selected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<String> resetItems = new ArrayList<>();
+
+        if (resetSpeed) {
+            currentPlaybackSpeed = 1.0f;
+            primaryPlaybackSpeed = 1.0f;
+            secondaryPlaybackSpeed = 1.0f;
+            resetItems.add(getString(R.string.reset_option_speed));
+        }
+
+        if (resetPitch) {
+            currentPitch = 1.0f;
+            if (serviceBound && audioService != null) {
+                audioService.setPitch(1.0f);
+            }
+            prefs.edit().putFloat("playback_pitch", 1.0f).apply();
+            resetItems.add(getString(R.string.reset_option_pitch));
+        }
+
+        if (resetSpeed || resetPitch) {
+            applyResetPlaybackParams(resetSpeed, resetPitch);
+        }
+
+        if (resetBoost) {
+            currentBoost = 1.0f;
+            if (serviceBound && audioService != null) {
+                audioService.setBoost(1.0f);
+            } else {
+                prefs.edit().putFloat("volume_boost_factor", 1.0f).apply();
+            }
+            try {
+                if (mediaPlayer != null) {
+                    mediaPlayer.setVolume(1.0f, 1.0f);
+                }
+                if (secondMediaPlayer != null) {
+                    secondMediaPlayer.setVolume(1.0f, 1.0f);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error resetting volume boost", e);
+            }
+            resetItems.add(getString(R.string.reset_option_boost));
+        }
+
+        if (resetEqualizer && ensureEqualizerInitialized() && equalizer != null) {
+            try {
+                short bands = equalizer.getNumberOfBands();
+                for (short band = 0; band < bands; band++) {
+                    equalizer.setBandLevel(band, (short) 0);
+                }
+                if (bassBoost != null) {
+                    bassBoost.setStrength((short) 0);
+                    bassBoost.setEnabled(false);
+                }
+                if (virtualizer != null) {
+                    virtualizer.setStrength((short) 0);
+                    virtualizer.setEnabled(false);
+                }
+                resetItems.add(getString(R.string.reset_option_equalizer));
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to reset equalizer during audio reset", e);
+            }
+        }
+
+        if (!resetItems.isEmpty()) {
+            Toast.makeText(this,
+                    getString(R.string.reset_to_default, TextUtils.join(", ", resetItems)),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void applyResetPlaybackParams(boolean resetSpeed, boolean resetPitch) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
+
+        float pitchToApply = resetPitch ? 1.0f : currentPitch;
+
+        if (mediaPlayer != null) {
+            float speedToApply = resetSpeed
+                    ? 1.0f
+                    : (secondAudioActive && useIndividualPlaybackSpeeds
+                    ? primaryPlaybackSpeed
+                    : currentPlaybackSpeed);
+            applyPlaybackParams(mediaPlayer, speedToApply, pitchToApply);
+        }
+
+        if (secondMediaPlayer != null && secondAudioActive) {
+            float speedToApply = resetSpeed
+                    ? 1.0f
+                    : (useIndividualPlaybackSpeeds ? secondaryPlaybackSpeed : currentPlaybackSpeed);
+            applyPlaybackParams(secondMediaPlayer, speedToApply, pitchToApply);
+        }
+    }
+
+    private void applyPlaybackParams(MediaPlayer player, float speed, float pitch) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || player == null) {
+            return;
+        }
+        try {
+            PlaybackParams params = new PlaybackParams();
+            params.setSpeed(speed);
+            params.setPitch(pitch);
+            player.setPlaybackParams(params);
+        } catch (Exception e) {
+            Log.e(TAG, "Error applying playback params", e);
         }
     }
 
@@ -4926,6 +5055,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_theme) {
                 showThemeSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_reset_options) {
+                showResetOptionsSettingsDialog();
+                return true;
             } else if (itemId == R.id.settings_how_to_use) {
                 showHowToUseDialog();
                 return true;
@@ -4934,6 +5066,35 @@ public class MainActivity extends AppCompatActivity {
         });
 
         popup.show();
+    }
+
+    private void showResetOptionsSettingsDialog() {
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_reset_options, null);
+        CheckBox speedCheck = dialogView.findViewById(R.id.check_reset_speed);
+        CheckBox pitchCheck = dialogView.findViewById(R.id.check_reset_pitch);
+        CheckBox equalizerCheck = dialogView.findViewById(R.id.check_reset_equalizer);
+        CheckBox boostCheck = dialogView.findViewById(R.id.check_reset_boost);
+
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        speedCheck.setChecked(prefs.getBoolean(PREF_RESET_SPEED, true));
+        pitchCheck.setChecked(prefs.getBoolean(PREF_RESET_PITCH, true));
+        equalizerCheck.setChecked(prefs.getBoolean(PREF_RESET_EQUALIZER, true));
+        boostCheck.setChecked(prefs.getBoolean(PREF_RESET_BOOST, true));
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.reset_options_settings)
+                .setView(dialogView)
+                .setPositiveButton(R.string.save, (d, which) -> {
+                    prefs.edit()
+                            .putBoolean(PREF_RESET_SPEED, speedCheck.isChecked())
+                            .putBoolean(PREF_RESET_PITCH, pitchCheck.isChecked())
+                            .putBoolean(PREF_RESET_EQUALIZER, equalizerCheck.isChecked())
+                            .putBoolean(PREF_RESET_BOOST, boostCheck.isChecked())
+                            .apply();
+                    Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 
     private void applySavedThemeMode() {

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="18dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/reset_options_title"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/reset_options_description"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <CheckBox
+        android:id="@+id/check_reset_speed"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="@string/reset_option_speed"
+        android:textColor="@color/text_primary" />
+
+    <CheckBox
+        android:id="@+id/check_reset_pitch"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/reset_option_pitch"
+        android:textColor="@color/text_primary" />
+
+    <CheckBox
+        android:id="@+id/check_reset_equalizer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/reset_option_equalizer"
+        android:textColor="@color/text_primary" />
+
+    <CheckBox
+        android:id="@+id/check_reset_boost"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/reset_option_boost"
+        android:textColor="@color/text_primary" />
+
+</LinearLayout>
