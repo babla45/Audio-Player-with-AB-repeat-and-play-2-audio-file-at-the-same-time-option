@@ -47,6 +47,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 5,
                 400,
                 listener != null ? listener.getCurrentPitch() : 1.0f,
+                1.0f,
                 value -> {
                     if (listener != null) {
                         listener.onPitchChanged(value);
@@ -63,6 +64,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 50,
                 200,
                 listener != null ? listener.getCurrentFormant() : 1.0f,
+                1.0f,
                 value -> {
                     if (listener != null) {
                         listener.onFormantChanged(value);
@@ -79,6 +81,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 25,
                 400,
                 listener != null ? listener.getCurrentSpeed() : 1.0f,
+                1.0f,
                 value -> {
                     if (listener != null) {
                         listener.onSpeedChanged(value);
@@ -91,6 +94,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 view.findViewById(R.id.bass_slider_row),
                 getString(R.string.voice_bass),
                 listener != null ? listener.getCurrentBass() : 0,
+                0,
                 value -> {
                     if (listener != null) {
                         listener.onBassChanged(value);
@@ -102,6 +106,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 view.findViewById(R.id.reverb_slider_row),
                 getString(R.string.voice_reverb),
                 listener != null ? listener.getCurrentReverb() : 0,
+                0,
                 value -> {
                     if (listener != null) {
                         listener.onReverbChanged(value);
@@ -145,6 +150,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             int minProgress,
             int maxProgress,
             float currentValue,
+            float defaultValue,
             FloatValueListener changeListener,
             ValueFormatter formatter) {
 
@@ -183,6 +189,16 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             }
         });
 
+        View resetButton = row.findViewById(R.id.voice_slider_reset);
+        if (resetButton != null) {
+            resetButton.setOnClickListener(v -> {
+                int defaultProgress = Math.round(defaultValue * 100f);
+                seekBar.setProgress(Math.max(minProgress, Math.min(maxProgress, defaultProgress)));
+                valueView.setText(formatter.format(defaultValue));
+                changeListener.onValueChanged(defaultValue);
+            });
+        }
+
         return seekBar;
     }
 
@@ -190,6 +206,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             View row,
             String label,
             int currentValue,
+            int defaultValue,
             IntValueListener changeListener) {
 
         TextView labelView = row.findViewById(R.id.voice_slider_label);
@@ -224,6 +241,16 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 changeListener.onValueChanged(bar.getProgress());
             }
         });
+
+        View resetButton = row.findViewById(R.id.voice_slider_reset);
+        if (resetButton != null) {
+            int clampedDefault = Math.max(0, Math.min(1000, defaultValue));
+            resetButton.setOnClickListener(v -> {
+                seekBar.setProgress(clampedDefault);
+                valueView.setText(formatPercent(clampedDefault));
+                changeListener.onValueChanged(clampedDefault);
+            });
+        }
     }
 
     private String formatPercent(int strength) {
