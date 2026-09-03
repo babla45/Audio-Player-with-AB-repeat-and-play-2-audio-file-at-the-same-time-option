@@ -4,7 +4,14 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.AnimationDrawable;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
@@ -33,6 +40,8 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     private Uri currentlyPlayingUri = null;
     private int highlightColor;
     private int defaultColor;
+    // Whether audio is actually playing (vs paused) — drives the equalizer animation
+    private boolean playbackActive = false;
 
     public AudioAdapter(List<AudioFile> audioFiles) {
         this.audioFiles = new ArrayList<>(audioFiles);
@@ -77,6 +86,17 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         notifyDataSetChanged(); // Refresh all items to update highlight
     }
 
+    /**
+     * Tell the adapter whether audio is actually playing or paused, so the
+     * equalizer indicator animates only while playing.
+     */
+    public void setPlaybackActive(boolean active) {
+        if (this.playbackActive != active) {
+            this.playbackActive = active;
+            notifyDataSetChanged();
+        }
+    }
+
     @NonNull
     @Override
     public AudioViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -102,30 +122,29 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         
         // Highlight if this is the currently playing track
         boolean isCurrentlyPlaying = currentlyPlayingUri != null && currentlyPlayingUri.equals(audioFile.getUri());
-        
+
         if (isCurrentlyPlaying) {
-            // Remove the left vertical "now playing" bar (user requested).
-            if (holder.nowPlayingBar != null) holder.nowPlayingBar.setVisibility(View.GONE);
             // Gradient background for the currently playing row (keeps rounded corners + ripple)
             holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item_playing);
-            // Show equalizer icon overlay
-            if (holder.nowPlayingIcon != null) {
-                holder.nowPlayingIcon.setVisibility(View.VISIBLE);
-            }
+            // Animated equalizer overlay: dancing bars while playing, dimmed static bars when paused
+            showEqualizerIndicator(holder, true);
             // Accent color for title
             holder.titleTextView.setTextColor(
                 ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary));
-            holder.durationTextView.setTextColor(
-                ContextCompat.getColor(holder.itemContainer.getContext(), R.color.text_secondary));
+            // Append an accent "Now Playing" tag to the duration/size line
+            String base = durationAndSize;
+            String tag = "  •  Now Playing";
+            SpannableString span = new SpannableString(base + tag);
+            int accent = ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary);
+            span.setSpan(new ForegroundColorSpan(accent), base.length(), span.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            span.setSpan(new StyleSpan(Typeface.BOLD), base.length(), span.length(),
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            holder.durationTextView.setText(span);
         } else {
             // Default state - use design system background
-            if (holder.nowPlayingBar != null) {
-                holder.nowPlayingBar.setVisibility(View.GONE);
-            }
             holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item);
-            if (holder.nowPlayingIcon != null) {
-                holder.nowPlayingIcon.setVisibility(View.GONE);
-            }
+            showEqualizerIndicator(holder, false);
             // Default text colors from design system
             holder.titleTextView.setTextColor(
                 ContextCompat.getColor(holder.itemContainer.getContext(), R.color.text_primary));
@@ -143,6 +162,35 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         holder.optionsMenu.setOnClickListener(v -> {
             showPopupMenu(v, audioFile);
         });
+    }
+
+    /**
+     * Shows/hides the equalizer indicator on the row's icon. While audio is
+     * actually playing the bars animate; when paused they stay static and dimmed.
+     */
+    private void showEqualizerIndicator(AudioViewHolder holder, boolean isCurrent) {
+        if (holder.nowPlayingIcon == null) return;
+        // Stop any running frame animation before switching state
+        Drawable current = holder.nowPlayingIcon.getDrawable();
+        if (current instanceof AnimationDrawable) {
+            ((AnimationDrawable) current).stop();
+        }
+        if (!isCurrent) {
+            holder.nowPlayingIcon.setVisibility(View.GONE);
+            return;
+        }
+        holder.nowPlayingIcon.setVisibility(View.VISIBLE);
+        if (playbackActive) {
+            holder.nowPlayingIcon.setImageResource(R.drawable.ic_equalizer_animated);
+            holder.nowPlayingIcon.setAlpha(1.0f);
+            Drawable d = holder.nowPlayingIcon.getDrawable();
+            if (d instanceof AnimationDrawable) {
+                ((AnimationDrawable) d).start();
+            }
+        } else {
+            holder.nowPlayingIcon.setImageResource(R.drawable.ic_equalizer_static);
+            holder.nowPlayingIcon.setAlpha(0.6f);
+        }
     }
 
     private void showPopupMenu(View view, AudioFile audioFile) {
@@ -186,7 +234,6 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         ImageView optionsMenu;
         View itemContainer;
         ImageView nowPlayingIcon;
-        View nowPlayingBar;
 
         AudioViewHolder(View itemView) {
             super(itemView);
@@ -195,7 +242,6 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             optionsMenu = itemView.findViewById(R.id.fileOptionsMenu);
             itemContainer = itemView.findViewById(R.id.innerLayout);
             nowPlayingIcon = itemView.findViewById(R.id.nowPlayingIcon);
-            nowPlayingBar = itemView.findViewById(R.id.nowPlayingBar);
         }
     }
 }

@@ -17,17 +17,6 @@
         android:clickable="true"
         android:focusable="true">
 
-        <!-- Now Playing accent bar (left edge) -->
-        <View
-            android:id="@+id/nowPlayingBar"
-            android:layout_width="3dp"
-            android:layout_height="0dp"
-            android:background="@drawable/now_playing_indicator"
-            android:visibility="gone"
-            app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="@id/iconContainer"
-            app:layout_constraintBottom_toBottomOf="@id/iconContainer" />
-
         <!-- Music icon container -->
         <FrameLayout
             android:id="@+id/iconContainer"
@@ -50,12 +39,12 @@
                 android:id="@+id/nowPlayingIcon"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:padding="12dp"
-                android:src="@drawable/ic_now_playing"
+                android:padding="10dp"
+                android:src="@drawable/ic_equalizer_static"
                 android:contentDescription="Now playing"
                 android:visibility="gone"
                 android:background="@drawable/bg_now_playing_icon_overlay"
-                app:tint="#FFFFFF" />
+                app:tint="@color/accent_primary" />
         </FrameLayout>
 
         <!-- Text content -->

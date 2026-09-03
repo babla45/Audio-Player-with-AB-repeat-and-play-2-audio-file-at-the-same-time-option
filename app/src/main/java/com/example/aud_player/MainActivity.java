@@ -5514,17 +5514,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void exitAppCompletely() {
+        // Do exactly what the notification's Stop button does: send ACTION_STOP
+        // to the playback service. The service then stops both players, cancels
+        // sleep timers, removes the notification, abandons audio focus, stops
+        // itself, and broadcasts CLOSE_APP_COMMAND — whose receiver in this
+        // activity calls finishAndRemoveTask(). No local shortcuts that could
+        // kill the service mid-cleanup or leave the notification behind.
         try {
-            // Stop local players immediately to avoid any audible delay.
-            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-                mediaPlayer.pause();
-            }
-            if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
-                secondMediaPlayer.pause();
-            }
-            isPlaying = false;
-
-            // Ask the foreground playback service to stop and remove notification.
             Intent stopIntent = new Intent(this, AudioPlaybackService.class);
             stopIntent.setAction("ACTION_STOP");
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -5532,21 +5528,46 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 startService(stopIntent);
             }
-            stopService(new Intent(this, AudioPlaybackService.class));
         } catch (Exception e) {
-            Log.e(TAG, "Error while stopping playback during app exit", e);
-        } finally {
+            Log.e(TAG, "Error sending stop command during app exit", e);
+            // Fallback: the service isn't running — close the app directly.
             try {
+                stopService(new Intent(this, AudioPlaybackService.class));
+            } catch (Exception ignored) {}
+            try {
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    mediaPlayer.pause();
+                }
+                if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
+                    secondMediaPlayer.pause();
+                }
+            } catch (Exception ignored) {}
+            isPlaying = false;
+            closeAppNow();
+            return;
+        }
+
+        // Safety net: if CLOSE_APP_COMMAND never arrives (e.g. the service was
+        // already dead), close the app ourselves so Exit always works.
+        handler.postDelayed(this::closeAppNow, 750);
+    }
+
+    /**
+     * Final teardown used when the app closes itself (fallback path): unbind
+     * from the service and remove the app from recents.
+     */
+    private void closeAppNow() {
+        try {
+            if (!isFinishing()) {
                 if (serviceBound) {
                     unbindService(serviceConnection);
                     serviceBound = false;
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "Error while unbinding service during app exit", e);
+                finishAffinity();
+                finishAndRemoveTask();
             }
-
-            finishAffinity();
-            finishAndRemoveTask();
+        } catch (Exception e) {
+            Log.e(TAG, "Error while closing app", e);
         }
     }
 
@@ -6717,6 +6738,11 @@ public class MainActivity extends AppCompatActivity {
                 // Sync mini player play/pause button if the main one is updated
                 if (button == playPauseButton && miniPlayPauseBtn != null) {
                     miniPlayPauseBtn.setImageResource(resId);
+                }
+                // Keep the song list's equalizer indicator animating only while
+                // actually playing (pause icon shown == playback active).
+                if (button == playPauseButton && audioAdapter != null) {
+                    audioAdapter.setPlaybackActive(resId == R.drawable.ic_pause_improved);
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Error setting image resource", e);
