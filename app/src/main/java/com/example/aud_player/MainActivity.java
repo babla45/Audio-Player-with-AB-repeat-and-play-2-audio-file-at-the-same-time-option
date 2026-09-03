@@ -777,8 +777,9 @@ public class MainActivity extends AppCompatActivity {
                 bottomNavigation.setOnItemSelectedListener(item -> {
                     int id = item.getItemId();
                     if (id == R.id.nav_library) {
-                        // Show all songs view
-                        if (inPlaylistView) toggleToAllSongsView();
+                        // Toggle between folder view and list view
+                        toggleFolderView();
+                        updateLibraryNavItem();
                         return false;
                     } else if (id == R.id.nav_playlists) {
                         // Open playlists
@@ -796,6 +797,8 @@ public class MainActivity extends AppCompatActivity {
                 });
                 // Prevent first item (Library) from staying selected by default.
                 clearBottomNavSelectionSoon();
+                // Reflect the saved folder/list view mode in the nav item
+                updateLibraryNavItem();
             }
 
             // Start with player collapsed
@@ -1144,8 +1147,9 @@ public class MainActivity extends AppCompatActivity {
             }
             autoScrollToCurrentSongIfEnabled();
 
-            // Set data source from URI
-            mediaPlayer.setDataSource(getApplicationContext(), requestUri);
+            // Set data source from URI (with descriptor fallback for tricky formats,
+            // e.g. some .wav files that fail via the plain content URI path)
+            setDataSourceCompat(mediaPlayer, requestUri, requestVersion);
 
             // Set listeners before preparing
             mediaPlayer.setOnPreparedListener(mp -> {
@@ -1250,6 +1254,28 @@ public class MainActivity extends AppCompatActivity {
             Log.e(TAG, "Media player error", e);
             Toast.makeText(this, "Error with media player", Toast.LENGTH_SHORT).show();
             shouldAutoPlay = false; // Reset flag on error
+        }
+    }
+
+    /**
+     * Sets the data source with a descriptor fallback. Some devices (notably
+     * Android 11 with certain .wav encodings) fail to prepare when the source
+     * is set from a plain MediaStore content URI; opening an
+     * AssetFileDescriptor and using its FileDescriptor instead lets the
+     * underlying extractor read the file directly and succeeds.
+     */
+    private void setDataSourceCompat(MediaPlayer player, Uri uri, int requestVersion) throws IOException {
+        try {
+            player.setDataSource(getApplicationContext(), uri);
+        } catch (IOException | IllegalArgumentException | IllegalStateException | SecurityException e) {
+            Log.w(TAG, "Primary setDataSource failed for " + uri + ", retrying via file descriptor", e);
+            try (android.content.res.AssetFileDescriptor afd =
+                         getContentResolver().openAssetFileDescriptor(uri, "r")) {
+                if (afd == null) {
+                    throw new IOException("openAssetFileDescriptor returned null for " + uri);
+                }
+                player.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+            }
         }
     }
 
@@ -1690,11 +1716,6 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onViewToggleClicked() {
-                toggleFolderView();
-            }
-
-            @Override
             public boolean hasSongSelected() {
                 return selectedAudioUri != null;
             }
@@ -1702,11 +1723,6 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean isMixerEnabled() {
                 return mixerModeActive;
-            }
-
-            @Override
-            public boolean isFolderViewEnabled() {
-                return folderViewEnabled;
             }
 
             @Override
@@ -3635,7 +3651,8 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             // Use a completely separate preparation path for the second player
-            secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+            // (with descriptor fallback for formats that fail via the URI path)
+            setDataSourceCompat(secondMediaPlayer, secondAudioUri, 0);
 
             // Set listeners with careful error handling
             secondMediaPlayer.setOnPreparedListener(mp -> {
@@ -4500,6 +4517,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * Keeps the bottom-nav Library slot reflecting the current view mode:
+     * shows "Folders" + folder icon in list view (tap to switch to folders),
+     * "List View" + list icon while in folder view (tap to switch back).
+     */
+    private void updateLibraryNavItem() {
+        if (bottomNavigation == null) {
+            return;
+        }
+        MenuItem libraryItem = bottomNavigation.getMenu().findItem(R.id.nav_library);
+        if (libraryItem == null) {
+            return;
+        }
+        if (folderViewEnabled) {
+            libraryItem.setIcon(R.drawable.ic_list);
+            libraryItem.setTitle("List View");
+        } else {
+            libraryItem.setIcon(R.drawable.ic_folder);
+            libraryItem.setTitle("Folders");
+        }
+    }
+
+    /**
      * Replaces the song list with folder rows grouped from the current filtered songs.
      */
     private void showFolderView() {
@@ -4540,6 +4579,7 @@ public class MainActivity extends AppCompatActivity {
                 .edit().putBoolean(PREF_FOLDER_VIEW, false).apply();
         setupAudioAdapter();
         audioAdapter.updateList(filteredAudioFiles);
+        updateLibraryNavItem();
     }
 
     /**
@@ -4558,6 +4598,7 @@ public class MainActivity extends AppCompatActivity {
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit().putBoolean(PREF_FOLDER_VIEW, true).apply();
         showFolderView();
+        updateLibraryNavItem();
     }
 
 
@@ -5235,7 +5276,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     secondMediaPlayer.reset();
                     if (secondAudioUri != null) {
-                        secondMediaPlayer.setDataSource(getApplicationContext(), secondAudioUri);
+                        setDataSourceCompat(secondMediaPlayer, secondAudioUri, 0);
                         secondMediaPlayer.prepareAsync();
                     }
                 } catch (Exception e) {
