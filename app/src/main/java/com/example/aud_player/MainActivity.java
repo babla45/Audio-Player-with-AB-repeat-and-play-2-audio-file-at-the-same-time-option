@@ -167,6 +167,10 @@ public class MainActivity extends AppCompatActivity {
     private TextView emptyView;
     private List<AudioFile> audioFiles = new ArrayList<>();
     private AudioAdapter audioAdapter;
+    private FolderAdapter folderAdapter;
+    private boolean folderViewEnabled = false;
+    private String currentFolderName = null; // non-null while browsing a folder's songs
+    private static final String PREF_FOLDER_VIEW = "folder_view_enabled";
 
     private int currentSortOrder = SORT_BY_DATE_DESC; // Change from SORT_BY_NAME_ASC to SORT_BY_DATE_DESC
 
@@ -473,7 +477,9 @@ public class MainActivity extends AppCompatActivity {
         voiceReverbLevel = prefs.getInt(PREF_VOICE_REVERB, 0);
         // Load saved boost
         currentBoost = prefs.getFloat("volume_boost_factor", 1.0f);
-        
+        // Load saved folder view preference
+        folderViewEnabled = prefs.getBoolean(PREF_FOLDER_VIEW, false);
+
         // Load saved playback mode
         loadPlaybackMode();
 
@@ -1684,6 +1690,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onViewToggleClicked() {
+                toggleFolderView();
+            }
+
+            @Override
             public boolean hasSongSelected() {
                 return selectedAudioUri != null;
             }
@@ -1691,6 +1702,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean isMixerEnabled() {
                 return mixerModeActive;
+            }
+
+            @Override
+            public boolean isFolderViewEnabled() {
+                return folderViewEnabled;
             }
 
             @Override
@@ -3954,7 +3970,8 @@ public class MainActivity extends AppCompatActivity {
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.SIZE,
                 MediaStore.Audio.Media.DISPLAY_NAME,
-                MediaStore.Audio.Media.DATE_ADDED  // Make sure DATE_ADDED is included
+                MediaStore.Audio.Media.DATE_ADDED,  // Make sure DATE_ADDED is included
+                MediaStore.Audio.Media.BUCKET_DISPLAY_NAME  // Folder (bucket) name
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -3978,6 +3995,8 @@ public class MainActivity extends AppCompatActivity {
             int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
             int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
             int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+            // BUCKET_DISPLAY_NAME may be absent on some devices/providers
+            int bucketColumn = cursor.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
@@ -3995,11 +4014,15 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
+                String folderName = bucketColumn != -1 ? cursor.getString(bucketColumn) : null;
+
                 String durationFormatted = formatTime((int)duration);
                 Uri contentUri = Uri.withAppendedPath(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
-                allAudioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded));
+                AudioFile audioFile = new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded);
+                audioFile.setFolderName(folderName);
+                allAudioFiles.add(audioFile);
             }
             cursor.close();
 
@@ -4413,6 +4436,11 @@ public class MainActivity extends AppCompatActivity {
 
     // Update the updateAudioFilesList method to use the new setupAudioAdapter method
     private void updateAudioFilesList() {
+        if (folderViewEnabled) {
+            showFolderView();
+            return;
+        }
+
         // Show empty view if no filtered files
         if (filteredAudioFiles.isEmpty()) {
             audioRecyclerView.setVisibility(View.GONE);
@@ -4437,6 +4465,102 @@ public class MainActivity extends AppCompatActivity {
             autoScrollToCurrentSongIfEnabled();
         }
     }
+
+    /**
+     * Toggles the song list between a flat list view and a folder-grouped view.
+     */
+    private void toggleFolderView() {
+        folderViewEnabled = !folderViewEnabled;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit().putBoolean(PREF_FOLDER_VIEW, folderViewEnabled).apply();
+        if (folderViewEnabled) {
+            // Entering folder view clears any open folder
+            currentFolderName = null;
+            // Restore the full library so folders group everything
+            filteredAudioFiles.clear();
+            filteredAudioFiles.addAll(allAudioFiles);
+            if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                filterAudioFiles(searchEditText.getText().toString());
+            }
+        } else {
+            // Restore the flat list adapter
+            if (audioAdapter != null) {
+                audioAdapter.updateList(filteredAudioFiles);
+            } else {
+                setupAudioAdapter();
+            }
+            if (audioRecyclerView.getAdapter() != audioAdapter) {
+                setupAudioAdapter();
+            }
+        }
+        updateAudioFilesList();
+        Toast.makeText(this,
+                folderViewEnabled ? "Folder view" : "List view",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Replaces the song list with folder rows grouped from the current filtered songs.
+     */
+    private void showFolderView() {
+        if (filteredAudioFiles.isEmpty()) {
+            audioRecyclerView.setVisibility(View.GONE);
+            emptyView.setVisibility(View.VISIBLE);
+            if (!allAudioFiles.isEmpty() && !TextUtils.isEmpty(searchEditText.getText())) {
+                emptyView.setText(R.string.no_matching_files);
+            } else {
+                emptyView.setText(R.string.no_audio_files);
+            }
+            return;
+        }
+
+        audioRecyclerView.setVisibility(View.VISIBLE);
+        emptyView.setVisibility(View.GONE);
+
+        if (folderAdapter == null) {
+            folderAdapter = new FolderAdapter();
+            folderAdapter.setOnFolderClickListener(folder -> openFolder(folder));
+        }
+        if (audioRecyclerView.getAdapter() != folderAdapter) {
+            audioRecyclerView.setAdapter(folderAdapter);
+        }
+        folderAdapter.updateFolders(filteredAudioFiles);
+    }
+
+    /**
+     * Opens a folder from folder view: scopes the list to its songs. Use the
+     * system back button to return to the folders.
+     */
+    private void openFolder(FolderAdapter.Folder folder) {
+        currentFolderName = folder.name;
+        filteredAudioFiles.clear();
+        filteredAudioFiles.addAll(folder.songs);
+        folderViewEnabled = false;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit().putBoolean(PREF_FOLDER_VIEW, false).apply();
+        setupAudioAdapter();
+        audioAdapter.updateList(filteredAudioFiles);
+    }
+
+    /**
+     * Returns from a folder's song list back to folder view (or the full list
+     * when returning from the empty folder state).
+     */
+    private void closeCurrentFolder() {
+        currentFolderName = null;
+        // Restore the full library (folder view groups from filteredAudioFiles)
+        filteredAudioFiles.clear();
+        filteredAudioFiles.addAll(allAudioFiles);
+        if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+            filterAudioFiles(searchEditText.getText().toString());
+        }
+        folderViewEnabled = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit().putBoolean(PREF_FOLDER_VIEW, true).apply();
+        showFolderView();
+    }
+
+
 
     // Add a new method to sort audio files
     private void sortAudioFiles() {
@@ -7035,6 +7159,16 @@ public class MainActivity extends AppCompatActivity {
             currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
             showPlaylistSongs();
         }
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Leaving a folder's song list returns to folder view instead of exiting
+        if (currentFolderName != null) {
+            closeCurrentFolder();
+            return;
+        }
+        super.onBackPressed();
     }
 
     /**
