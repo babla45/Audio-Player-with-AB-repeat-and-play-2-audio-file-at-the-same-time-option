@@ -1072,13 +1072,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void pickAudioFile() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("audio/*");
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        // ACTION_GET_CONTENT lets any app that can supply audio participate,
+        // including third-party file managers (which don't need to implement
+        // the SAF document-provider API that ACTION_OPEN_DOCUMENT requires).
+        Intent getContent = new Intent(Intent.ACTION_GET_CONTENT);
+        getContent.addCategory(Intent.CATEGORY_OPENABLE);
+        getContent.setType("audio/*");
+
+        // Also offer the system document picker explicitly, since it supports
+        // persistable URI grants that survive restarts.
+        Intent openDocument = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        openDocument.addCategory(Intent.CATEGORY_OPENABLE);
+        openDocument.setType("audio/*");
+        openDocument.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+
+        Intent chooser = Intent.createChooser(getContent, "Select audio file");
+        chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] { openDocument });
 
         try {
-            audioPickerLauncher.launch(intent);
+            audioPickerLauncher.launch(chooser);
         } catch (Exception e) {
             Log.e(TAG, "Error launching audio picker", e);
             Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
@@ -4198,17 +4211,94 @@ public class MainActivity extends AppCompatActivity {
         TextView titleText = view.findViewById(R.id.detail_title);
         TextView durationText = view.findViewById(R.id.detail_duration);
         TextView sizeText = view.findViewById(R.id.detail_size);
+        TextView mimeText = view.findViewById(R.id.detail_mime);
+        TextView folderText = view.findViewById(R.id.detail_folder);
+        TextView dateAddedText = view.findViewById(R.id.detail_date_added);
         TextView pathText = view.findViewById(R.id.detail_path);
 
         // Set the details
         titleText.setText(audioFile.getTitle());
         durationText.setText(audioFile.getDuration());
         sizeText.setText(audioFile.getFormattedSize());
-        pathText.setText(getReadablePathFromUri(audioFile.getUri()));
+
+        // Extra metadata straight from MediaStore
+        String mimeType = queryAudioMetadata(audioFile.getUri(), MediaStore.Audio.Media.MIME_TYPE);
+        mimeText.setText(!TextUtils.isEmpty(mimeType) ? mimeType : "audio/*");
+        String bucket = queryAudioMetadata(audioFile.getUri(), MediaStore.Audio.Media.BUCKET_DISPLAY_NAME);
+        folderText.setText(!TextUtils.isEmpty(bucket) ? bucket : getString(R.string.unknown_folder));
+        dateAddedText.setText(formatDateAdded(audioFile.getDateAdded()));
+
+        final String displayPath = getReadablePathFromUri(audioFile.getUri());
+        pathText.setText(displayPath);
+
+        // Tap the path to copy it to the clipboard
+        pathText.setOnClickListener(v -> {
+            try {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                android.content.ClipData clip =
+                        android.content.ClipData.newPlainText("File path", displayPath);
+                if (clipboard != null) {
+                    clipboard.setPrimaryClip(clip);
+                    Toast.makeText(this, R.string.path_copied, Toast.LENGTH_SHORT).show();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to copy path to clipboard", e);
+            }
+        });
 
         builder.setView(view);
         builder.setPositiveButton(R.string.ok, null);
         builder.show();
+    }
+
+    /**
+     * Reads a single metadata column for the given content URI from MediaStore.
+     * Returns null when the column is missing or the query fails.
+     */
+    private String queryAudioMetadata(Uri uri, String column) {
+        if (uri == null) {
+            return null;
+        }
+        try {
+            Cursor c = getContentResolver().query(uri, new String[] { column }, null, null, null);
+            if (c != null) {
+                try {
+                    if (c.moveToFirst()) {
+                        int idx = c.getColumnIndex(column);
+                        if (idx != -1) {
+                            return c.getString(idx);
+                        }
+                    }
+                } finally {
+                    c.close();
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to query " + column + " for " + uri, e);
+        }
+        return null;
+    }
+
+    /**
+     * Formats a MediaStore DATE_ADDED value (seconds since epoch) as a
+     * human-readable local date, e.g. "Sep 3, 2026 14:05".
+     */
+    private String formatDateAdded(long dateAddedSeconds) {
+        if (dateAddedSeconds <= 0) {
+            return getString(R.string.unknown_date);
+        }
+        try {
+            java.text.DateFormat dateFmt =
+                    java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM);
+            java.text.DateFormat timeFmt =
+                    java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT);
+            long millis = dateAddedSeconds * 1000L;
+            return dateFmt.format(new java.util.Date(millis))
+                    + " " + timeFmt.format(new java.util.Date(millis));
+        } catch (Exception e) {
+            return String.valueOf(dateAddedSeconds);
+        }
     }
 
     // Derive a readable path from a content/file URI for display in the details dialog
@@ -6471,14 +6561,21 @@ public class MainActivity extends AppCompatActivity {
 
     private void selectSecondAudio() {
         if (isPermissionGranted) {
-            // Create intent to browse for audio file
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("audio/*");
+            // ACTION_GET_CONTENT so third-party file managers can supply audio too
+            Intent getContent = new Intent(Intent.ACTION_GET_CONTENT);
+            getContent.addCategory(Intent.CATEGORY_OPENABLE);
+            getContent.setType("audio/*");
+
+            Intent openDocument = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            openDocument.addCategory(Intent.CATEGORY_OPENABLE);
+            openDocument.setType("audio/*");
+
+            Intent chooser = Intent.createChooser(getContent, "Select second audio file");
+            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[] { openDocument });
 
             try {
                 // Use the second launcher explicitly for the second file
-                secondAudioPickerLauncher.launch(intent);
+                secondAudioPickerLauncher.launch(chooser);
             } catch (Exception e) {
                 Log.e(TAG, "Error launching second audio picker", e);
                 Toast.makeText(this, "Error opening file picker", Toast.LENGTH_SHORT).show();
