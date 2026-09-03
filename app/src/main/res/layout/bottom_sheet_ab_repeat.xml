@@ -41,6 +41,19 @@
             android:textColor="@color/text_primary"
             android:layout_marginStart="12dp" />
 
+        <ImageView
+            android:id="@+id/ab_step_btn"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="4dp"
+            android:layout_marginEnd="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Set nudge step"
+            android:src="@drawable/ic_tune"
+            app:tint="@color/text_secondary" />
+
         <TextView
             android:id="@+id/ab_status_badge"
             android:layout_width="wrap_content"
@@ -52,6 +65,85 @@
             android:textSize="12sp"
             android:textColor="@color/text_tertiary" />
     </LinearLayout>
+
+    <!-- Playback position: current time above the slider, total time on the right -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp">
+
+        <TextView
+            android:id="@+id/ab_current_time"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="0:00"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textColor="@color/accent_primary" />
+
+        <TextView
+            android:id="@+id/ab_total_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0:00"
+            android:textSize="12sp"
+            android:textColor="@color/text_tertiary" />
+    </LinearLayout>
+
+    <SeekBar
+        android:id="@+id/ab_progress_seekbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:paddingHorizontal="16dp"
+        android:progressTint="@color/accent_primary"
+        android:thumbTint="@color/accent_primary" />
+
+    <!-- A-B range: slide the two handles to adjust Point A and Point B -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:layout_marginTop="2dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Point A"
+            android:textSize="11sp"
+            android:textColor="@color/text_tertiary" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Point B"
+            android:textSize="11sp"
+            android:textColor="@color/text_tertiary" />
+    </LinearLayout>
+
+    <com.google.android.material.slider.RangeSlider
+        android:id="@+id/ab_range_slider"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="12dp"
+        app:trackColorActive="@color/accent_primary"
+        app:trackColorInactive="@color/text_tertiary"
+        app:thumbColor="@color/accent_primary" />
+
+    <TextView
+        android:id="@+id/ab_range_hint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingHorizontal="20dp"
+        android:text="Slide the handles to set Point A and Point B"
+        android:textSize="11sp"
+        android:textColor="@color/text_tertiary"
+        android:visibility="gone" />
 
     <!-- Point A -->
     <LinearLayout
@@ -74,16 +166,61 @@
             android:id="@+id/ab_point_a_value"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="44dp"
+            android:gravity="end"
             android:text="--:--"
             android:textSize="14sp"
-            android:textColor="@color/text_tertiary"
-            android:layout_marginEnd="12dp" />
+            android:textColor="@color/text_secondary"
+            android:paddingHorizontal="4dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Edit Point A time"
+            android:layout_marginEnd="8dp" />
+
+        <ImageView
+            android:id="@+id/ab_nudge_a_minus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Point A minus 1 second"
+            android:src="@drawable/ic_nudge_minus"
+            app:tint="@color/text_secondary" />
+
+        <ImageView
+            android:id="@+id/ab_nudge_a_plus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Point A plus 1 second"
+            android:src="@drawable/ic_nudge_plus"
+            app:tint="@color/text_secondary" />
+
+        <ImageView
+            android:id="@+id/ab_play_a"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="4dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Play from Point A"
+            android:src="@drawable/ic_play"
+            app:tint="@color/success" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ab_set_a_btn"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
+            android:layout_marginStart="8dp"
             android:text="Set A" />
     </LinearLayout>
 
@@ -108,16 +245,61 @@
             android:id="@+id/ab_point_b_value"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="44dp"
+            android:gravity="end"
             android:text="--:--"
             android:textSize="14sp"
-            android:textColor="@color/text_tertiary"
-            android:layout_marginEnd="12dp" />
+            android:textColor="@color/text_secondary"
+            android:paddingHorizontal="4dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Edit Point B time"
+            android:layout_marginEnd="8dp" />
+
+        <ImageView
+            android:id="@+id/ab_nudge_b_minus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Point B minus 1 second"
+            android:src="@drawable/ic_nudge_minus"
+            app:tint="@color/text_secondary" />
+
+        <ImageView
+            android:id="@+id/ab_nudge_b_plus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Point B plus 1 second"
+            android:src="@drawable/ic_nudge_plus"
+            app:tint="@color/text_secondary" />
+
+        <ImageView
+            android:id="@+id/ab_play_b"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="4dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Play from Point B"
+            android:src="@drawable/ic_play"
+            app:tint="@color/success" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ab_set_b_btn"
             style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
+            android:layout_marginStart="8dp"
             android:text="Set B" />
     </LinearLayout>
 
