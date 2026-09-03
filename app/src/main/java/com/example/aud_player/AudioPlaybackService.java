@@ -565,11 +565,11 @@ public class AudioPlaybackService extends Service {
             applyBoostToEnhancers();
         } catch (Exception e) {
             Log.w(TAG, "LoudnessEnhancer initialization failed", e);
-            // fallback: ensure volume not muted
+            // setVolume cannot exceed 1.0, so it can never amplify — leave the
+            // players at full volume instead of attenuating them.
             try {
-                float v = Math.min(1.0f, currentBoost / 5.0f);
-                if (mediaPlayer != null) mediaPlayer.setVolume(v, v);
-                if (secondMediaPlayer != null) secondMediaPlayer.setVolume(v, v);
+                if (mediaPlayer != null) mediaPlayer.setVolume(1.0f, 1.0f);
+                if (secondMediaPlayer != null) secondMediaPlayer.setVolume(1.0f, 1.0f);
             } catch (Exception ignored) {}
         }
         updatePlaybackState();
@@ -741,10 +741,11 @@ public class AudioPlaybackService extends Service {
                 applyBoostToEnhancers();
             } catch (Exception e) {
                 Log.w(TAG, "LoudnessEnhancer apply failed, falling back to setVolume", e);
+                // setVolume cannot exceed 1.0, so it can never amplify — leave the
+                // players at full volume instead of attenuating them.
                 try {
-                    float vol = Math.min(1.0f, currentBoost / 5.0f);
-                    if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
-                    if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
+                    if (mediaPlayer != null) mediaPlayer.setVolume(1.0f, 1.0f);
+                    if (secondMediaPlayer != null) secondMediaPlayer.setVolume(1.0f, 1.0f);
                 } catch (Exception ex) {
                     Log.e(TAG, "Failed to apply boost to players", ex);
                 }

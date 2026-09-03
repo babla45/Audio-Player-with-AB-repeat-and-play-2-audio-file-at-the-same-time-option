@@ -146,8 +146,7 @@
             android:layout_height="44dp"
             android:text="Pause playback"
             android:textColor="@color/text_primary"
-            android:buttonTint="@color/accent_primary"
-            android:checked="true" />
+            android:buttonTint="@color/accent_primary" />
 
         <RadioButton
             android:id="@+id/timer_action_close"
@@ -155,7 +154,8 @@
             android:layout_height="44dp"
             android:text="Close app"
             android:textColor="@color/text_primary"
-            android:buttonTint="@color/accent_primary" />
+            android:buttonTint="@color/accent_primary"
+            android:checked="true" />
     </RadioGroup>
 
     <!-- Buttons -->

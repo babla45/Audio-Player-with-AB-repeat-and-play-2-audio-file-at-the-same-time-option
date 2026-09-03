@@ -175,17 +175,20 @@
             android:orientation="horizontal"
             android:paddingHorizontal="16dp">
 
-            <!-- Music icon -->
+            <!-- Music icon: tap to slide the list to the currently playing song -->
             <FrameLayout
+                android:id="@+id/miniMusicIconContainer"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
-                android:background="@drawable/bg_icon_container">
+                android:background="@drawable/bg_icon_container"
+                android:clickable="true"
+                android:focusable="true">
 
                 <ImageView
                     android:layout_width="20dp"
                     android:layout_height="20dp"
                     android:layout_gravity="center"
-                    android:contentDescription="Now playing"
+                    android:contentDescription="Slide to currently playing song"
                     android:src="@drawable/ic_music_note"
                     app:tint="@color/accent_primary" />
             </FrameLayout>

@@ -48,14 +48,14 @@
                 android:id="@+id/radio_pause"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/timer_action_pause"
-                android:checked="true"/>
-                
+                android:text="@string/timer_action_pause"/>
+
             <RadioButton
                 android:id="@+id/radio_close"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/timer_action_close"/>
+                android:text="@string/timer_action_close"
+                android:checked="true"/>
         </RadioGroup>
     </LinearLayout>
 
