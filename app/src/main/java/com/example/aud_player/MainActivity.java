@@ -1045,6 +1045,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void checkPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // All files access (MANAGE_EXTERNAL_STORAGE) enables direct write to
+            // MediaStore for rename/delete, including SD card, without the
+            // system per-file consent dialog.
+            if (!isAllFilesAccessGranted()) {
+                requestAllFilesAccess();
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // Check both READ_MEDIA_AUDIO and POST_NOTIFICATIONS permissions
             boolean hasAudioPermission = ContextCompat.checkSelfPermission(this,
@@ -1070,6 +1078,44 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+    /**
+     * True when the user has granted All files access (MANAGE_EXTERNAL_STORAGE)
+     * via system settings. With this, MediaStore updates/deletes (including on
+     * SD card) succeed without per-file consent prompts.
+     */
+    private boolean isAllFilesAccessGranted() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && Environment.isExternalStorageManager();
+    }
+
+    /**
+     * Opens the system screen where the user can grant All files access.
+     * Safe to call repeatedly: if the screen is unavailable we silently fall
+     * back to regular runtime permissions.
+     */
+    private void requestAllFilesAccess() {
+        if (allFilesAccessAskedOnce) {
+            return; // Don't nag on every check; user can grant from app settings
+        }
+        allFilesAccessAskedOnce = true;
+        try {
+            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+            Toast.makeText(this,
+                    "Allow 'All files access' so rename and delete work everywhere",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (Exception ex) {
+                Log.w(TAG, "Unable to open all-files access settings", ex);
+            }
+        }
+    }
+
+    private boolean allFilesAccessAskedOnce = false;
 
     private void pickAudioFile() {
         // ACTION_GET_CONTENT lets any app that can supply audio participate,
@@ -4419,41 +4465,175 @@ public class MainActivity extends AppCompatActivity {
 
             ContentValues values = new ContentValues();
             values.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
-            int rows = getContentResolver().update(audioFile.getUri(), values, null, null);
+            int rows;
+            try {
+                rows = getContentResolver().update(audioFile.getUri(), values, null, null);
+            } catch (Exception se) {
+                // MediaStore refused (common for SD card without All files access);
+                // fall through to the direct file-path rename below.
+                Log.w(TAG, "MediaStore update refused for rename, trying direct file path", se);
+                rows = 0;
+            }
             if (rows > 0) {
                 Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
                 refreshAudioFiles();
             } else {
-                // Try SAF-based rename (useful on SD card)
-                if (trySafRename(audioFile.getUri(), newName)) {
+                // Direct file-path rename first (works with All files access,
+                // including SD card), then SAF as a last resort.
+                if (renameDirectFile(audioFile, newName)) {
+                    Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
+                    // refresh happens after the media scanner reindexes (see renameDirectFile)
+                } else if (trySafRename(audioFile.getUri(), newName)) {
                     Toast.makeText(this, R.string.file_renamed, Toast.LENGTH_SHORT).show();
                     refreshAudioFiles();
                 } else {
                     Toast.makeText(this, R.string.error_renaming_file, Toast.LENGTH_SHORT).show();
                 }
             }
-        } catch (SecurityException se) {
-            Log.e(TAG, "SecurityException renaming file", se);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    PendingIntent pi = MediaStore.createWriteRequest(getContentResolver(), java.util.Collections.singletonList(audioFile.getUri()));
-                    pendingRenameFile = audioFile;
-                    pendingRenameNewName = newName;
-                    startIntentSenderForResult(pi.getIntentSender(), REQUEST_WRITE_PERMISSION, null, 0, 0, 0);
-                    return;
-                } catch (Exception ex) {
-                    Log.e(TAG, "Failed to request write access", ex);
-                }
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // No API to request per-item edit consent on Android 10; show guidance
-                Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
-                return;
-            }
-            Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             Log.e(TAG, "Error renaming file", e);
             Toast.makeText(this, R.string.error_renaming_file, Toast.LENGTH_SHORT).show();
         }
+    }
+
+    /**
+     * Renames the file directly on disk via its real path. Because a raw
+     * renameTo() can fail on SD-card/FUSE mounts, falls back to copy+delete.
+     * After the on-disk rename, triggers a media rescan of both the old and
+     * new paths so the MediaStore index reflects the change (otherwise the
+     * song list keeps showing the old name). The list is refreshed once the
+     * scan completes.
+     */
+    private boolean renameDirectFile(AudioFile audioFile, String newName) {
+        try {
+            String filePath = getRealFilePath(audioFile.getUri());
+            if (filePath == null) {
+                return false;
+            }
+            java.io.File file = new java.io.File(filePath);
+            if (!file.exists()) {
+                return false;
+            }
+            java.io.File target = new java.io.File(file.getParentFile(), newName);
+            if (target.exists()) {
+                // Don't clobber an existing file with the same name
+                return false;
+            }
+            boolean renamed;
+            try {
+                renamed = file.renameTo(target);
+            } catch (Exception e) {
+                Log.w(TAG, "renameTo threw, trying copy+delete", e);
+                renamed = false;
+            }
+            if (!renamed) {
+                // Some SD-card/FUSE mounts refuse renameTo; copy+delete instead
+                renamed = copyThenDelete(file, target);
+            }
+            if (!renamed) {
+                return false;
+            }
+
+            // Best effort: update the existing row's display name
+            try {
+                ContentValues nameValues = new ContentValues();
+                nameValues.put(MediaStore.MediaColumns.DISPLAY_NAME, newName);
+                getContentResolver().update(audioFile.getUri(), nameValues, null, null);
+            } catch (Exception e) {
+                Log.w(TAG, "MediaStore display name not updated after direct rename", e);
+            }
+
+            // Rescan old + new paths so the MediaStore index matches the disk
+            final String oldPath = filePath;
+            final String newPath = target.getAbsolutePath();
+            try {
+                android.media.MediaScannerConnection.scanFile(this,
+                        new String[] { oldPath, newPath }, null,
+                        (path, uri) -> {
+                            Log.d(TAG, "Media scan finished for " + path);
+                            handler.post(this::refreshAudioFiles);
+                        });
+            } catch (Exception e) {
+                Log.w(TAG, "Media scan failed; refreshing list anyway", e);
+                refreshAudioFiles();
+            }
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Direct file rename failed", e);
+            return false;
+        }
+    }
+
+    /**
+     * Copies file content to target then removes the source. Used as the
+     * fallback when File.renameTo() refuses to operate (some SD-card mounts).
+     */
+    private boolean copyThenDelete(java.io.File source, java.io.File target) {
+        java.io.FileInputStream in = null;
+        java.io.FileOutputStream out = null;
+        try {
+            in = new java.io.FileInputStream(source);
+            out = new java.io.FileOutputStream(target);
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+            out.getFD().sync();
+            in.close();
+            out.close();
+            in = null;
+            out = null;
+            return source.delete();
+        } catch (Exception e) {
+            Log.w(TAG, "Copy+delete rename failed for " + source, e);
+            // Clean up partial copy so we don't leave duplicates
+            try {
+                if (out != null) out.close();
+                if (in != null) in.close();
+            } catch (Exception ignored) {}
+            try {
+                if (target.exists()) target.delete();
+            } catch (Exception ignored) {}
+            return false;
+        }
+    }
+
+    /**
+     * Resolves a MediaStore content URI to a real absolute file path when
+     * possible, using DATA on older APIs and RELATIVE_PATH/DISPLAY_NAME on Q+.
+     * Returns null when the path can't be resolved.
+     */
+    private String getRealFilePath(Uri uri) {
+        try {
+            if (uri == null) {
+                return null;
+            }
+            String scheme = uri.getScheme();
+            if ("file".equalsIgnoreCase(scheme)) {
+                return uri.getPath();
+            }
+            if (!"content".equalsIgnoreCase(scheme)) {
+                return null;
+            }
+            // DATA is still returned by MediaStore queries even on Q+ in practice
+            try (Cursor c = getContentResolver().query(uri,
+                    new String[] { MediaStore.MediaColumns.DATA }, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int idx = c.getColumnIndex(MediaStore.MediaColumns.DATA);
+                    if (idx != -1) {
+                        String path = c.getString(idx);
+                        if (!TextUtils.isEmpty(path)) {
+                            return path;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to resolve real file path for " + uri, e);
+        }
+        return null;
     }
 
     private void showDeleteConfirmationDialog(AudioFile audioFile) {
@@ -4470,6 +4650,23 @@ public class MainActivity extends AppCompatActivity {
     private void deleteFile(AudioFile audioFile) {
         try {
             if (audioFile == null || audioFile.getUri() == null) return;
+
+            // Direct file-path delete first: with All files access this works
+            // for SD card too, and avoids the system consent dialog entirely.
+            String filePath = getRealFilePath(audioFile.getUri());
+            if (filePath != null) {
+                java.io.File file = new java.io.File(filePath);
+                if (file.exists() && file.delete()) {
+                    // Remove from MediaStore index as well
+                    try {
+                        getContentResolver().delete(audioFile.getUri(), null, null);
+                    } catch (Exception ignored) {}
+                    Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
+                    refreshAudioFiles();
+                    return;
+                }
+            }
+
             int rows = getContentResolver().delete(audioFile.getUri(), null, null);
             if (rows > 0) {
                 Toast.makeText(this, R.string.file_deleted, Toast.LENGTH_SHORT).show();
@@ -4484,24 +4681,28 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (SecurityException se) {
             Log.e(TAG, "SecurityException deleting file", se);
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    PendingIntent pi = MediaStore.createDeleteRequest(getContentResolver(), java.util.Collections.singletonList(audioFile.getUri()));
-                    pendingDeleteFile = audioFile;
-                    startIntentSenderForResult(pi.getIntentSender(), REQUEST_DELETE_PERMISSION, null, 0, 0, 0);
-                    return;
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    // Use SAF to request write permission then delete
-                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setDataAndType(audioFile.getUri(), "audio/*");
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                    pendingDeleteFile = audioFile;
-                    startActivityForResult(intent, REQUEST_SAF_EDIT);
-                    return;
+            // Only fall back to the system consent flow when All files access
+            // is genuinely missing; with it granted this branch is not reached.
+            if (!isAllFilesAccessGranted()) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        PendingIntent pi = MediaStore.createDeleteRequest(getContentResolver(), java.util.Collections.singletonList(audioFile.getUri()));
+                        pendingDeleteFile = audioFile;
+                        startIntentSenderForResult(pi.getIntentSender(), REQUEST_DELETE_PERMISSION, null, 0, 0, 0);
+                        return;
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        // Use SAF to request write permission then delete
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setDataAndType(audioFile.getUri(), "audio/*");
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                        pendingDeleteFile = audioFile;
+                        startActivityForResult(intent, REQUEST_SAF_EDIT);
+                        return;
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Failed to request edit permissions for delete", ex);
                 }
-            } catch (Exception ex) {
-                Log.e(TAG, "Failed to request edit permissions for delete", ex);
             }
             Toast.makeText(this, R.string.permission_required_for_action, Toast.LENGTH_LONG).show();
         } catch (Exception e) {
