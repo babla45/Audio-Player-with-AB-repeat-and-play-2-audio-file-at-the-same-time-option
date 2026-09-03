@@ -3825,6 +3825,10 @@ public class MainActivity extends AppCompatActivity {
         if (expandedPlayerControls != null) {
             expandedPlayerControls.setVisibility(playerExpanded ? View.VISIBLE : View.GONE);
         }
+        // Only one progress bar at a time: hide the mini bar while expanded
+        if (miniProgressBar != null) {
+            miniProgressBar.setVisibility(playerExpanded ? View.GONE : View.VISIBLE);
+        }
         // Rotate the expand arrow
         ImageView expandBtn = findViewById(R.id.expandPlayerBtn);
         if (expandBtn != null) {
