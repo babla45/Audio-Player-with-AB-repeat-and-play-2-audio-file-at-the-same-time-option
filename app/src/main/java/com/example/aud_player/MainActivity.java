@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int TIMER_ACTION_PAUSE = 0;
     private static final int TIMER_ACTION_CLOSE_APP = 1;
     private static final int TIMER_ACTION_END_OF_SONG = 2; // New action for end of song
-    private int timerAction = TIMER_ACTION_PAUSE; // Default is pause
+    private int timerAction = TIMER_ACTION_CLOSE_APP; // Default is close app
 
     private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
     private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
@@ -759,6 +759,12 @@ public class MainActivity extends AppCompatActivity {
                 miniPlayPauseBtn.setOnClickListener(v -> {
                     if (playPauseButton != null) playPauseButton.performClick();
                 });
+            }
+
+            // Music icon in mini player: slide the song list to the currently playing song
+            View miniMusicIcon = findViewById(R.id.miniMusicIconContainer);
+            if (miniMusicIcon != null) {
+                miniMusicIcon.setOnClickListener(v -> slideToCurrentlyPlayingSong());
             }
 
             // Expand/collapse buttons
@@ -2204,21 +2210,20 @@ public class MainActivity extends AppCompatActivity {
         boostSheet.setBoostListener(new BoostBottomSheet.BoostListener() {
             @Override
             public void onBoostChanged(float boost) {
-                // Update service if available
+                // Keep local state and preference in sync
+                currentBoost = boost;
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit().putFloat("volume_boost_factor", boost).apply();
+                } catch (Exception ignored) {}
+
+                // Real amplification is done by the service via LoudnessEnhancer
+                // attached to the players' audio sessions. Do NOT scale
+                // MediaPlayer.setVolume here — it caps at 1.0 and used to cancel
+                // out the enhancer's gain (boost made playback quieter, not louder).
                 if (serviceBound && audioService != null) {
                     audioService.setBoost(boost);
                 }
-
-                // Best-effort apply to local media players via setVolume (clamped)
-                try {
-                    float left = 1.0f;
-                    float right = 1.0f;
-                    float applied = Math.max(1.0f, boost);
-                    // clamp to max 5.0f here logically; setVolume expects 0..1 so we scale down when >1
-                    float vol = Math.min(1.0f, applied / 5.0f);
-                    if (mediaPlayer != null) mediaPlayer.setVolume(vol, vol);
-                    if (secondMediaPlayer != null) secondMediaPlayer.setVolume(vol, vol);
-                } catch (Exception ignored) {}
             }
 
             @Override
@@ -5762,9 +5767,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void applySavedThemeMode() {
         int savedThemeMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+                .getInt(PREF_THEME_MODE, THEME_MODE_BLUISH_BLACK);
         if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_CUSTOM) {
-            savedThemeMode = THEME_MODE_WHITE;
+            savedThemeMode = THEME_MODE_BLUISH_BLACK;
         }
         if (savedThemeMode == THEME_MODE_BLUISH_BLACK) {
             AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES);
@@ -5785,9 +5790,9 @@ public class MainActivity extends AppCompatActivity {
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         int savedThemeMode = prefs
-                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+                .getInt(PREF_THEME_MODE, THEME_MODE_BLUISH_BLACK);
         if (savedThemeMode < THEME_MODE_WHITE || savedThemeMode > THEME_MODE_CUSTOM) {
-            savedThemeMode = THEME_MODE_WHITE;
+            savedThemeMode = THEME_MODE_BLUISH_BLACK;
         }
         int savedMiniTheme = prefs.getInt(PREF_MINI_PLAYER_THEME, MINI_PLAYER_THEME_CURRENT);
         if (savedMiniTheme < MINI_PLAYER_THEME_CURRENT || savedMiniTheme > MINI_PLAYER_THEME_CUSTOM) {
@@ -5947,13 +5952,13 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isMilkyThemeActive() {
         int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+                .getInt(PREF_THEME_MODE, THEME_MODE_BLUISH_BLACK);
         return mode == THEME_MODE_MILKY;
     }
 
     private boolean isCustomAppThemeActive() {
         int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .getInt(PREF_THEME_MODE, THEME_MODE_WHITE);
+                .getInt(PREF_THEME_MODE, THEME_MODE_BLUISH_BLACK);
         return mode == THEME_MODE_CUSTOM;
     }
 
@@ -6580,6 +6585,54 @@ public class MainActivity extends AppCompatActivity {
 
         int currentIndex = getCurrentSongIndexInList(filteredAudioFiles);
         if (currentIndex < 0) return;
+
+        RecyclerView.LayoutManager lm = audioRecyclerView.getLayoutManager();
+        if (lm instanceof LinearLayoutManager) {
+            ((LinearLayoutManager) lm).scrollToPositionWithOffset(currentIndex, 120);
+        } else {
+            audioRecyclerView.scrollToPosition(currentIndex);
+        }
+    }
+
+    /**
+     * Scrolls the song list to the currently playing song. Leaves folder view
+     * (or an opened folder) first so the flat song list is visible.
+     */
+    private void slideToCurrentlyPlayingSong() {
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "No song is playing", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Leave folder view / an opened folder so the song list is showing
+        if (folderViewEnabled || currentFolderName != null) {
+            folderViewEnabled = false;
+            currentFolderName = null;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit().putBoolean(PREF_FOLDER_VIEW, false).apply();
+            filteredAudioFiles.clear();
+            filteredAudioFiles.addAll(allAudioFiles);
+            if (searchEditText != null && !TextUtils.isEmpty(searchEditText.getText())) {
+                filterAudioFiles(searchEditText.getText().toString());
+            }
+            if (audioAdapter == null || audioRecyclerView.getAdapter() != audioAdapter) {
+                setupAudioAdapter();
+            }
+            audioAdapter.updateList(filteredAudioFiles);
+            updateAudioFilesList();
+            updateLibraryNavItem();
+        }
+
+        if (audioRecyclerView == null || audioAdapter == null || filteredAudioFiles.isEmpty()) {
+            Toast.makeText(this, "No songs in the list", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int currentIndex = getCurrentSongIndexInList(filteredAudioFiles);
+        if (currentIndex < 0) {
+            Toast.makeText(this, "Current song is not in this list", Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         RecyclerView.LayoutManager lm = audioRecyclerView.getLayoutManager();
         if (lm instanceof LinearLayoutManager) {
