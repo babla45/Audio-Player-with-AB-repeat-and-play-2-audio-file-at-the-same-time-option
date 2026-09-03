@@ -147,6 +147,13 @@ public class MainActivity extends AppCompatActivity {
     private int currentPlaybackMode = PLAYBACK_MODE_NEXT_IN_LIST; // Default is list play
     private Uri lastPlayedUri = null; // Track last played song for random mode
 
+    // Random-mode playback history: the actual order songs were played in, so
+    // Next/Previous move through the sequence instead of re-randomizing.
+    // randomHistoryPosition points at the currently playing entry.
+    private static final int RANDOM_HISTORY_MAX_SIZE = 1000;
+    private final List<Uri> randomHistory = new ArrayList<>();
+    private int randomHistoryPosition = -1;
+
     private Button selectButton;
     private TextView fileNameText, currentTimeText, totalTimeText;
     private SeekBar seekBar;
@@ -1458,13 +1465,15 @@ public class MainActivity extends AppCompatActivity {
                 // Pick a random song from current context (search results, playlist, or all songs)
                 List<AudioFile> randomPlaylistContextList = getPlaybackContextList();
                 if (!randomPlaylistContextList.isEmpty()) {
+                    anchorRandomHistoryToCurrentSong();
                     int randomIndex;
                     do {
                         randomIndex = new java.util.Random().nextInt(randomPlaylistContextList.size());
-                    } while (randomPlaylistContextList.size() > 1 && 
+                    } while (randomPlaylistContextList.size() > 1 &&
                              randomPlaylistContextList.get(randomIndex).getUri().equals(selectedAudioUri));
-                    
+
                     selectedAudioUri = randomPlaylistContextList.get(randomIndex).getUri();
+                    syncRandomHistory(selectedAudioUri);
                 shouldAutoPlay = true;
                 prepareMediaPlayer();
 
@@ -1507,10 +1516,11 @@ public class MainActivity extends AppCompatActivity {
                     // Play a random song from current context (search results, playlist, or all songs)
                     List<AudioFile> randomContextList = getPlaybackContextList();
                     if (!randomContextList.isEmpty()) {
+                        anchorRandomHistoryToCurrentSong();
                         int randomIndex;
                         do {
                             randomIndex = new java.util.Random().nextInt(randomContextList.size());
-                        } while (randomContextList.size() > 1 && 
+                        } while (randomContextList.size() > 1 &&
                                  randomContextList.get(randomIndex).getUri().equals(selectedAudioUri));
                         onAudioFileSelected(randomContextList.get(randomIndex));
                     }
@@ -1526,10 +1536,18 @@ public class MainActivity extends AppCompatActivity {
             if (idx != -1 && list != null && !list.isEmpty()) {
                 int next;
                 if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
-                    // Choose a different random index than current
                     if (list.size() == 1) return;
-                    int candidate = idx;
+                    anchorRandomHistoryToCurrentSong();
+                    // Move forward through the existing random history — do NOT
+                    // generate a new random song while forward history remains.
+                    AudioFile historyFile = getRandomHistoryNeighbor(+1, list);
+                    if (historyFile != null) {
+                        onAudioFileSelected(historyFile);
+                        return;
+                    }
+                    // End of history reached: pick a new random song
                     Random r = new Random();
+                    int candidate = idx;
                     for (int tries = 0; tries < 5 && candidate == idx; tries++) {
                         candidate = r.nextInt(list.size());
                     }
@@ -1552,12 +1570,26 @@ public class MainActivity extends AppCompatActivity {
                 int prev;
                 if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
                     if (list.size() == 1) return;
-                    int candidate = idx;
-                    Random r = new Random();
-                    for (int tries = 0; tries < 5 && candidate == idx; tries++) {
-                        candidate = r.nextInt(list.size());
+                    anchorRandomHistoryToCurrentSong();
+                    // Move backward through the existing random history — do NOT
+                    // generate a new random song.
+                    AudioFile historyFile = getRandomHistoryNeighbor(-1, list);
+                    if (historyFile != null) {
+                        onAudioFileSelected(historyFile);
+                        return;
                     }
-                    prev = candidate == idx ? (idx - 1 + list.size()) % list.size() : candidate;
+                    // At the very start of the random history: restart the song
+                    if (mediaPlayer != null) {
+                        try {
+                            mediaPlayer.seekTo(0);
+                            if (mediaPlayer.isPlaying()) {
+                                mediaPlayer.start();
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error restarting song at start of random history", e);
+                        }
+                    }
+                    return;
                 } else {
                     prev = (idx - 1 + list.size()) % list.size();
                 }
@@ -1565,6 +1597,96 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error playing previous", e);
+        }
+    }
+
+    /**
+     * Returns the next (+1) or previous (-1) song in the random playback history
+     * relative to the current position, or null when there is no entry in that
+     * direction (or the entry's file can no longer be found).
+     */
+    private AudioFile getRandomHistoryNeighbor(int direction, List<AudioFile> list) {
+        int target = randomHistoryPosition + direction;
+        if (randomHistoryPosition < 0 || target < 0 || target >= randomHistory.size()) {
+            return null;
+        }
+        return findAudioFileByUri(randomHistory.get(target), list);
+    }
+
+    private AudioFile findAudioFileByUri(Uri uri, List<AudioFile> list) {
+        if (uri == null) {
+            return null;
+        }
+        if (list != null) {
+            for (AudioFile file : list) {
+                if (uri.toString().equals(file.getUri().toString())) {
+                    return file;
+                }
+            }
+        }
+        // Fall back to the full library in case the song left the current
+        // context (e.g. a different folder/search filter is being viewed).
+        if (allAudioFiles != null) {
+            for (AudioFile file : allAudioFiles) {
+                if (uri.toString().equals(file.getUri().toString())) {
+                    return file;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Makes sure the random history position matches the currently playing song.
+     * Needed after a mode switch or manual song selection while outside the
+     * history sequence.
+     */
+    private void anchorRandomHistoryToCurrentSong() {
+        boolean anchored = randomHistoryPosition >= 0
+                && randomHistoryPosition < randomHistory.size()
+                && selectedAudioUri != null
+                && randomHistory.get(randomHistoryPosition).equals(selectedAudioUri);
+        if (!anchored) {
+            syncRandomHistory(selectedAudioUri);
+        }
+    }
+
+    /**
+     * Records a song change in the random history: steps forward/backward when
+     * the song matches an adjacent entry (history navigation), otherwise drops
+     * any forward entries and appends the song as the newest in the sequence.
+     */
+    private void syncRandomHistory(Uri uri) {
+        if (uri == null) {
+            return;
+        }
+        // Already the song at the current position
+        if (randomHistoryPosition >= 0 && randomHistoryPosition < randomHistory.size()
+                && uri.equals(randomHistory.get(randomHistoryPosition))) {
+            return;
+        }
+        // Forward navigation within existing history
+        if (randomHistoryPosition >= 0 && randomHistoryPosition + 1 < randomHistory.size()
+                && uri.equals(randomHistory.get(randomHistoryPosition + 1))) {
+            randomHistoryPosition++;
+            return;
+        }
+        // Backward navigation within existing history
+        if (randomHistoryPosition > 0
+                && uri.equals(randomHistory.get(randomHistoryPosition - 1))) {
+            randomHistoryPosition--;
+            return;
+        }
+        // A new song in the sequence: cut stale forward entries and append
+        if (randomHistoryPosition < randomHistory.size() - 1) {
+            randomHistory.subList(randomHistoryPosition + 1, randomHistory.size()).clear();
+        }
+        randomHistory.add(uri);
+        randomHistoryPosition = randomHistory.size() - 1;
+        // Keep the history bounded
+        if (randomHistory.size() > RANDOM_HISTORY_MAX_SIZE) {
+            randomHistory.remove(0);
+            randomHistoryPosition--;
         }
     }
 
@@ -4655,6 +4777,9 @@ public class MainActivity extends AppCompatActivity {
     private void onAudioFileSelected(AudioFile audioFile) {
         // Handle primary audio selection
         selectedAudioUri = audioFile.getUri();
+        if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
+            syncRandomHistory(selectedAudioUri);
+        }
         String fileName = audioFile.getTitle();
         fileNameText.setText(fileName);
         updateMiniPlayer();
