@@ -114,6 +114,12 @@ public class AudioPlaybackService extends Service {
                     if (!isAllowAudioMixEnabled()) {
                         isPlaying = false;
                         updateNotification();
+                        // Notify UI to reflect paused state
+                        try {
+                            sendLocalBroadcast(new Intent("PLAYBACK_PAUSED"));
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to broadcast paused state", e);
+                        }
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error handling audio focus loss", e);
@@ -130,6 +136,12 @@ public class AudioPlaybackService extends Service {
                             isPlaying = true;
                             pausedByAudioFocusLoss = false;
                             updateNotification();
+                            // Notify UI to reflect resumed state
+                            try {
+                                sendLocalBroadcast(new Intent("PLAYBACK_RESUMED"));
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to broadcast resumed state", e);
+                            }
                         } else {
                             Log.d(TAG, "Call is ongoing, won't resume playback on focus gain");
                         }
@@ -224,21 +236,25 @@ public class AudioPlaybackService extends Service {
                             try {
                                 if (requestAudioFocus()) {
                                     mediaPlayer.start();
-                                }
-                                if (secondMediaPlayer != null && secondAudioActive) {
-                                    if (requestAudioFocus()) {
+                                    if (secondMediaPlayer != null && secondAudioActive) {
                                         secondMediaPlayer.start();
                                     }
+                                    isPlaying = true;
+                                    registerBecomingNoisy();
+                                    updateMediaSessionMetadata();
+                                    // Re-post foreground notification now that isPlaying changed
+                                    startForeground(NOTIFICATION_ID, createNotification());
                                 }
-                                isPlaying = true;
-                                registerBecomingNoisy();
-                                updateMediaSessionMetadata();
-                                // Re-post foreground notification now that isPlaying changed
-                                startForeground(NOTIFICATION_ID, createNotification());
                             } catch (IllegalStateException e) {
                                 Log.e(TAG, "Error starting playback in service", e);
                             }
                         }
+                    }
+                    // Notify UI to reflect resumed state (e.g. mini player button)
+                    try {
+                        sendLocalBroadcast(new Intent("PLAYBACK_RESUMED"));
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to broadcast resumed state", e);
                     }
                     break;
                 case ACTION_PAUSE:
@@ -258,6 +274,12 @@ public class AudioPlaybackService extends Service {
                                 Log.e(TAG, "Error pausing playback in service", e);
                             }
                         }
+                    }
+                    // Notify UI to reflect paused state (e.g. mini player button)
+                    try {
+                        sendLocalBroadcast(new Intent("PLAYBACK_PAUSED"));
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to broadcast paused state", e);
                     }
                     break;
                 case ACTION_NEXT:
@@ -927,18 +949,24 @@ public class AudioPlaybackService extends Service {
     public void onDestroy() {
         super.onDestroy();
         try {
+            // The activity owns these player instances (they are passed in via
+            // setMediaPlayers). Releasing them here would leave a still-open
+            // activity with a dead MediaPlayer that throws on every call, so
+            // only stop them and detach; the activity releases them itself.
             if (mediaPlayer != null) {
-                if (mediaPlayer.isPlaying()) {
-                    mediaPlayer.stop();
-                }
-                mediaPlayer.release();
+                try {
+                    if (mediaPlayer.isPlaying()) {
+                        mediaPlayer.stop();
+                    }
+                } catch (Exception ignored) {}
                 mediaPlayer = null;
             }
             if (secondMediaPlayer != null && secondAudioActive) {
-                if (secondMediaPlayer.isPlaying()) {
-                    secondMediaPlayer.stop();
-                }
-                secondMediaPlayer.release();
+                try {
+                    if (secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.stop();
+                    }
+                } catch (Exception ignored) {}
                 secondMediaPlayer = null;
             }
             secondAudioActive = false;

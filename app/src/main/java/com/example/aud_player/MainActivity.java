@@ -290,6 +290,15 @@ public class MainActivity extends AppCompatActivity {
     private AudioFocusRequest audioFocusRequest;
     private boolean pausedByAudioFocusLoss = false;
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
+        // When the playback service is bound it owns the audio focus and the
+        // shared MediaPlayer. Reacting here as well would fight the service:
+        // its focus re-request on a notification resume delivers a LOSS to
+        // this listener, which would pause the player the service just started.
+        // Real interruptions are handled by the service's own listener, which
+        // broadcasts PLAYBACK_PAUSED/RESUMED back to this UI.
+        if (serviceBound && audioService != null) {
+            return;
+        }
         switch (focusChange) {
             case AudioManager.AUDIOFOCUS_LOSS:
                 // Permanent loss of audio focus: pause playback
@@ -618,17 +627,26 @@ public class MainActivity extends AppCompatActivity {
         mediaFilter.addAction("PLAYBACK_SEEKED");
         ContextCompat.registerReceiver(this, mediaControlsReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
 
-        // Update UI when playback is paused by service (e.g., headphones unplugged)
+        // Update UI when playback is paused/resumed outside the UI (notification,
+        // media session button, headphones unplugged, audio focus changes)
         BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if ("PLAYBACK_PAUSED".equals(intent.getAction())) {
                     isPlaying = false;
                     safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                } else if ("PLAYBACK_RESUMED".equals(intent.getAction())) {
+                    isPlaying = true;
+                    safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                 }
+                // Keep the mini player (icon, time, progress) in sync too
+                updateMiniPlayer();
             }
         };
-        ContextCompat.registerReceiver(this, pausedReceiver, new IntentFilter("PLAYBACK_PAUSED"), ContextCompat.RECEIVER_NOT_EXPORTED);
+        IntentFilter pausedFilter = new IntentFilter();
+        pausedFilter.addAction("PLAYBACK_PAUSED");
+        pausedFilter.addAction("PLAYBACK_RESUMED");
+        ContextCompat.registerReceiver(this, pausedReceiver, pausedFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private void saveNowPlayingPrefs() {
@@ -675,10 +693,20 @@ public class MainActivity extends AppCompatActivity {
             MediaPlayer svcSecond = audioService.getSecondMediaPlayer();
 
             if (mediaPlayer == null && svcMain != null) {
-                mediaPlayer = svcMain;
+                try {
+                    // Throws IllegalStateException if the instance was released
+                    svcMain.getAudioSessionId();
+                    mediaPlayer = svcMain;
+                } catch (IllegalStateException e) {
+                    Log.w(TAG, "Service player is released, will create a fresh one");
+                }
             }
             if (secondMediaPlayer == null && svcSecond != null) {
-                secondMediaPlayer = svcSecond;
+                try {
+                    svcSecond.getAudioSessionId();
+                    secondMediaPlayer = svcSecond;
+                } catch (IllegalStateException ignored) {
+                }
             }
 
             if (svcMain != null) {
@@ -1247,7 +1275,16 @@ public class MainActivity extends AppCompatActivity {
             requestAudioFocus();
 
             if (mediaPlayer != null) {
-                mediaPlayer.reset();
+                try {
+                    mediaPlayer.reset();
+                } catch (IllegalStateException e) {
+                    // The instance was released elsewhere (e.g. service teardown)
+                    // and can never be used again. Replace it with a fresh player
+                    // so future songs still play instead of failing until the app
+                    // is force-closed.
+                    Log.w(TAG, "Stale MediaPlayer instance, creating a new one", e);
+                    mediaPlayer = new MediaPlayer();
+                }
             } else {
                 mediaPlayer = new MediaPlayer();
             }
