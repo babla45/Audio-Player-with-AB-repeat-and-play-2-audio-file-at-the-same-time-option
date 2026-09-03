@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Quick manual"
+            android:text="Full manual"
             android:textColor="@color/text_primary"
             android:textSize="16sp"
             android:textStyle="bold" />
@@ -23,10 +23,207 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
             android:lineSpacingExtra="2dp"
-            android:text="1) Select and play\nTap any song in the list to play it. Use play/pause, next/previous, and seek controls in the player.\n\n2) Gestures and quick actions\n- Swipe up/down on the mini player area to expand/collapse now-playing controls.\n- Swipe up from the bottom navigation area to open More options quickly.\n- Tap the expand arrow to open/close the full player controls.\n\n3) Search, sort, and list behavior\nUse search to quickly filter songs. Use sort options to order by name, date, size, or duration. Turn on Auto slide to current song in Settings to keep the current track visible in the list.\n\n4) Mixer mode (dual track)\nEnable Mixer mode to play a second track with the primary track. You can select second audio, adjust balance, sync tracks, and save/load mixer presets.\n\n5) Playlists\nCreate playlists, add songs from file options, and open playlist details to play in sequence.\n\n6) Sleep timer\nSet a timer to pause playback or close the app automatically.\n\n7) Playback behavior setting\nPlay alongside other apps lets AudPlayer continue playback when other apps start audio/video.\n\n8) Useful tips\n- If no song appears, refresh permissions and verify local media access.\n- If a selected song is not visible in list, clear search filter.\n- Use saved mixers for quick repeat setups."
+            android:text="Everything AudPlayer can do, section by section. Open the More (•••) panel from the bottom navigation for most tools."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="1) Playing music"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Tap any song in the list to play it.\n- Swipe up/down on the mini player to expand or collapse the full now-playing controls. Tap the expand arrow for the same.\n- Use play/pause, next/previous, and the seek bar. The two buttons beside the seek bar skip forward/backward by your Seek Time setting.\n- Playback keeps running in the background with notification controls. The notification's close button stops playback and exits.\n- Mode button: choose Repeat Current, Next in List (plays the list in order), or Random.\n- Tap the music icon in the player to jump the list to the currently playing song."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="2) Library, folders, search and sort"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Toggle between the all-songs list and folder view using the folder/list icon in the bottom navigation.\n- Search filters songs instantly. If a song seems missing, clear the search filter first.\n- Sort by name, date, size, or duration (ascending or descending) from the Sort option.\n- Refresh re-scans your music. Browse opens the system file picker so you can open any audio file directly.\n- Settings &gt; Auto slide to current song keeps the playing track visible in the list."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="3) File options"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="Open a song's options menu to:\n- File details: shows format, size, duration and location. Tap the path text to copy it to the clipboard.\n- Rename and Delete files.\n- Share a file with other apps.\n- Add to playlist."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="4) Playlists"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Open Playlists from the bottom navigation, then create a new playlist.\n- Add songs using each song's options menu (Add to playlist).\n- Open a playlist to play its songs in sequence. Long-press or use its menu to rename or delete it."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="5) Equalizer and boost"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Equalizer: drag the band sliders to shape the sound, or pick a preset (device presets and custom presets like Rock, Pop, Jazz).\n- Boost: raises volume up to 5x using a loudness enhancer. Quick chips set common values."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="6) Voice Changer"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="Open Voice Changer from the More panel. Sliders and toggles apply live while music plays:\n- Pitch: raise or lower the voice pitch (0.25x–4x), with quick chips.\n- Formant: shifts the voice character without changing speed.\n- Speed: playback speed (0.25x–4x).\n- Bass / Reverb: deepen the low end, add room ambience.\n- Treble: boost or cut high frequencies.\n- Vocal Clarity: lifts speech frequencies and reduces muddiness.\n- Echo: adds repeated reflections.\n- Distortion: metallic, aggressive tone.\n- Vibrato: periodic pitch wobble.\n- Volume Boost: up to 3x volume (synced with the Boost tool).\n- Voice Depth: deeper on one side, thinner on the other.\n- Robot: synthetic, metallic voice effect (toggle).\n- Noise Reduction: suppresses background noise (toggle; depends on device support).\n- Auto-tune: snaps the pitch to exact musical semitones (toggle; pauses vibrato while on).\n- Voice Presets: one-tap voices such as Monster, Chipmunk, Alien, Ghost and more.\n- EQ Presets: voice-tuned curves (Male, Female, Deep, Radio...).\n- Each slider has a reset icon; Reset All Voice Settings restores every control at once.\nAll settings are saved and reapplied automatically on the next song."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="7) Mixer mode (dual track)"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Enable Mixer mode to play a second track alongside the primary one.\n- Select second audio, adjust left/right balance, sync track positions, and enable individual speeds for each track.\n- Save mixer setups and reload them later from Saved mixers. Clear second audio to return to single-track playback."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="8) A-B Repeat"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="Set a Point A and Point B in a song, then enable to loop just that section. Clear removes both points."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="9) Sleep timer"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="Set 15/30/45/60 minutes or a custom time. When the timer ends the app can pause playback or close completely (choose the end action)."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="10) Settings"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- Theme: White, Bluish Black, Milky, or Custom color.\n- Seek Time Settings: change how many seconds the skip buttons jump (1–300s).\n- Play alongside other apps: keep playing when other apps start audio.\n- Auto slide to current song.\n- Reset Options: choose which settings reset when you use Reset (speed, pitch, equalizer, boost).\n- Exit App: fully stops playback and closes the app (same as the notification's close button)."
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="11) Tips and troubleshooting"
+            android:textColor="@color/text_primary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:lineSpacingExtra="2dp"
+            android:text="- If no songs appear, refresh the list and check that media/storage permission is granted.\n- If a song you just picked is not in the list, clear the search filter or check folder view.\n- Voice Changer and Equalizer effects apply to the current song's audio session; effects are remembered between songs.\n- Noise Reduction and some effects depend on your device's audio engine; if a device doesn't support one, the app tells you and everything else keeps working.\n- Use saved mixers for quick repeat dual-track setups."
             android:textColor="@color/text_secondary"
             android:textSize="14sp" />
 
     </LinearLayout>
-
 </ScrollView>
