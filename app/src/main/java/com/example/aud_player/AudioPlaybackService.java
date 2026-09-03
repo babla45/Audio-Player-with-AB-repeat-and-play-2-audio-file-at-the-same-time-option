@@ -237,7 +237,18 @@ public class AudioPlaybackService extends Service {
                                 if (requestAudioFocus()) {
                                     mediaPlayer.start();
                                     if (secondMediaPlayer != null && secondAudioActive) {
-                                        secondMediaPlayer.start();
+                                        try {
+                                            // Don't restart a second track that already
+                                            // played to its end — start() would loop it
+                                            // back from 0:00 over the new song
+                                            boolean finished = secondMediaPlayer.getCurrentPosition()
+                                                    >= secondMediaPlayer.getDuration() - 50;
+                                            if (!finished) {
+                                                secondMediaPlayer.start();
+                                            }
+                                        } catch (Exception ignored) {
+                                            // Stale second player — resume the main track anyway
+                                        }
                                     }
                                     isPlaying = true;
                                     registerBecomingNoisy();
@@ -320,17 +331,23 @@ public class AudioPlaybackService extends Service {
                             timerHandler.removeCallbacks(timerRunnable);
                         }
                         
-                        // Stop the players immediately on the main thread to avoid delays
+                        // Stop both players unconditionally — a stale secondAudioActive
+                        // flag must never leave a track playing after the app closes.
+                        // Each player is guarded so a dead reference can't abort cleanup.
                         if (mediaPlayer != null) {
-                            if (mediaPlayer.isPlaying()) {
-                                mediaPlayer.stop();
-                            }
+                            try {
+                                if (mediaPlayer.isPlaying()) {
+                                    mediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
                         }
-                        
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            if (secondMediaPlayer.isPlaying()) {
-                                secondMediaPlayer.stop();
-                            }
+
+                        if (secondMediaPlayer != null) {
+                            try {
+                                if (secondMediaPlayer.isPlaying()) {
+                                    secondMediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
                         }
                         
                         // Stop the service directly - don't use handler delay
@@ -961,7 +978,7 @@ public class AudioPlaybackService extends Service {
                 } catch (Exception ignored) {}
                 mediaPlayer = null;
             }
-            if (secondMediaPlayer != null && secondAudioActive) {
+            if (secondMediaPlayer != null) {
                 try {
                     if (secondMediaPlayer.isPlaying()) {
                         secondMediaPlayer.stop();
@@ -1154,5 +1171,29 @@ public class AudioPlaybackService extends Service {
         // Send broadcast to update UI
         Intent finishedIntent = new Intent("TIMER_FINISHED");
         sendLocalBroadcast(finishedIntent);
+    }
+
+    /**
+     * Called by the activity when mixer mode is toggled. Keeps the service's copy of
+     * the second-track state in sync so notification/media-session actions never
+     * restart a second track the user deactivated.
+     */
+    public void setSecondAudioActive(boolean active) {
+        this.secondAudioActive = active;
+        if (!active && secondMediaPlayer != null) {
+            try {
+                if (secondMediaPlayer.isPlaying()) {
+                    secondMediaPlayer.pause();
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Replaces the service's reference to the second player (e.g. after the activity
+     * re-created it for a new second track) without touching playback state.
+     */
+    public void setSecondMediaPlayer(MediaPlayer second) {
+        this.secondMediaPlayer = second;
     }
 }
