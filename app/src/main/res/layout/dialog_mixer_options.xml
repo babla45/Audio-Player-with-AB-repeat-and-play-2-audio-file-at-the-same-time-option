@@ -1,29 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_mixer_panel"
-    android:fillViewport="true">
+    android:fillViewport="true"
+    android:scrollbars="none">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="20dp">
 
+        <!-- Header: icon, title, mode switch -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
+            <FrameLayout
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/bg_icon_container">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Mixer"
+                    android:src="@drawable/ic_mixer_on"
+                    app:tint="@color/accent_primary" />
+            </FrameLayout>
+
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:layout_marginStart="12dp"
                 android:text="Mixer"
                 android:textStyle="bold"
-                android:textSize="17sp"
+                android:textSize="18sp"
                 android:textColor="@color/text_primary" />
 
             <androidx.appcompat.widget.SwitchCompat
@@ -32,58 +50,145 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- Status badge -->
         <TextView
             android:id="@+id/mixerStatusText"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textColor="@color/text_secondary"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_icon_container"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="4dp"
+            android:textColor="@color/text_tertiary"
             android:textSize="12sp"
             android:text="OFF" />
 
-        <TextView
-            android:id="@+id/mixerSecondTrackText"
+        <!-- Second track card -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp"
-            android:text="2nd: Not selected"
-            android:maxLines="1"
-            android:ellipsize="end" />
+            android:layout_marginTop="16dp"
+            android:orientation="vertical"
+            android:background="@drawable/bg_icon_container"
+            android:padding="14dp">
 
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="14dp"
-            android:layout_marginBottom="12dp"
-            android:background="@color/divider" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-        <Button
-            android:id="@+id/mixerSelectSecondButton"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:text="Select 2nd Track" />
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="Second track"
+                    android:src="@drawable/ic_queue_music"
+                    app:tint="@color/accent_secondary" />
 
-        <Button
-            android:id="@+id/mixerBalanceButton"
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="SECOND TRACK"
+                        android:textSize="10sp"
+                        android:letterSpacing="0.1"
+                        android:textColor="@color/text_tertiary" />
+
+                    <TextView
+                        android:id="@+id/mixerSecondTrackText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:text="Not selected"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mixerSelectSecondButton"
+                    style="@style/Widget.Material3.Button.TonalButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    app:icon="@drawable/ic_library_music"
+                    app:iconGravity="textStart"
+                    android:text="Select Track" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/mixerClearSecondButton"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="Clear"
+                    android:textColor="@color/error" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Tools section -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="MIXER TOOLS"
+            android:textSize="10sp"
+            android:letterSpacing="0.1"
+            android:textColor="@color/text_tertiary" />
+
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Balance" />
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/mixerSyncButton"
-            android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="8dp"
-            android:text="Sync Position" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/mixerBalanceButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                app:icon="@drawable/ic_tune"
+                app:iconGravity="textStart"
+                android:text="Balance" />
 
-        <Button
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/mixerSyncButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="0dp"
+                android:layout_height="46dp"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                app:icon="@drawable/ic_sync_positions"
+                app:iconGravity="textStart"
+                android:text="Sync" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/mixerToggleIndividualSpeedButton"
+            style="@style/Widget.Material3.Button.TonalButton"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
+            android:layout_height="46dp"
             android:layout_marginTop="8dp"
+            app:icon="@drawable/ic_speed"
+            app:iconGravity="textStart"
             android:text="Individual Speeds" />
 
         <LinearLayout
@@ -91,36 +196,41 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:orientation="horizontal">
+            android:orientation="horizontal"
+            android:visibility="gone">
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/mixerPrimarySpeedButton"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
-                android:text="Speed 1" />
+                android:text="Track 1 Speed" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/mixerSecondarySpeedButton"
+                style="@style/Widget.Material3.Button.OutlinedButton"
                 android:layout_width="0dp"
                 android:layout_height="44dp"
                 android:layout_weight="1"
                 android:layout_marginStart="8dp"
-                android:text="Speed 2" />
+                android:text="Track 2 Speed" />
         </LinearLayout>
 
-        <Button
-            android:id="@+id/mixerClearSecondButton"
+        <View
             android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="8dp"
-            android:text="Clear 2nd Track" />
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:background="@color/divider" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/mixerSavedButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
-            android:layout_height="44dp"
-            android:layout_marginTop="8dp"
+            android:layout_height="46dp"
+            app:icon="@drawable/ic_queue_music"
+            app:iconGravity="textStart"
             android:text="Saved Mixer" />
 
     </LinearLayout>

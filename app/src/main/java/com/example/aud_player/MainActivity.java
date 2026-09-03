@@ -33,6 +33,7 @@ import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
+import android.graphics.Typeface;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
@@ -393,7 +394,9 @@ public class MainActivity extends AppCompatActivity {
             // Normal flow: pass the current MediaPlayer instances to the service with title
             if (mediaPlayer != null && secondMediaPlayer != null) {
                 String currentTitle = fileNameText != null ? fileNameText.getText().toString() : "Audio Player";
-                audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer, currentTitle);
+                // Only hand over the second player if it's actually active, so the
+                // service's secondAudioActive flag mirrors the true mixer state
+                audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null, currentTitle);
             }
         }
 
@@ -959,10 +962,9 @@ public class MainActivity extends AppCompatActivity {
                     } else {
                         mediaPlayer.start();
 
-                        // Also start the second audio if it's ready
-                        if (secondMediaPlayer != null && secondAudioActive) {
-                            secondMediaPlayer.start();
-                        }
+                        // Also start the second audio if it's ready (unless it already
+                        // played to its end — restarting would loop it from 0:00)
+                        startSecondTrackIfNotFinished();
 
                         // Use the new improved icons
                         safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
@@ -973,7 +975,7 @@ public class MainActivity extends AppCompatActivity {
 
                     // Update service with current state
                     if (serviceBound && audioService != null) {
-                        audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer,
+                        audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null,
                                 fileNameText.getText().toString());
                     }
 
@@ -1289,6 +1291,17 @@ public class MainActivity extends AppCompatActivity {
                 mediaPlayer = new MediaPlayer();
             }
 
+            // If the second track isn't active (mixer off / cleared), make sure a
+            // leftover second track from an earlier session is silenced so it can't
+            // play under the new song
+            if ((!mixerModeActive || !secondAudioActive) && secondMediaPlayer != null) {
+                try {
+                    if (secondMediaPlayer.isPlaying()) {
+                        secondMediaPlayer.pause();
+                    }
+                } catch (Exception ignored) {}
+            }
+
             // Update the adapter to highlight the current track
             if (audioAdapter != null) {
                 audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
@@ -1336,7 +1349,7 @@ public class MainActivity extends AppCompatActivity {
 
                         // Update service with media players
                         if (serviceBound && audioService != null) {
-                            audioService.setMediaPlayers(mediaPlayer, secondMediaPlayer,
+                            audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null,
                                     fileNameText.getText().toString());
                         }
 
@@ -2681,13 +2694,18 @@ public class MainActivity extends AppCompatActivity {
 
             if (!mixerModeActive) {
                 mixerStatusText.setText("OFF");
+                mixerStatusText.setTextColor(getResources().getColor(R.color.text_tertiary, null));
             } else if (!secondAudioActive) {
-                mixerStatusText.setText("ON - No 2nd track");
+                mixerStatusText.setText("ON · No 2nd track");
+                mixerStatusText.setTextColor(getResources().getColor(R.color.warning, null));
             } else {
-                mixerStatusText.setText("ON - Ready");
+                mixerStatusText.setText("ON · Ready");
+                mixerStatusText.setTextColor(getResources().getColor(R.color.success, null));
             }
 
-            mixerSecondTrackText.setText("2nd: " + secondTrackName);
+            mixerSecondTrackText.setText(secondTrackName);
+            mixerSecondTrackText.setTextColor(getResources().getColor(
+                    secondAudioActive ? R.color.text_primary : R.color.text_tertiary, null));
 
             boolean hasSecondTrack = secondAudioActive;
             balanceButton.setEnabled(hasSecondTrack);
@@ -4020,33 +4038,53 @@ public class MainActivity extends AppCompatActivity {
         final float currentSpeed = isPrimary ? primaryPlaybackSpeed : secondaryPlaybackSpeed;
 
         // Create a dialog with a slider for adjusting speed
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        com.google.android.material.dialog.MaterialAlertDialogBuilder builder =
+                new com.google.android.material.dialog.MaterialAlertDialogBuilder(this);
         builder.setTitle(title);
 
         // Create a simple layout with a seekbar and text display
+        int pad = (int) (20 * getResources().getDisplayMetrics().density);
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(50, 30, 50, 30);
+        layout.setPadding(pad, pad / 2, pad, pad / 4);
 
         TextView speedLabel = new TextView(this);
-        speedLabel.setText(String.format("Current: %.2fx", currentSpeed));
+        speedLabel.setText(String.format("%.2fx", currentSpeed));
         speedLabel.setGravity(Gravity.CENTER);
-        speedLabel.setTextSize(18);
+        speedLabel.setTextSize(26);
+        speedLabel.setTypeface(null, Typeface.BOLD);
+        speedLabel.setTextColor(getResources().getColor(R.color.accent_primary, null));
         layout.addView(speedLabel);
 
         SeekBar speedSeekBar = new SeekBar(this);
-        // Map 0.25x-4.0x to progress values (0-375)
         speedSeekBar.setMax(375);
         int initialProgress = (int)((currentSpeed - 0.25f) * 100);
         speedSeekBar.setProgress(initialProgress);
+        speedSeekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(
+                getResources().getColor(R.color.accent_primary, null)));
+        speedSeekBar.setThumbTintList(android.content.res.ColorStateList.valueOf(
+                getResources().getColor(R.color.accent_primary, null)));
+        speedSeekBar.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                getResources().getColor(R.color.surface_600, null)));
+        LinearLayout.LayoutParams sbParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sbParams.topMargin = pad / 2;
+        speedSeekBar.setLayoutParams(sbParams);
         layout.addView(speedSeekBar);
+
+        TextView rangeHint = new TextView(this);
+        rangeHint.setText("0.25x – 4.00x");
+        rangeHint.setGravity(Gravity.CENTER);
+        rangeHint.setTextSize(11);
+        rangeHint.setTextColor(getResources().getColor(R.color.text_tertiary, null));
+        layout.addView(rangeHint);
 
         speedSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 float speed = 0.25f + (progress / 100.0f);
                 if (speed > 4.0f) speed = 4.0f;
-                speedLabel.setText(String.format("Current: %.2fx", speed));
+                speedLabel.setText(String.format("%.2fx", speed));
 
                 // Preview the speed change if possible
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && fromUser) {
@@ -4480,6 +4518,13 @@ public class MainActivity extends AppCompatActivity {
             secondMediaPlayer.setOnPreparedListener(mp -> {
                 secondAudioActive = true;
 
+                // Keep the service's reference and flag in sync — the service may
+                // still hold the previous (possibly released) second player instance
+                if (serviceBound && audioService != null) {
+                    audioService.setSecondMediaPlayer(secondMediaPlayer);
+                    audioService.setSecondAudioActive(true);
+                }
+
                 // Set volume based on saved balance
                 secondMediaPlayer.setVolume(secondAudioVolume, secondAudioVolume);
 
@@ -4526,6 +4571,11 @@ public class MainActivity extends AppCompatActivity {
                         Log.e(TAG, "Error releasing second player after error", e);
                     }
                     secondMediaPlayer = null;
+                }
+                // Drop the service's now-dead reference
+                if (serviceBound && audioService != null) {
+                    audioService.setSecondMediaPlayer(null);
+                    audioService.setSecondAudioActive(false);
                 }
                 return true;
             });
@@ -4595,6 +4645,23 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "Error starting second track for mixer", e);
         }
+    }
+
+    /**
+     * Starts the second (mixer) track unless it already played to its end —
+     * calling start() on a finished MediaPlayer would loop it back to 0:00.
+     */
+    private void startSecondTrackIfNotFinished() {
+        if (secondMediaPlayer == null || !secondAudioActive) {
+            return;
+        }
+        try {
+            boolean finished = secondMediaPlayer.getCurrentPosition()
+                    >= secondMediaPlayer.getDuration() - 50;
+            if (!finished) {
+                secondMediaPlayer.start();
+            }
+        } catch (Exception ignored) {}
     }
 
     @Override
@@ -5938,6 +6005,11 @@ public class MainActivity extends AppCompatActivity {
         if (!mixerModeActive && secondMediaPlayer != null) {
             secondMediaPlayer.pause();
             secondAudioActive = false;
+            // Keep the service's copy of the state in sync, so notification and
+            // media-session actions never restart the deactivated second track
+            if (serviceBound && audioService != null) {
+                audioService.setSecondAudioActive(false);
+            }
         }
     }
 
@@ -7640,10 +7712,14 @@ public class MainActivity extends AppCompatActivity {
 
         SeekBar firstAudioSeekBar = dialogView.findViewById(R.id.firstAudioVolumeSeekBar);
         SeekBar secondAudioSeekBar = dialogView.findViewById(R.id.secondAudioVolumeSeekBar);
+        TextView firstVolumeLabel = dialogView.findViewById(R.id.firstAudioVolumeText);
+        TextView secondVolumeLabel = dialogView.findViewById(R.id.secondAudioVolumeText);
 
         // Set initial values based on current volume
         firstAudioSeekBar.setProgress((int)(firstAudioVolume * 100));
         secondAudioSeekBar.setProgress((int)(secondAudioVolume * 100));
+        if (firstVolumeLabel != null) firstVolumeLabel.setText(firstAudioSeekBar.getProgress() + "%");
+        if (secondVolumeLabel != null) secondVolumeLabel.setText(secondAudioSeekBar.getProgress() + "%");
 
         // Create method to apply volume immediately
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -7667,6 +7743,7 @@ public class MainActivity extends AppCompatActivity {
         firstAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (firstVolumeLabel != null) firstVolumeLabel.setText(progress + "%");
                 if (fromUser && mediaPlayer != null) {
                     float volume = progress / 100f;
                     mediaPlayer.setVolume(volume, volume);
@@ -7680,6 +7757,7 @@ public class MainActivity extends AppCompatActivity {
         secondAudioSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (secondVolumeLabel != null) secondVolumeLabel.setText(progress + "%");
                 if (fromUser && secondMediaPlayer != null) {
                     float volume = progress / 100f;
                     secondMediaPlayer.setVolume(volume, volume);
@@ -7707,7 +7785,13 @@ public class MainActivity extends AppCompatActivity {
         // Clear URI and reset state
         secondAudioUri = null;
         secondAudioActive = false;
-        
+
+        // Drop the service's stale reference so it can never act on a released player
+        if (serviceBound && audioService != null) {
+            audioService.setSecondMediaPlayer(null);
+            audioService.setSecondAudioActive(false);
+        }
+
         // Update mixer indicator
         updateMixerIndicator();
         
@@ -8642,11 +8726,9 @@ public class MainActivity extends AppCompatActivity {
                 Log.d(TAG, "Music resumed after call");
             }
             
-            // Also resume second player if it was active
-            if (secondMediaPlayer != null && secondAudioActive && !secondMediaPlayer.isPlaying()) {
-                secondMediaPlayer.start();
-                Log.d(TAG, "Second audio resumed after call");
-            }
+            // Also resume second player if it was active (skip if it finished —
+            // restarting would loop it back to 0:00)
+            startSecondTrackIfNotFinished();
         } catch (Exception e) {
             Log.e(TAG, "Error resuming playback after call", e);
         }
