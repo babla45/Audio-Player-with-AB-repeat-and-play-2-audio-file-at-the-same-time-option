@@ -127,9 +127,11 @@
                     android:layout_width="0dp"
                     android:layout_height="44dp"
                     android:layout_weight="1"
+                    android:paddingLeft="0dp"
+                    android:layout_marginLeft="0dp"
                     app:icon="@drawable/ic_library_music"
                     app:iconGravity="textStart"
-                    android:text="Select Track" />
+                    android:text="Select" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/mixerClearSecondButton"
@@ -165,6 +167,8 @@
                 android:layout_width="0dp"
                 android:layout_height="46dp"
                 android:layout_weight="1"
+                android:paddingLeft="0dp"
+                android:layout_marginLeft="0dp"
                 app:icon="@drawable/ic_tune"
                 app:iconGravity="textStart"
                 android:text="Balance" />
