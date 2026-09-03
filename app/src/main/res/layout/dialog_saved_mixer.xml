@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_mixer_panel"
+    android:fillViewport="true"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Header: icon, title, count badge -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <FrameLayout
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:background="@drawable/bg_icon_container">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="Saved mixers"
+                    android:src="@drawable/ic_queue_music"
+                    app:tint="@color/accent_primary" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:text="Saved Mixers"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:id="@+id/savedMixerCountText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_icon_container"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="4dp"
+                android:text="0 saved"
+                android:textSize="12sp"
+                android:letterSpacing="0.08"
+                android:textColor="@color/text_tertiary" />
+        </LinearLayout>
+
+        <!-- Empty state -->
+        <LinearLayout
+            android:id="@+id/savedMixerEmptyState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="12dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:visibility="gone">
+
+            <FrameLayout
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:background="@drawable/bg_icon_container">
+
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_gravity="center"
+                    android:contentDescription="No saved mixers"
+                    android:src="@drawable/ic_mixer_off"
+                    app:tint="@color/text_tertiary" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:text="No saved mixers yet"
+                android:textStyle="bold"
+                android:textSize="15sp"
+                android:textColor="@color/text_primary" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text="Mix two tracks in the Mixer panel, then save the setup here for one-tap playback."
+                android:textSize="12.5sp"
+                android:lineSpacingExtra="3dp"
+                android:textColor="@color/text_tertiary" />
+        </LinearLayout>
+
+        <!-- Preset cards -->
+        <LinearLayout
+            android:id="@+id/savedMixerList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="12dp"
+            android:background="@color/divider" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/savedMixerSaveButton"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            app:icon="@drawable/ic_add"
+            app:iconGravity="textStart"
+            android:text="Save Current Mix" />
+
+    </LinearLayout>
+</ScrollView>

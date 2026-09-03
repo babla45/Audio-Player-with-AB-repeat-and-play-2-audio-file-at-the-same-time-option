@@ -45,8 +45,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.app.Dialog;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.FrameLayout;
 import android.widget.PopupMenu;
 import android.widget.SeekBar;
 import android.widget.Switch;
@@ -100,6 +102,8 @@ import android.widget.ScrollView;
 import android.widget.HorizontalScrollView;
 import android.view.Window;
 import android.view.WindowManager;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -2669,7 +2673,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void showMixerOptionsDialog() {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_mixer_options, null);
-
         SwitchCompat mixerModeSwitch = dialogView.findViewById(R.id.mixerModeSwitch);
         TextView mixerStatusText = dialogView.findViewById(R.id.mixerStatusText);
         TextView mixerSecondTrackText = dialogView.findViewById(R.id.mixerSecondTrackText);
@@ -2722,10 +2725,9 @@ public class MainActivity extends AppCompatActivity {
 
         updateUiState.run();
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setView(dialogView)
-                .setNegativeButton("Close", null)
-                .create();
+        // Fullscreen window with a blurred screenshot behind the panel
+        Dialog dialog = showBlurredPanelDialog(dialogView,
+                Gravity.END | Gravity.BOTTOM, 0.82f);
 
         mixerModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isChecked != mixerModeActive) {
@@ -2786,18 +2788,175 @@ public class MainActivity extends AppCompatActivity {
 
         savedMixerButton.setOnClickListener(v -> showSavedMixerDialog());
 
-        dialog.show();
-        dialog.setCanceledOnTouchOutside(true);
-        dialog.setCancelable(true);
+        // The blurred-panel helper handles the window setup (fullscreen, transparent,
+        // tap-outside-to-close); nothing else to configure here.
+    }
+
+    /**
+     * Shows a panel over a blurred snapshot of the current screen (used by the
+     * Mixer and Saved Mixer windows). The dialog window is fullscreen and
+     * transparent; a blurred screenshot of the app plus a light scrim fill it,
+     * and the panel content is placed on top. Tapping the blurred area or
+     * pressing back dismisses the dialog. Falls back to a plain dark scrim if
+     * the screenshot can't be captured.
+     *
+     * @param panelGravity  where the panel sits inside the blurred backdrop
+     * @param widthFraction 0..1 — share of the screen width the panel uses
+     *                      (values >= 0.99 mean match parent with side margins)
+     */
+    private Dialog showBlurredPanelDialog(View content, int panelGravity, float widthFraction) {
+        FrameLayout root = new FrameLayout(this);
+
+        Bitmap blur = createBlurredBackground();
+        ImageView blurredView = null;
+        if (blur != null) {
+            blurredView = new ImageView(this);
+            blurredView.setImageBitmap(blur);
+            blurredView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            root.addView(blurredView, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        }
+
+        // Light scrim so the panel pops off the blur; doubles as the fallback
+        // backdrop when no screenshot could be captured
+        View scrim = new View(this);
+        scrim.setBackgroundColor(blur != null ? 0x40000000 : 0xB3000000);
+        root.addView(scrim, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        FrameLayout.LayoutParams cardLp;
+        if (widthFraction >= 0.99f) {
+            int margin = (int) (16 * getResources().getDisplayMetrics().density);
+            cardLp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    panelGravity);
+            cardLp.setMargins(margin, margin, margin, margin);
+        } else {
+            int width = (int) (getResources().getDisplayMetrics().widthPixels * widthFraction);
+            cardLp = new FrameLayout.LayoutParams(width,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, panelGravity);
+        }
+        // Consume taps on the panel itself so they never fall through to the scrim
+        content.setClickable(true);
+        root.addView(content, cardLp);
+
+        Dialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .create();
+
         Window window = dialog.getWindow();
         if (window != null) {
-            window.setBackgroundDrawable(new ColorDrawable(android.graphics.Color.TRANSPARENT));
-            WindowManager.LayoutParams params = window.getAttributes();
-            params.gravity = Gravity.END | Gravity.BOTTOM;
-            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.82f);
-            params.height = WindowManager.LayoutParams.WRAP_CONTENT;
-            window.setAttributes(params);
+            // Transparent + no system dim before show, so the blank alert layout
+            // never flashes; our own scrim darkens the backdrop instead
+            window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
         }
+        dialog.show();
+
+        // AlertDialog reinstalls its own (blank) content during show(), so our
+        // content only sticks if it is set AFTERWARDS
+        dialog.setContentView(root);
+
+        if (window != null) {
+            // Must be set after show() to take effect
+            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+        }
+
+        View.OnClickListener dismiss = v -> dialog.dismiss();
+        if (blurredView != null) {
+            blurredView.setOnClickListener(dismiss);
+        }
+        scrim.setOnClickListener(dismiss);
+        return dialog;
+    }
+
+    /**
+     * Captures the activity's content, downsamples it and blurs it for use as a
+     * dialog backdrop. Returns null if the capture fails; callers fall back to
+     * a plain dim layer.
+     */
+    private Bitmap createBlurredBackground() {
+        try {
+            View decor = getWindow().getDecorView();
+            if (decor == null || decor.getWidth() == 0 || decor.getHeight() == 0) {
+                return null;
+            }
+
+            Bitmap shot = Bitmap.createBitmap(decor.getWidth(), decor.getHeight(),
+                    Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(shot);
+            decor.draw(canvas);
+
+            // Downsample heavily first: the blur runs on the small image (fast)
+            // and gets stretched back up to full size (which smooths it further)
+            float scale = 0.15f;
+            int dw = Math.max(1, (int) (shot.getWidth() * scale));
+            int dh = Math.max(1, (int) (shot.getHeight() * scale));
+            Bitmap small = Bitmap.createScaledBitmap(shot, dw, dh, true);
+            shot.recycle();
+
+            Bitmap blurred = boxBlurBitmap(small, 4);
+            small.recycle();
+            return blurred;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to create blurred background", e);
+            return null;
+        }
+    }
+
+    /** Blurs a small bitmap with three box-blur passes — approximates a gaussian. */
+    private Bitmap boxBlurBitmap(Bitmap src, int radius) {
+        int w = src.getWidth();
+        int h = src.getHeight();
+        int[] pixels = new int[w * h];
+        src.getPixels(pixels, 0, w, 0, 0, w, h);
+
+        for (int pass = 0; pass < 3; pass++) {
+            pixels = boxBlurAxis(pixels, w, h, radius, true);
+            pixels = boxBlurAxis(pixels, w, h, radius, false);
+        }
+
+        Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        out.setPixels(pixels, 0, w, 0, 0, w, h);
+        return out;
+    }
+
+    /** One sliding-window box blur pass over one axis (horizontal or vertical). */
+    private int[] boxBlurAxis(int[] pix, int w, int h, int r, boolean horizontal) {
+        int[] out = new int[pix.length];
+        int outer = horizontal ? h : w;
+        int inner = horizontal ? w : h;
+        int step = horizontal ? 1 : w;
+
+        for (int o = 0; o < outer; o++) {
+            int base = horizontal ? o * w : o;
+            int sumR = 0, sumG = 0, sumB = 0;
+            int div = 2 * r + 1;
+
+            // Initial window [-r .. r], clamped at the edges
+            for (int i = -r; i <= r; i++) {
+                int p = pix[base + clampIndex(i, 0, inner - 1) * step];
+                sumR += (p >> 16) & 0xFF;
+                sumG += (p >> 8) & 0xFF;
+                sumB += p & 0xFF;
+            }
+
+            for (int i = 0; i < inner; i++) {
+                out[base + i * step] = 0xFF000000
+                        | ((sumR / div) << 16) | ((sumG / div) << 8) | (sumB / div);
+                int leaving = pix[base + clampIndex(i - r, 0, inner - 1) * step];
+                int entering = pix[base + clampIndex(i + r + 1, 0, inner - 1) * step];
+                sumR += ((entering >> 16) & 0xFF) - ((leaving >> 16) & 0xFF);
+                sumG += ((entering >> 8) & 0xFF) - ((leaving >> 8) & 0xFF);
+                sumB += (entering & 0xFF) - (leaving & 0xFF);
+            }
+        }
+        return out;
+    }
+
+    private int clampIndex(int value, int min, int max) {
+        return value < min ? min : Math.min(value, max);
     }
 
     private void showEqualizerPanel() {
@@ -6462,18 +6621,6 @@ public class MainActivity extends AppCompatActivity {
             if (secondMediaPlayer != null && secondAudioActive) {
                 syncSecondPlayerPosition();
 
-                // Show toast with track info
-                String primaryFile = getFileNameFromUri(selectedAudioUri);
-                String secondaryFile = getFileNameFromUri(secondAudioUri);
-                if (primaryFile.length() > 20) primaryFile = primaryFile.substring(0, 17) + "...";
-                if (secondaryFile.length() > 20) secondaryFile = secondaryFile.substring(0, 17) + "...";
-
-                String direction = offsetMs > 0 ? "forward" : "backward";
-                int seconds = Math.abs(offsetMs) / 1000;
-
-                Toast.makeText(this, String.format("Seeking %s %ds\n▶ %s\n▶ %s",
-                                direction, seconds, primaryFile, secondaryFile),
-                        Toast.LENGTH_SHORT).show();
             }
         } catch (IllegalStateException e) {
             Log.e(TAG, "Error during seek operation", e);
@@ -7721,6 +7868,18 @@ public class MainActivity extends AppCompatActivity {
         if (firstVolumeLabel != null) firstVolumeLabel.setText(firstAudioSeekBar.getProgress() + "%");
         if (secondVolumeLabel != null) secondVolumeLabel.setText(secondAudioSeekBar.getProgress() + "%");
 
+        // Show each track's name under its label ("..." when it doesn't fit)
+        TextView firstTitleText = dialogView.findViewById(R.id.firstAudioTitleText);
+        TextView secondTitleText = dialogView.findViewById(R.id.secondAudioTitleText);
+        if (firstTitleText != null) {
+            firstTitleText.setText(selectedAudioUri != null
+                    ? getFileNameFromUri(selectedAudioUri) : "Primary track");
+        }
+        if (secondTitleText != null) {
+            secondTitleText.setText(secondAudioUri != null
+                    ? getFileNameFromUri(secondAudioUri) : "Secondary track");
+        }
+
         // Create method to apply volume immediately
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Audio Balance")
@@ -7800,51 +7959,46 @@ public class MainActivity extends AppCompatActivity {
 
     private void showSavedMixerDialog() {
         List<SavedMixerPreset> presets = loadSavedMixerPresets();
-        int padding = (int) (16 * getResources().getDisplayMetrics().density);
-        int itemPadding = (int) (12 * getResources().getDisplayMetrics().density);
 
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setPadding(padding, padding, padding, padding);
-        scrollView.addView(container);
+        View content = getLayoutInflater().inflate(R.layout.dialog_saved_mixer, null);
+        LinearLayout listContainer = content.findViewById(R.id.savedMixerList);
+        View emptyState = content.findViewById(R.id.savedMixerEmptyState);
+        TextView countText = content.findViewById(R.id.savedMixerCountText);
+
+        // Fullscreen window with a blurred screenshot behind the panel
+        Dialog dialog = showBlurredPanelDialog(content, Gravity.CENTER, 1.0f);
+
+        // Reopen the dialog so the list reflects a save/delete
+        Runnable refreshDialog = () -> {
+            dialog.dismiss();
+            showSavedMixerDialog();
+        };
 
         if (presets.isEmpty()) {
-            TextView emptyText = new TextView(this);
-            emptyText.setText("No saved mixers yet.");
-            emptyText.setTextSize(14f);
-            emptyText.setTextColor(getResources().getColor(R.color.text_secondary, null));
-            container.addView(emptyText);
+            emptyState.setVisibility(View.VISIBLE);
+            countText.setText("0 saved");
         } else {
+            emptyState.setVisibility(View.GONE);
+            countText.setText(presets.size() + " saved");
             for (int i = 0; i < presets.size(); i++) {
                 SavedMixerPreset preset = presets.get(i);
-                View item = createSavedMixerItemView(preset, itemPadding, i + 1);
-                container.addView(item);
+                listContainer.addView(createSavedMixerItemView(preset, i + 1, dialog, refreshDialog));
             }
         }
 
-        new AlertDialog.Builder(this)
-                .setTitle("Saved Mixer")
-                .setView(scrollView)
-                .setPositiveButton("Save New Mixer", (dialog, which) -> promptSaveCurrentMix())
-                .setNegativeButton("Close", null)
-                .show();
+        content.findViewById(R.id.savedMixerSaveButton).setOnClickListener(v ->
+                promptSaveCurrentMix(refreshDialog));
     }
 
-    private View createSavedMixerItemView(SavedMixerPreset preset, int itemPadding, int index) {
-        LinearLayout itemLayout = new LinearLayout(this);
-        itemLayout.setOrientation(LinearLayout.VERTICAL);
-        itemLayout.setPadding(itemPadding, itemPadding, itemPadding, itemPadding);
-        itemLayout.setBackgroundResource(R.drawable.bg_saved_mixer_item);
-        itemLayout.setMinimumHeight((int) (76 * getResources().getDisplayMetrics().density));
-
-        LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(
+    private View createSavedMixerItemView(SavedMixerPreset preset, int index, Dialog hostDialog,
+                                          Runnable refreshDialog) {
+        View item = getLayoutInflater().inflate(R.layout.item_saved_mixer, null);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        int bottomMargin = (int) (10 * getResources().getDisplayMetrics().density);
-        itemParams.bottomMargin = bottomMargin;
-        itemLayout.setLayoutParams(itemParams);
+        params.bottomMargin = (int) (10 * getResources().getDisplayMetrics().density);
+        item.setLayoutParams(params);
 
         String firstSongName = "Unknown primary track";
         String secondSongName = "Unknown secondary track";
@@ -7859,55 +8013,68 @@ public class MainActivity extends AppCompatActivity {
             Log.e(TAG, "Failed to parse saved mixer track uri", e);
         }
 
-        TextView indexView = new TextView(this);
-        indexView.setText("Mixer " + index);
-        indexView.setSingleLine(true);
-        indexView.setTextSize(11.5f);
-        indexView.setTextColor(getResources().getColor(R.color.accent_primary, null));
-        LinearLayout.LayoutParams indexParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-        indexParams.bottomMargin = (int) (4 * getResources().getDisplayMetrics().density);
-        indexView.setLayoutParams(indexParams);
-        itemLayout.addView(indexView);
+        TextView nameView = item.findViewById(R.id.savedMixerName);
+        TextView track1View = item.findViewById(R.id.savedMixerTrack1);
+        TextView track2View = item.findViewById(R.id.savedMixerTrack2);
+        TextView metaView = item.findViewById(R.id.savedMixerMeta);
 
-        TextView firstLine = new TextView(this);
-        firstLine.setText(firstSongName);
-        firstLine.setSingleLine(true);
-        firstLine.setEllipsize(TextUtils.TruncateAt.END);
-        firstLine.setTextSize(15.5f);
-        firstLine.setTextColor(getResources().getColor(R.color.text_primary, null));
-        firstLine.setTypeface(firstLine.getTypeface(), android.graphics.Typeface.BOLD);
-        itemLayout.addView(firstLine);
+        nameView.setText(preset.name != null && !preset.name.trim().isEmpty()
+                ? preset.name : "Mixer " + index);
+        track1View.setText(firstSongName);
+        track2View.setText(secondSongName);
 
-        View divider = new View(this);
-        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                (int) (1 * getResources().getDisplayMetrics().density)
-        );
-        dividerParams.topMargin = (int) (6 * getResources().getDisplayMetrics().density);
-        dividerParams.bottomMargin = (int) (6 * getResources().getDisplayMetrics().density);
-        divider.setLayoutParams(dividerParams);
-        divider.setBackgroundColor(getResources().getColor(R.color.divider, null));
-        itemLayout.addView(divider);
+        // Balance + speed summary line, e.g. "50% · 50%  •  1.00x"
+        String volumes = Math.round(preset.firstVolume * 100) + "% · "
+                + Math.round(preset.secondVolume * 100) + "%";
+        String speed = preset.useIndividualSpeeds
+                ? String.format(Locale.US, "%.2fx / %.2fx", preset.primarySpeed, preset.secondarySpeed)
+                : String.format(Locale.US, "%.2fx", preset.globalSpeed);
+        metaView.setText(volumes + "  •  " + speed);
 
-        TextView secondLine = new TextView(this);
-        secondLine.setText(secondSongName);
-        secondLine.setSingleLine(true);
-        secondLine.setEllipsize(TextUtils.TruncateAt.END);
-        secondLine.setTextSize(14f);
-        secondLine.setTextColor(getResources().getColor(R.color.text_secondary, null));
-        itemLayout.addView(secondLine);
+        // Tap anywhere on the card to play the mix, then close the list.
+        // The delete button consumes its own tap, so it never triggers playback.
+        item.setOnClickListener(v -> {
+            applySavedMixerPreset(preset);
+            hostDialog.dismiss();
+        });
+        item.findViewById(R.id.savedMixerDelete).setOnClickListener(v ->
+                confirmDeleteMixerPreset(preset, refreshDialog));
 
-        itemLayout.setClickable(true);
-        itemLayout.setFocusable(true);
-        itemLayout.setOnClickListener(v -> applySavedMixerPreset(preset));
+        return item;
+    }
 
-        return itemLayout;
+    /** Asks for confirmation, removes the preset, then refreshes the Saved Mixer list. */
+    private void confirmDeleteMixerPreset(SavedMixerPreset preset, Runnable refreshDialog) {
+        String name = preset.name != null && !preset.name.trim().isEmpty()
+                ? preset.name : "this mixer";
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("Delete mixer?")
+                .setMessage("Delete \"" + name + "\"? This cannot be undone.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    deleteSavedMixerPreset(preset);
+                    if (refreshDialog != null) {
+                        refreshDialog.run();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Removes a preset from storage, matching on name and both track URIs. */
+    private void deleteSavedMixerPreset(SavedMixerPreset preset) {
+        List<SavedMixerPreset> presets = loadSavedMixerPresets();
+        presets.removeIf(p -> TextUtils.equals(p.name, preset.name)
+                && TextUtils.equals(p.primaryUri, preset.primaryUri)
+                && TextUtils.equals(p.secondaryUri, preset.secondaryUri));
+        persistSavedMixerPresets(presets);
+        Toast.makeText(this, "Mixer deleted", Toast.LENGTH_SHORT).show();
     }
 
     private void promptSaveCurrentMix() {
+        promptSaveCurrentMix(null);
+    }
+
+    private void promptSaveCurrentMix(Runnable onSaved) {
         if (selectedAudioUri == null || secondAudioUri == null) {
             Toast.makeText(this, "Select primary and second audio first", Toast.LENGTH_SHORT).show();
             return;
@@ -7917,19 +8084,26 @@ public class MainActivity extends AppCompatActivity {
         String secondaryName = getFileNameFromUri(secondAudioUri);
         String defaultName = "Mix: " + primaryName + " + " + secondaryName;
 
-        EditText input = new EditText(this);
+        View content = getLayoutInflater().inflate(R.layout.dialog_save_mixer, null);
+        com.google.android.material.textfield.TextInputEditText input =
+                content.findViewById(R.id.saveMixerNameInput);
         input.setText(defaultName);
-        input.setSelection(defaultName.length());
+        // Select based on the field's actual length — the text may be shorter
+        // than the default name if anything filtered it
+        input.setSelection(input.getText().length());
 
-        new AlertDialog.Builder(this)
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                 .setTitle("Save Mixer")
-                .setView(input)
+                .setView(content)
                 .setPositiveButton("Save", (dialog, which) -> {
                     String name = input.getText() != null ? input.getText().toString().trim() : "";
                     if (TextUtils.isEmpty(name)) {
                         name = defaultName;
                     }
                     saveCurrentMixerPreset(name);
+                    if (onSaved != null) {
+                        onSaved.run();
+                    }
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -8006,7 +8180,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         updateMixerIndicator();
-        Toast.makeText(this, "Playing saved mixer: " + preset.name, Toast.LENGTH_SHORT).show();
+        
     }
 
     private List<SavedMixerPreset> loadSavedMixerPresets() {
