@@ -1,5 +1,6 @@
 package com.example.aud_player;
 
+import android.app.Dialog;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -10,7 +11,11 @@ import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.widget.SwitchCompat;
+import androidx.core.widget.NestedScrollView;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.google.android.material.chip.Chip;
 
@@ -27,6 +32,26 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         int getCurrentBass();
         void onReverbChanged(int level);
         int getCurrentReverb();
+        void onTrebleChanged(int strength);
+        int getCurrentTreble();
+        void onVocalClarityChanged(int strength);
+        int getCurrentVocalClarity();
+        void onEchoChanged(int level);
+        int getCurrentEcho();
+        void onDistortionChanged(int strength);
+        int getCurrentDistortion();
+        void onVibratoChanged(int depth);
+        int getCurrentVibrato();
+        void onVolumeBoostChanged(float boost);
+        float getCurrentVolumeBoost();
+        void onVoiceDepthChanged(int strength);
+        int getCurrentVoiceDepth();
+        void onRobotToggled(boolean enabled);
+        boolean isRobotEnabled();
+        void onNoiseReductionToggled(boolean enabled);
+        boolean isNoiseReductionEnabled();
+        void onAutoTuneToggled(boolean enabled);
+        boolean isAutoTuneEnabled();
         void onEqPresetSelected(String presetName);
     }
 
@@ -159,6 +184,126 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 }
         );
 
+        setupSignedPercentSlider(
+                view.findViewById(R.id.treble_slider_row),
+                getString(R.string.voice_treble),
+                listener != null ? listener.getCurrentTreble() : 0,
+                value -> {
+                    if (listener != null) {
+                        listener.onTrebleChanged(value);
+                    }
+                }
+        );
+
+        setupPercentSlider(
+                view.findViewById(R.id.clarity_slider_row),
+                getString(R.string.voice_clarity),
+                listener != null ? listener.getCurrentVocalClarity() : 0,
+                0,
+                value -> {
+                    if (listener != null) {
+                        listener.onVocalClarityChanged(value);
+                    }
+                }
+        );
+
+        setupPercentSlider(
+                view.findViewById(R.id.echo_slider_row),
+                getString(R.string.voice_echo),
+                listener != null ? listener.getCurrentEcho() : 0,
+                0,
+                value -> {
+                    if (listener != null) {
+                        listener.onEchoChanged(value);
+                    }
+                }
+        );
+
+        setupPercentSlider(
+                view.findViewById(R.id.distortion_slider_row),
+                getString(R.string.voice_distortion),
+                listener != null ? listener.getCurrentDistortion() : 0,
+                0,
+                value -> {
+                    if (listener != null) {
+                        listener.onDistortionChanged(value);
+                    }
+                }
+        );
+
+        setupPercentSlider(
+                view.findViewById(R.id.vibrato_slider_row),
+                getString(R.string.voice_vibrato),
+                listener != null ? listener.getCurrentVibrato() : 0,
+                0,
+                value -> {
+                    if (listener != null) {
+                        listener.onVibratoChanged(value);
+                    }
+                }
+        );
+
+        setupFactorSlider(
+                view.findViewById(R.id.volume_boost_slider_row),
+                getString(R.string.voice_volume_boost),
+                "1.00x",
+                "3.00x",
+                100,
+                300,
+                listener != null ? listener.getCurrentVolumeBoost() : 1.0f,
+                1.0f,
+                value -> {
+                    if (listener != null) {
+                        listener.onVolumeBoostChanged(value);
+                    }
+                },
+                value -> String.format("%.2fx", value)
+        );
+
+        setupSignedPercentSlider(
+                view.findViewById(R.id.depth_slider_row),
+                getString(R.string.voice_depth),
+                listener != null ? listener.getCurrentVoiceDepth() : 0,
+                value -> {
+                    if (listener != null) {
+                        listener.onVoiceDepthChanged(value);
+                    }
+                }
+        );
+
+        setupToggle(
+                view.findViewById(R.id.robot_toggle_row),
+                getString(R.string.voice_robot),
+                listener != null && listener.isRobotEnabled(),
+                value -> {
+                    if (listener != null) {
+                        listener.onRobotToggled(value);
+                    }
+                }
+        );
+
+        setupToggle(
+                view.findViewById(R.id.noise_reduction_toggle_row),
+                getString(R.string.voice_noise_reduction),
+                listener != null && listener.isNoiseReductionEnabled(),
+                value -> {
+                    if (listener != null) {
+                        listener.onNoiseReductionToggled(value);
+                    }
+                }
+        );
+
+        setupToggle(
+                view.findViewById(R.id.autotune_toggle_row),
+                getString(R.string.voice_autotune),
+                listener != null && listener.isAutoTuneEnabled(),
+                value -> {
+                    if (listener != null) {
+                        listener.onAutoTuneToggled(value);
+                    }
+                }
+        );
+
         TextView pitchValue = view.findViewById(R.id.pitch_slider_row).findViewById(R.id.voice_slider_value);
         setupChip(view, R.id.pitch_chip_025, 0.25f, pitchSeekBar, pitchValue);
         setupChip(view, R.id.pitch_chip_050, 0.5f, pitchSeekBar, pitchValue);
@@ -186,9 +331,20 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                     listener.onSpeedChanged(defaults.speed);
                     listener.onBassChanged(defaults.bass);
                     listener.onReverbChanged(defaults.reverb);
+                    listener.onTrebleChanged(0);
+                    listener.onVocalClarityChanged(0);
+                    listener.onEchoChanged(0);
+                    listener.onDistortionChanged(0);
+                    listener.onVibratoChanged(0);
+                    listener.onVolumeBoostChanged(1.0f);
+                    listener.onVoiceDepthChanged(0);
+                    listener.onRobotToggled(false);
+                    listener.onNoiseReductionToggled(false);
+                    listener.onAutoTuneToggled(false);
                     listener.onEqPresetSelected("None");
                 }
                 syncVoiceSliders(view, defaults);
+                syncNewVoiceSliders(view);
                 clearChipSelection(view, R.id.voice_preset_row);
                 clearChipSelection(view, R.id.eq_preset_row);
             });
@@ -289,13 +445,16 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             min = 0;
         }
         max = seekBar.getMax();
-        if (max >= 100) {
-            progress = Math.round(value * 100f);
-        } else {
+        // Percent rows (Bass/Reverb) use min=0 and max=1000 with the value already
+        // in per-mille units; factor rows (Pitch/Formant/Speed) use min>0 with 100 per unit.
+        boolean isPercentRow = min == 0 && max >= 1000;
+        if (isPercentRow) {
             progress = (int) value;
+        } else {
+            progress = Math.round(value * 100f);
         }
         seekBar.setProgress(Math.max(min, Math.min(max, progress)));
-        valueView.setText(max >= 100 ? String.format("%.2fx", value) : formatPercent((int) value));
+        valueView.setText(isPercentRow ? formatPercent((int) value) : String.format("%.2fx", value));
     }
 
     private void highlightSelectedChip(LinearLayout presetRow, Chip selected) {
@@ -317,6 +476,26 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
 
     private interface IntValueListener {
         void onValueChanged(int value);
+    }
+
+    private interface BoolValueListener {
+        void onValueChanged(boolean value);
+    }
+
+    private void setupToggle(View row, String label, boolean checked, BoolValueListener changeListener) {
+        if (row == null) {
+            return;
+        }
+        TextView labelView = row.findViewById(R.id.voice_toggle_label);
+        SwitchCompat toggle = row.findViewById(R.id.voice_toggle_switch);
+        if (labelView != null) {
+            labelView.setText(label);
+        }
+        if (toggle != null) {
+            toggle.setChecked(checked);
+            toggle.setOnCheckedChangeListener((buttonView, isChecked) ->
+                    changeListener.onValueChanged(isChecked));
+        }
     }
 
     private SeekBar setupFactorSlider(
@@ -434,6 +613,140 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         return Math.round(strength / 10f) + "%";
     }
 
+    /**
+     * Slider for effects with a signed range (-100%..+100%). Internally the value is
+     * stored in per-mille units (-1000..1000, matching the 0..1000 percent sliders);
+     * the seek bar maps 0..2000 with 1000 as the neutral center.
+     */
+    private void setupSignedPercentSlider(
+            View row,
+            String label,
+            int currentValue,
+            IntValueListener changeListener) {
+
+        TextView labelView = row.findViewById(R.id.voice_slider_label);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        TextView minView = row.findViewById(R.id.voice_slider_min);
+        TextView maxView = row.findViewById(R.id.voice_slider_max);
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+
+        labelView.setText(label);
+        minView.setText("-100%");
+        maxView.setText("+100%");
+        int clamped = Math.max(-1000, Math.min(1000, currentValue));
+        valueView.setText(formatSignedPercent(clamped));
+        seekBar.setMin(0);
+        seekBar.setMax(2000);
+        seekBar.setProgress(clamped + 1000);
+
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int value = progress - 1000;
+                valueView.setText(formatSignedPercent(value));
+                if (fromUser) {
+                    changeListener.onValueChanged(value);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+                changeListener.onValueChanged(bar.getProgress() - 1000);
+            }
+        });
+
+        View resetButton = row.findViewById(R.id.voice_slider_reset);
+        if (resetButton != null) {
+            resetButton.setOnClickListener(v -> {
+                seekBar.setProgress(1000);
+                valueView.setText(formatSignedPercent(0));
+                changeListener.onValueChanged(0);
+            });
+        }
+    }
+
+    private String formatSignedPercent(int strength) {
+        int percent = Math.round(strength / 10f);
+        if (percent == 0) {
+            return "0%";
+        }
+        return (percent > 0 ? "+" : "") + percent + "%";
+    }
+
+    /** Updates the extra voice sliders (treble/clarity/echo/distortion/vibrato/depth/boost) to defaults. */
+    private void syncNewVoiceSliders(View view) {
+        syncPercentSliderRow(view, R.id.clarity_slider_row, 0);
+        syncPercentSliderRow(view, R.id.echo_slider_row, 0);
+        syncPercentSliderRow(view, R.id.distortion_slider_row, 0);
+        syncPercentSliderRow(view, R.id.vibrato_slider_row, 0);
+        syncSignedSliderRow(view, R.id.treble_slider_row, 0);
+        syncSignedSliderRow(view, R.id.depth_slider_row, 0);
+        syncFactorSliderRow(view, R.id.volume_boost_slider_row, 1.0f);
+        setToggleChecked(view, R.id.robot_toggle_row, false);
+        setToggleChecked(view, R.id.noise_reduction_toggle_row, false);
+        setToggleChecked(view, R.id.autotune_toggle_row, false);
+    }
+
+    private void syncSignedSliderRow(View view, int rowId, int value) {
+        View row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        if (seekBar != null) {
+            seekBar.setProgress(Math.max(0, Math.min(2000, value + 1000)));
+        }
+        if (valueView != null) {
+            valueView.setText(formatSignedPercent(value));
+        }
+    }
+
+    private void syncFactorSliderRow(View view, int rowId, float value) {
+        View row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        if (seekBar != null) {
+            seekBar.setProgress(Math.max(100, Math.min(300, Math.round(value * 100f))));
+        }
+        if (valueView != null) {
+            valueView.setText(String.format("%.2fx", value));
+        }
+    }
+
+    private void setToggleChecked(View view, int rowId, boolean checked) {
+        View row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        SwitchCompat toggle = row.findViewById(R.id.voice_toggle_switch);
+        if (toggle != null) {
+            toggle.setChecked(checked);
+        }
+    }
+
+    private void syncPercentSliderRow(View view, int rowId, int value) {
+        View row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        if (seekBar != null) {
+            seekBar.setProgress(Math.max(0, Math.min(1000, value)));
+        }
+        if (valueView != null) {
+            valueView.setText(formatPercent(value));
+        }
+    }
+
+
     private void setupChip(View root, int chipId, float pitch, SeekBar seekBar, TextView display) {
         Chip chip = root.findViewById(chipId);
         if (chip == null) {
@@ -452,5 +765,37 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     @Override
     public int getTheme() {
         return com.google.android.material.R.style.Theme_Material3_Dark_BottomSheetDialog;
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Dialog dialog = getDialog();
+        if (!(dialog instanceof BottomSheetDialog)) {
+            return;
+        }
+        BottomSheetBehavior<?> behavior = ((BottomSheetDialog) dialog).getBehavior();
+        behavior.addBottomSheetCallback(new BottomSheetBehavior.BottomSheetCallback() {
+            @Override
+            public void onStateChanged(@NonNull View bottomSheet, int newState) {
+                if (newState != BottomSheetBehavior.STATE_COLLAPSED
+                        && newState != BottomSheetBehavior.STATE_HALF_EXPANDED) {
+                    return;
+                }
+                // The sheet was slid back down: scroll the content back to the top
+                // so the upper controls (Pitch slider, chips) are visible again.
+                View root = getView();
+                if (root == null) {
+                    return;
+                }
+                View scroll = root.findViewById(R.id.voice_controls_scroll);
+                if (scroll instanceof NestedScrollView) {
+                    scroll.post(() -> ((NestedScrollView) scroll).smoothScrollTo(0, 0));
+                }
+            }
+
+            @Override
+            public void onSlide(@NonNull View bottomSheet, float slideOffset) {}
+        });
     }
 }

@@ -41,7 +41,11 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <ScrollView
+    <!-- NestedScrollView (not plain ScrollView) so the bottom sheet's drag
+         gestures coordinate with the inner content scroll: dragging up expands
+         the sheet, dragging down at the top of the content collapses it. -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/voice_controls_scroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:fillViewport="true"
@@ -179,6 +183,56 @@
                 android:id="@+id/reverb_slider_row"
                 layout="@layout/item_voice_slider" />
 
+            <!-- Treble -->
+            <include
+                android:id="@+id/treble_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Vocal Clarity -->
+            <include
+                android:id="@+id/clarity_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Echo -->
+            <include
+                android:id="@+id/echo_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Distortion -->
+            <include
+                android:id="@+id/distortion_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Vibrato -->
+            <include
+                android:id="@+id/vibrato_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Volume Boost -->
+            <include
+                android:id="@+id/volume_boost_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Voice Depth -->
+            <include
+                android:id="@+id/depth_slider_row"
+                layout="@layout/item_voice_slider" />
+
+            <!-- Robot -->
+            <include
+                android:id="@+id/robot_toggle_row"
+                layout="@layout/item_voice_toggle" />
+
+            <!-- Noise Reduction -->
+            <include
+                android:id="@+id/noise_reduction_toggle_row"
+                layout="@layout/item_voice_toggle" />
+
+            <!-- Auto-tune -->
+            <include
+                android:id="@+id/autotune_toggle_row"
+                layout="@layout/item_voice_toggle" />
+
             <!-- Voice presets -->
             <TextView
                 android:layout_width="match_parent"
@@ -248,5 +302,5 @@
                 android:textColor="@color/text_primary" />
 
         </LinearLayout>
-    </ScrollView>
+    </androidx.core.widget.NestedScrollView>
 </LinearLayout>

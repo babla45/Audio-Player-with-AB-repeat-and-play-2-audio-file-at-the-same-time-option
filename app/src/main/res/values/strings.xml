@@ -110,6 +110,16 @@
     <string name="voice_speed">Speed</string>
     <string name="voice_bass">Bass</string>
     <string name="voice_reverb">Reverb</string>
+    <string name="voice_treble">Treble</string>
+    <string name="voice_clarity">Vocal Clarity</string>
+    <string name="voice_echo">Echo</string>
+    <string name="voice_distortion">Distortion</string>
+    <string name="voice_vibrato">Vibrato</string>
+    <string name="voice_volume_boost">Volume Boost</string>
+    <string name="voice_depth">Voice Depth</string>
+    <string name="voice_robot">Robot (Synthetic Voice)</string>
+    <string name="voice_noise_reduction">Noise Reduction</string>
+    <string name="voice_autotune">Auto-tune (Snap Pitch)</string>
     <string name="seek_time_settings">Set Seek Time</string>
     <string name="seek_forward_seconds">Forward Seek Time (seconds)</string>
     <string name="seek_backward_seconds">Backward Seek Time (seconds)</string>
