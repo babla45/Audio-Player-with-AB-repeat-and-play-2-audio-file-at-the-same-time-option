@@ -48,8 +48,10 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onBrowseClicked();
         void onMixerToggleClicked();
         void onResetClicked();
+        void onViewToggleClicked();
         boolean hasSongSelected();
         boolean isMixerEnabled();
+        boolean isFolderViewEnabled();
         float getCurrentSpeed();
         int getCurrentPlaybackMode();
     }
@@ -150,6 +152,11 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
+        view.findViewById(R.id.menu_view_toggle_btn).setOnClickListener(v -> {
+            if (listener != null) listener.onViewToggleClicked();
+            dismiss();
+        });
+
         View addToPlaylistButton = view.findViewById(R.id.menu_add_to_playlist_btn);
         boolean canAddToPlaylist = listener != null && listener.hasSongSelected();
         addToPlaylistButton.setEnabled(canAddToPlaylist);
@@ -178,6 +185,13 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             boolean mixerEnabled = listener.isMixerEnabled();
             mixerToggleLabel.setText(mixerEnabled ? "Mixer On" : "Mixer Off");
             mixerToggleIcon.setImageResource(mixerEnabled ? R.drawable.ic_mixer_on : R.drawable.ic_mixer_off);
+
+            // Folder / list view toggle state
+            TextView viewToggleLabel = view.findViewById(R.id.menu_view_toggle_label);
+            ImageView viewToggleIcon = view.findViewById(R.id.menu_view_toggle_icon);
+            boolean folderView = listener.isFolderViewEnabled();
+            viewToggleLabel.setText(folderView ? "List View" : "Folders");
+            viewToggleIcon.setImageResource(folderView ? R.drawable.ic_list : R.drawable.ic_folder);
         }
 
         normalizeMenuGridAppearance(view);
@@ -265,7 +279,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 R.id.menu_exit_btn,
                 R.id.menu_browse_btn,
                 R.id.menu_mixer_toggle_btn,
-                R.id.menu_reset_btn
+                R.id.menu_reset_btn,
+                R.id.menu_view_toggle_btn
         };
 
         for (int tileId : tileIds) {
@@ -416,7 +431,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             if (root == null) return;
             SharedPreferences prefs = root.getContext().getSharedPreferences("audio_player_prefs", Context.MODE_PRIVATE);
             List<String> names = new ArrayList<>();
-            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4 };
+            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4, R.id.menu_row_5 };
             for (int rowId : rowIds) {
                 ViewGroup row = root.findViewById(rowId);
                 if (row == null) continue;
@@ -464,7 +479,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                     R.id.menu_exit_btn,
                     R.id.menu_browse_btn,
                     R.id.menu_mixer_toggle_btn,
-                    R.id.menu_reset_btn
+                    R.id.menu_reset_btn,
+                    R.id.menu_view_toggle_btn
             };
             for (int tid : allTileIds) {
                 View v = root.findViewById(tid);
@@ -474,7 +490,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             if (ordered.isEmpty()) return;
 
             // Clear rows and re-add in saved order, 4 items per row
-            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4 };
+            int[] rowIds = new int[] { R.id.menu_row_1, R.id.menu_row_2, R.id.menu_row_3, R.id.menu_row_4, R.id.menu_row_5 };
             int perRow = 4;
             int idx = 0;
             for (int rowId : rowIds) {

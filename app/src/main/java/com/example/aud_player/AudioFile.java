@@ -11,16 +11,10 @@ public class AudioFile {
     private String formattedSize;
     private long dateAdded;
     private String originalTitle; // MediaStore TITLE (metadata tag)
+    private String folderName; // MediaStore BUCKET_DISPLAY_NAME (parent folder)
 
     public AudioFile(String title, String duration, Uri uri, long id, long fileSize, long dateAdded) {
-        this.title = title;
-        this.duration = duration;
-        this.uri = uri;
-        this.id = id;
-        this.fileSize = fileSize;
-        this.formattedSize = formatFileSize(fileSize);
-        this.dateAdded = dateAdded;
-        this.originalTitle = null;
+        this(title, duration, uri, id, fileSize, dateAdded, null);
     }
 
     public AudioFile(String title, String duration, Uri uri, long id, long fileSize, long dateAdded, String originalTitle) {
@@ -32,10 +26,23 @@ public class AudioFile {
         this.formattedSize = formatFileSize(fileSize);
         this.dateAdded = dateAdded;
         this.originalTitle = originalTitle;
+        this.folderName = null;
     }
 
     public String getTitle() {
         return title;
+    }
+
+    /**
+     * Returns the MediaStore bucket (parent folder) display name, or null if
+     * the file has no folder associated.
+     */
+    public String getFolderName() {
+        return folderName;
+    }
+
+    public void setFolderName(String folderName) {
+        this.folderName = folderName;
     }
 
     /**

@@ -560,6 +560,54 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
                 </LinearLayout>
+
+                <!-- Folder / List view toggle -->
+                <LinearLayout
+                    android:id="@+id/menu_view_toggle_btn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_menu_grid_item"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <ImageView
+                        android:id="@+id/menu_view_toggle_icon"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Toggle folder or list view"
+                        android:src="@drawable/ic_folder"
+                        app:tint="@color/white" />
+
+                    <TextView
+                        android:id="@+id/menu_view_toggle_label"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Folders"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- Spacer -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="4dp" />
+
+            <!-- Icon Grid: Row 5 (overflow row for reordered tiles) -->
+            <LinearLayout
+                android:id="@+id/menu_row_5"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingHorizontal="12dp">
+
             </LinearLayout>
 
         </LinearLayout>
