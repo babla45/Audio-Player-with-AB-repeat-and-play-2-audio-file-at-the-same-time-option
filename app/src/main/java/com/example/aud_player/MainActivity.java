@@ -2257,6 +2257,69 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean isABRepeatActive() { return abRepeatActive; }
+
+            @Override
+            public int getCurrentPosition() {
+                try {
+                    return mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0;
+                } catch (Exception e) {
+                    return 0;
+                }
+            }
+
+            @Override
+            public int getDuration() {
+                try {
+                    return mediaPlayer != null ? mediaPlayer.getDuration() : 0;
+                } catch (Exception e) {
+                    return 0;
+                }
+            }
+
+            @Override
+            public void onSeekTo(int position) {
+                if (mediaPlayer != null) {
+                    try {
+                        mediaPlayer.seekTo(position);
+                        updateSeekBar();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error seeking in A-B sheet", e);
+                    }
+                }
+            }
+
+            @Override
+            public void onPlayFrom(int position) {
+                if (mediaPlayer == null) {
+                    Toast.makeText(MainActivity.this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                try {
+                    mediaPlayer.seekTo(position);
+                    resumePlayback();
+                    updateSeekBar();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error playing from A-B point", e);
+                }
+            }
+
+            @Override
+            public void onNudgePointA(int deltaMs) { nudgeABPoint(true, deltaMs); }
+
+            @Override
+            public void onNudgePointB(int deltaMs) { nudgeABPoint(false, deltaMs); }
+
+            @Override
+            public void onSetPointAAt(int positionMs) { setABPointManually(true, positionMs); }
+
+            @Override
+            public void onSetPointBAt(int positionMs) { setABPointManually(false, positionMs); }
+
+            @Override
+            public void onMovePointA(int positionMs) { moveABPoint(true, positionMs); }
+
+            @Override
+            public void onMovePointB(int positionMs) { moveABPoint(false, positionMs); }
         });
         abSheet.show(getSupportFragmentManager(), "ABRepeatBottomSheet");
     }
@@ -7959,6 +8022,139 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Log.e(TAG, "Error setting point B", e);
             Toast.makeText(this, "Error setting point B", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Fine-tunes Point A or Point B by deltaMs (fractional steps supported, e.g. 100ms),
+     * applying the same validity rules as setting the point manually.
+     */
+    private void nudgeABPoint(boolean isPointA, int deltaMs) {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            int duration = mediaPlayer.getDuration();
+            int maxPoint = Math.max(0, duration - 1);
+
+            if (isPointA) {
+                if (pointA == -1) {
+                    Toast.makeText(this, "Set Point A first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int newA = Math.min(Math.max(pointA + deltaMs, 0), maxPoint);
+                // If A would reach/pass an existing B, clear B and disable repeat (same as setPointA).
+                if (pointB != -1 && newA >= pointB) {
+                    pointA = newA;
+                    pointB = -1;
+                    abRepeatActive = false;
+                    updateABRepeatIndicator();
+                    Toast.makeText(this, "Point A: " + formatTimePrecise(pointA) + " (Point B cleared)", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                pointA = newA;
+                updateABRepeatIndicator();
+                Toast.makeText(this, "Point A: " + formatTimePrecise(pointA), Toast.LENGTH_SHORT).show();
+            } else {
+                if (pointB == -1) {
+                    Toast.makeText(this, "Set Point B first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int newB = pointB + deltaMs;
+                if (pointA != -1 && newB <= pointA) {
+                    Toast.makeText(this, "Point B must be after Point A", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                pointB = Math.min(newB, maxPoint);
+                updateABRepeatIndicator();
+                Toast.makeText(this, "Point B: " + formatTimePrecise(pointB), Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error nudging A-B point", e);
+        }
+    }
+
+    /** Like formatTime but keeps one decimal (e.g. "1:23.4") so fractional fine-tuning steps are visible. */
+    private String formatTimePrecise(int milliseconds) {
+        return formatTime(milliseconds) + "." + ((Math.abs(milliseconds) % 1000) / 100);
+    }
+
+    /**
+     * Sets Point A or Point B to an exact position typed by the user,
+     * applying the same validity rules as the Set buttons.
+     */
+    private void setABPointManually(boolean isPointA, int positionMs) {
+        if (mediaPlayer == null) {
+            Toast.makeText(this, "Please select an audio file first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            int duration = mediaPlayer.getDuration();
+            int maxPoint = Math.max(0, duration - 1);
+            int newMs = Math.min(Math.max(positionMs, 0), maxPoint);
+
+            if (isPointA) {
+                // If A would reach/pass an existing B, clear B and disable repeat (same as setPointA).
+                if (pointB != -1 && newMs >= pointB) {
+                    pointA = newMs;
+                    pointB = -1;
+                    abRepeatActive = false;
+                    updateABRepeatIndicator();
+                    Toast.makeText(this, "Point A set: " + formatTimePrecise(pointA) + " (Point B cleared)", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                pointA = newMs;
+                updateABRepeatIndicator();
+                Toast.makeText(this, "Point A set: " + formatTimePrecise(pointA), Toast.LENGTH_SHORT).show();
+            } else {
+                if (pointA == -1) {
+                    Toast.makeText(this, "Set Point A first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (newMs <= pointA) {
+                    Toast.makeText(this, "Point B must be after Point A", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                pointB = newMs;
+                updateABRepeatIndicator();
+                Toast.makeText(this, "Point B set: " + formatTimePrecise(pointB), Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting A-B point manually", e);
+        }
+    }
+
+    /**
+     * Live point adjustment from the range slider: silent (no toasts on every
+     * drag tick) and clamped so Point A always stays before Point B.
+     */
+    private void moveABPoint(boolean isPointA, int positionMs) {
+        if (mediaPlayer == null) {
+            return;
+        }
+
+        try {
+            int duration = mediaPlayer.getDuration();
+            int maxPoint = Math.max(0, duration - 1);
+            int newMs = Math.min(Math.max(positionMs, 0), maxPoint);
+
+            if (isPointA) {
+                if (pointB != -1 && newMs >= pointB) {
+                    newMs = Math.max(0, pointB - 200);
+                }
+                pointA = newMs;
+            } else {
+                if (pointA != -1 && newMs <= pointA) {
+                    newMs = Math.min(maxPoint, pointA + 200);
+                }
+                pointB = newMs;
+            }
+            updateABRepeatIndicator();
+        } catch (Exception e) {
+            Log.e(TAG, "Error moving A-B point", e);
         }
     }
 
