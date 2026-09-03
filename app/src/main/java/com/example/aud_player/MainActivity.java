@@ -22,6 +22,7 @@ import android.media.audiofx.AudioEffect;
 import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
 import android.media.audiofx.EnvironmentalReverb;
+import android.media.audiofx.NoiseSuppressor;
 import android.media.audiofx.Virtualizer;
 import android.net.Uri;
 import android.os.Build;
@@ -205,6 +206,15 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_VOICE_FORMANT = "voice_formant";
     private static final String PREF_VOICE_BASS = "voice_bass";
     private static final String PREF_VOICE_REVERB = "voice_reverb";
+    private static final String PREF_VOICE_TREBLE = "voice_treble";
+    private static final String PREF_VOICE_CLARITY = "voice_clarity";
+    private static final String PREF_VOICE_ECHO = "voice_echo";
+    private static final String PREF_VOICE_DISTORTION = "voice_distortion";
+    private static final String PREF_VOICE_VIBRATO = "voice_vibrato";
+    private static final String PREF_VOICE_DEPTH = "voice_depth";
+    private static final String PREF_VOICE_ROBOT = "voice_robot";
+    private static final String PREF_VOICE_NOISE_REDUCTION = "voice_noise_reduction";
+    private static final String PREF_VOICE_AUTOTUNE = "voice_autotune";
     private static final int THEME_MODE_WHITE = 0;
     private static final int THEME_MODE_BLUISH_BLACK = 1;
     private static final int THEME_MODE_MILKY = 2;
@@ -246,6 +256,16 @@ public class MainActivity extends AppCompatActivity {
     private BassBoost bassBoost = null;
     private Virtualizer virtualizer = null;
     private EnvironmentalReverb environmentalReverb = null;
+    // Echo uses a separate reverb instance so it renders independently of the
+    // Reverb control. Treble/Clarity/Distortion are applied as ADDITIVE OFFSETS on
+    // top of the main equalizer's band levels (voiceFxBandOffsets + eqBaseBandLevels).
+    // A second Equalizer instance on the same session is NOT used: it takes control
+    // of the session's equalizer engine away from the main equalizer, which made
+    // EQ presets stop affecting the audio.
+    private EnvironmentalReverb echoReverb = null;
+    private NoiseSuppressor noiseSuppressor = null;
+    private short[] voiceFxBandOffsets = null;
+    private short[] eqBaseBandLevels = null;
     private int equalizerSessionId = -1;
     private int[] bandSeekIds = null;
 
@@ -318,6 +338,16 @@ public class MainActivity extends AppCompatActivity {
     private float currentFormant = 1.0f;
     private int voiceBassStrength = 0;
     private int voiceReverbLevel = 0;
+    private int voiceTrebleLevel = 0;      // -1000..1000 per-mille (-100%..+100%)
+    private int voiceClarityLevel = 0;     // 0..1000 per-mille
+    private int voiceEchoLevel = 0;        // 0..1000 per-mille
+    private int voiceDistortionLevel = 0;  // 0..1000 per-mille
+    private int voiceVibratoDepth = 0;     // 0..1000 per-mille
+    private long voiceVibratoStartMs = 0L; // vibrato phase reference
+    private int voiceDepthLevel = 0;       // -1000..1000 per-mille (thinner..deeper)
+    private boolean voiceRobotEnabled = false;
+    private boolean voiceNoiseReductionEnabled = false;
+    private boolean voiceAutoTuneEnabled = false;
     private float currentBoost = 1.0f;
 
     // Add PlaylistDatabaseHelper as a class field
@@ -475,6 +505,15 @@ public class MainActivity extends AppCompatActivity {
         currentFormant = prefs.getFloat(PREF_VOICE_FORMANT, 1.0f);
         voiceBassStrength = prefs.getInt(PREF_VOICE_BASS, 0);
         voiceReverbLevel = prefs.getInt(PREF_VOICE_REVERB, 0);
+        voiceTrebleLevel = prefs.getInt(PREF_VOICE_TREBLE, 0);
+        voiceClarityLevel = prefs.getInt(PREF_VOICE_CLARITY, 0);
+        voiceEchoLevel = prefs.getInt(PREF_VOICE_ECHO, 0);
+        voiceDistortionLevel = prefs.getInt(PREF_VOICE_DISTORTION, 0);
+        voiceVibratoDepth = prefs.getInt(PREF_VOICE_VIBRATO, 0);
+        voiceDepthLevel = prefs.getInt(PREF_VOICE_DEPTH, 0);
+        voiceRobotEnabled = prefs.getBoolean(PREF_VOICE_ROBOT, false);
+        voiceNoiseReductionEnabled = prefs.getBoolean(PREF_VOICE_NOISE_REDUCTION, false);
+        voiceAutoTuneEnabled = prefs.getBoolean(PREF_VOICE_AUTOTUNE, false);
         // Load saved boost
         currentBoost = prefs.getFloat("volume_boost_factor", 1.0f);
         // Load saved folder view preference
@@ -1273,6 +1312,10 @@ public class MainActivity extends AppCompatActivity {
                     }
                     applyVoiceBass(voiceBassStrength);
                     applyVoiceReverb(voiceReverbLevel);
+                    applyVoiceEcho(voiceEchoLevel);
+                    applyVoiceFxEqualizer();
+                    applyVoiceNoiseReduction(false);
+                    startVoiceVibratoTicks();
                 } catch (Exception e) {
                     Log.e(TAG, "Error in onPrepared", e);
                 }
@@ -2123,7 +2166,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if (serviceBound && audioService != null) {
                     audioService.setPitch(pitch);
-                    if (Math.abs(currentFormant - 1.0f) > 0.001f) {
+                    if (Math.abs(currentFormant - 1.0f) > 0.001f || voiceAutoTuneEnabled) {
                         applyVoiceSettingsToActivePlayers();
                     }
                 } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
@@ -2194,6 +2237,159 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public int getCurrentReverb() {
                 return voiceReverbLevel;
+            }
+
+            @Override
+            public void onTrebleChanged(int strength) {
+                voiceTrebleLevel = Math.max(-1000, Math.min(1000, strength));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_TREBLE, voiceTrebleLevel).apply();
+                applyVoiceFxEqualizer();
+            }
+
+            @Override
+            public int getCurrentTreble() {
+                return voiceTrebleLevel;
+            }
+
+            @Override
+            public void onVocalClarityChanged(int strength) {
+                voiceClarityLevel = Math.max(0, Math.min(1000, strength));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_CLARITY, voiceClarityLevel).apply();
+                applyVoiceFxEqualizer();
+            }
+
+            @Override
+            public int getCurrentVocalClarity() {
+                return voiceClarityLevel;
+            }
+
+            @Override
+            public void onEchoChanged(int level) {
+                voiceEchoLevel = Math.max(0, Math.min(1000, level));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_ECHO, voiceEchoLevel).apply();
+                applyVoiceEcho(voiceEchoLevel);
+            }
+
+            @Override
+            public int getCurrentEcho() {
+                return voiceEchoLevel;
+            }
+
+            @Override
+            public void onDistortionChanged(int strength) {
+                voiceDistortionLevel = Math.max(0, Math.min(1000, strength));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_DISTORTION, voiceDistortionLevel).apply();
+                applyVoiceFxEqualizer();
+            }
+
+            @Override
+            public int getCurrentDistortion() {
+                return voiceDistortionLevel;
+            }
+
+            @Override
+            public void onVibratoChanged(int depth) {
+                voiceVibratoDepth = Math.max(0, Math.min(1000, depth));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_VIBRATO, voiceVibratoDepth).apply();
+                if (voiceVibratoDepth > 0) {
+                    startVoiceVibratoTicks();
+                } else {
+                    stopVoiceVibratoTicks();
+                }
+            }
+
+            @Override
+            public int getCurrentVibrato() {
+                return voiceVibratoDepth;
+            }
+
+            @Override
+            public void onVolumeBoostChanged(float boost) {
+                // Same pipeline as the Boost bottom sheet (service LoudnessEnhancer),
+                // constrained here to the voice changer's 1x..3x range.
+                currentBoost = Math.max(1.0f, Math.min(3.0f, boost));
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit().putFloat("volume_boost_factor", currentBoost).apply();
+                } catch (Exception ignored) {}
+                if (serviceBound && audioService != null) {
+                    audioService.setBoost(currentBoost);
+                }
+            }
+
+            @Override
+            public float getCurrentVolumeBoost() {
+                if (serviceBound && audioService != null) {
+                    return audioService.getCurrentBoost();
+                }
+                return currentBoost;
+            }
+
+            @Override
+            public void onVoiceDepthChanged(int strength) {
+                voiceDepthLevel = Math.max(-1000, Math.min(1000, strength));
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putInt(PREF_VOICE_DEPTH, voiceDepthLevel).apply();
+                applyVoiceFxEqualizer();
+            }
+
+            @Override
+            public int getCurrentVoiceDepth() {
+                return voiceDepthLevel;
+            }
+
+            @Override
+            public void onRobotToggled(boolean enabled) {
+                voiceRobotEnabled = enabled;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putBoolean(PREF_VOICE_ROBOT, voiceRobotEnabled).apply();
+                applyVoiceFxEqualizer();
+            }
+
+            @Override
+            public boolean isRobotEnabled() {
+                return voiceRobotEnabled;
+            }
+
+            @Override
+            public void onNoiseReductionToggled(boolean enabled) {
+                voiceNoiseReductionEnabled = enabled;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putBoolean(PREF_VOICE_NOISE_REDUCTION,
+                                voiceNoiseReductionEnabled).apply();
+                applyVoiceNoiseReduction(true);
+            }
+
+            @Override
+            public boolean isNoiseReductionEnabled() {
+                return voiceNoiseReductionEnabled;
+            }
+
+            @Override
+            public void onAutoTuneToggled(boolean enabled) {
+                voiceAutoTuneEnabled = enabled;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putBoolean(PREF_VOICE_AUTOTUNE, voiceAutoTuneEnabled).apply();
+                if (voiceAutoTuneEnabled) {
+                    // Lock pitch to exact semitones (also stops the vibrato loop,
+                    // since quantization would flatten its modulation)
+                    stopVoiceVibratoTicks();
+                } else {
+                    applyVoiceSettingsToActivePlayers();
+                    if (voiceVibratoDepth > 0) {
+                        startVoiceVibratoTicks();
+                    }
+                }
+            }
+
+            @Override
+            public boolean isAutoTuneEnabled() {
+                return voiceAutoTuneEnabled;
             }
 
             @Override
@@ -2435,7 +2631,7 @@ public class MainActivity extends AppCompatActivity {
             bandSeekIds = new int[bands];
             for (short band = 0; band < bands; band++) {
                 int centerHz = equalizer.getCenterFreq(band) / 1000;
-                short currentLevel = equalizer.getBandLevel(band);
+                short currentLevel = getEqBaseBandLevel(band);
 
                 TextView bandLabel = new TextView(this);
                 bandLabel.setText(String.format(Locale.getDefault(), "Band %d (%d Hz)", band + 1, centerHz));
@@ -2455,7 +2651,7 @@ public class MainActivity extends AppCompatActivity {
                         if (fromUser && equalizer != null) {
                             try {
                                 equalizer.setEnabled(true);
-                                equalizer.setBandLevel(targetBand, (short) (progress + minLevel));
+                                setEqBandLevel(targetBand, (short) (progress + minLevel));
                             } catch (Exception e) {
                                 Log.e(TAG, "Failed to set equalizer band level", e);
                             }
@@ -2602,10 +2798,31 @@ public class MainActivity extends AppCompatActivity {
             virtualizer.setEnabled(true);
             environmentalReverb = new EnvironmentalReverb(0, sessionId);
             environmentalReverb.setEnabled(false);
+            try {
+                echoReverb = new EnvironmentalReverb(0, sessionId);
+                echoReverb.setEnabled(false);
+            } catch (Exception e) {
+                Log.w(TAG, "Echo reverb unavailable", e);
+                echoReverb = null;
+            }
+            // Noise suppressor for the Noise Reduction toggle; not supported on
+            // every device/playback session — handled gracefully when absent.
+            try {
+                if (NoiseSuppressor.isAvailable()) {
+                    noiseSuppressor = NoiseSuppressor.create(sessionId);
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Noise suppressor unavailable", e);
+                noiseSuppressor = null;
+            }
 
             equalizerSessionId = sessionId;
+            initVoiceFxBandState();
             applyVoiceBass(voiceBassStrength);
             applyVoiceReverb(voiceReverbLevel);
+            applyVoiceEcho(voiceEchoLevel);
+            applyVoiceFxEqualizer();
+            applyVoiceNoiseReduction(false);
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Unable to initialize audio effects", e);
@@ -2622,7 +2839,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             short bands = equalizer.getNumberOfBands();
             for (short band = 0; band < bands; band++) {
-                equalizer.setBandLevel(band, (short) 0);
+                setEqBandLevel(band, (short) 0);
             }
             if (bassBoost != null) {
                 bassBoost.setStrength((short) 0);
@@ -2647,7 +2864,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             short bands = equalizer.getNumberOfBands();
             for (short band = 0; band < bands; band++) {
-                equalizer.setBandLevel(band, (short) 0);
+                setEqBandLevel(band, (short) 0);
             }
             if (bassBoost != null) {
                 bassBoost.setStrength((short) 0);
@@ -2721,7 +2938,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 short bands = equalizer.getNumberOfBands();
                 for (short band = 0; band < bands; band++) {
-                    equalizer.setBandLevel(band, (short) 0);
+                    setEqBandLevel(band, (short) 0);
                 }
                 if (bassBoost != null) {
                     bassBoost.setStrength((short) 0);
@@ -2774,9 +2991,16 @@ public class MainActivity extends AppCompatActivity {
         }
         try {
             float formant = currentFormant > 0f ? currentFormant : 1.0f;
+            float finalPitch = pitch * formant;
+            if (voiceAutoTuneEnabled && finalPitch > 0f) {
+                // Auto-tune: constrain the playback pitch to the nearest exact
+                // semitone of the equal-tempered scale (2^(n/12))
+                double semitones = Math.round(12.0 * (Math.log(finalPitch) / Math.log(2)));
+                finalPitch = (float) Math.pow(2.0, semitones / 12.0);
+            }
             PlaybackParams params = new PlaybackParams();
             params.setSpeed(speed / formant);
-            params.setPitch(pitch * formant);
+            params.setPitch(finalPitch);
             player.setPlaybackParams(params);
         } catch (Exception e) {
             Log.e(TAG, "Error applying playback params", e);
@@ -2837,6 +3061,301 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Echo: a dedicated EnvironmentalReverb configured for discrete, delayed
+     * reflections (low diffusion/density, short decay) so it sounds like distinct
+     * repeats rather than the smooth room tail of the Reverb control.
+     */
+    private void applyVoiceEcho(int level) {
+        voiceEchoLevel = Math.max(0, Math.min(1000, level));
+        if (!ensureEqualizerInitialized() || echoReverb == null) {
+            return;
+        }
+        try {
+            if (voiceEchoLevel <= 0) {
+                echoReverb.setEnabled(false);
+                return;
+            }
+            EnvironmentalReverb.Settings settings = new EnvironmentalReverb.Settings();
+            settings.roomLevel = (short) (-9000 + (voiceEchoLevel * 4000 / 1000));
+            settings.reflectionsLevel = (short) (-9000 + (voiceEchoLevel * 8500 / 1000));
+            settings.reflectionsDelay = 90 + voiceEchoLevel / 5; // 90..290 ms
+            settings.reverbLevel = (short) (-9000 + (voiceEchoLevel * 5000 / 1000));
+            settings.reverbDelay = 20;
+            settings.decayTime = 200 + voiceEchoLevel; // 200..1200 ms
+            settings.diffusion = (short) 0; // discrete repeats, not a wash
+            settings.density = (short) 0;
+            echoReverb.setProperties(settings);
+            echoReverb.setEnabled(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply voice echo", e);
+        }
+    }
+
+    /**
+     * Recomputes the voice-FX band offsets from the treble, vocal clarity and
+     * distortion settings and re-applies them on top of the main equalizer's base
+     * levels. A single equalizer instance is used on purpose: a second Equalizer on
+     * the same audio session takes over the effect engine and silently disables the
+     * main equalizer (which is why EQ presets stopped working).
+     */
+    private void applyVoiceFxEqualizer() {
+        if (!ensureEqualizerInitialized() || equalizer == null) {
+            return;
+        }
+        try {
+            if (voiceFxBandOffsets == null || eqBaseBandLevels == null) {
+                initVoiceFxBandState();
+            }
+            if (voiceFxBandOffsets == null || eqBaseBandLevels == null) {
+                return;
+            }
+            short bands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            short max = range[1];
+            short min = range[0];
+
+            float treble = voiceTrebleLevel / 1000f;         // -1..1
+            float clarity = voiceClarityLevel / 1000f;       // 0..1
+            float distortion = voiceDistortionLevel / 1000f; // 0..1
+            float depth = voiceDepthLevel / 1000f;           // -1..1 (thin..deep)
+
+            for (short band = 0; band < bands && band < voiceFxBandOffsets.length; band++) {
+                int freqHz = equalizer.getCenterFreq(band) / 1000; // mHz -> Hz
+                float offset = 0f;
+
+                // Treble: boost or cut the high frequencies
+                if (freqHz >= 4000) {
+                    offset += treble * max * 0.8f;
+                } else if (freqHz >= 2000) {
+                    offset += treble * max * 0.4f;
+                }
+
+                // Vocal clarity: lift the speech band, trim the muddy lows
+                if (freqHz >= 800 && freqHz <= 4500) {
+                    offset += clarity * max * 0.55f;
+                } else if (freqHz <= 250) {
+                    offset -= clarity * max * 0.2f;
+                }
+
+                // Voice depth: positive deepens (bigger lows, softer highs),
+                // negative thins the voice out (cut lows, lift highs)
+                if (freqHz <= 250) {
+                    offset += depth * max * 0.5f;
+                } else if (freqHz >= 4000) {
+                    offset -= depth * max * 0.3f;
+                }
+
+                // Robot: fixed metallic comb for a synthetic timbre
+                if (voiceRobotEnabled) {
+                    float sign = (band % 2 == 0) ? 1f : -1f;
+                    offset += sign * max * 0.45f;
+                    if (freqHz >= 1500 && freqHz <= 5000) {
+                        offset += max * 0.25f;
+                    }
+                    if (freqHz <= 200) {
+                        offset -= Math.abs(min) * 0.35f;
+                    }
+                }
+
+                // Distortion: alternating boost/cut comb for a metallic, aggressive
+                // tone, plus presence push and low cut to make it harsher
+                if (distortion > 0f) {
+                    float sign = (band % 2 == 0) ? 1f : -1f;
+                    offset += sign * distortion * max * 0.55f;
+                    if (freqHz >= 1500 && freqHz <= 6000) {
+                        offset += distortion * max * 0.35f;
+                    }
+                    if (freqHz <= 200) {
+                        offset -= distortion * Math.abs(min) * 0.4f;
+                    }
+                }
+
+                voiceFxBandOffsets[band] = (short) Math.max(min, Math.min(max, Math.round(offset)));
+                short total = (short) Math.max(min, Math.min(max,
+                        eqBaseBandLevels[band] + voiceFxBandOffsets[band]));
+                equalizer.setBandLevel(band, total);
+            }
+            equalizer.setEnabled(true);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply voice FX equalizer", e);
+        }
+    }
+
+    /** Sizes the voice-FX band state and seeds base levels from the equalizer. */
+    private void initVoiceFxBandState() {
+        if (equalizer == null) {
+            voiceFxBandOffsets = null;
+            eqBaseBandLevels = null;
+            return;
+        }
+        try {
+            short bands = equalizer.getNumberOfBands();
+            voiceFxBandOffsets = new short[bands];
+            eqBaseBandLevels = new short[bands];
+            for (short band = 0; band < bands; band++) {
+                eqBaseBandLevels[band] = equalizer.getBandLevel(band);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to init voice FX band state", e);
+            voiceFxBandOffsets = null;
+            eqBaseBandLevels = null;
+        }
+    }
+
+    /**
+     * Sets a base band level on the main equalizer while keeping the additive
+     * voice-FX offsets (treble/clarity/distortion) on top. Every code path that
+     * writes EQ band levels (presets, panel sliders, resets) must use this.
+     */
+    private void setEqBandLevel(short band, short level) {
+        if (equalizer == null) {
+            return;
+        }
+        try {
+            if (eqBaseBandLevels != null && band < eqBaseBandLevels.length) {
+                eqBaseBandLevels[band] = level;
+            }
+            short offset = (voiceFxBandOffsets != null && band < voiceFxBandOffsets.length)
+                    ? voiceFxBandOffsets[band] : 0;
+            short[] range = equalizer.getBandLevelRange();
+            short total = (short) Math.max(range[0], Math.min(range[1], level + offset));
+            equalizer.setBandLevel(band, total);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to set equalizer band level", e);
+        }
+    }
+
+    /**
+     * Adopts the equalizer's current band levels as the new base (e.g. after a
+     * device preset overwrote them via usePreset) and re-applies the FX offsets.
+     */
+    private void syncEqBaseFromCurrentLevels() {
+        if (equalizer == null) {
+            return;
+        }
+        try {
+            if (eqBaseBandLevels == null) {
+                initVoiceFxBandState();
+                return;
+            }
+            short bands = equalizer.getNumberOfBands();
+            short[] range = equalizer.getBandLevelRange();
+            for (short band = 0; band < bands && band < eqBaseBandLevels.length; band++) {
+                eqBaseBandLevels[band] = equalizer.getBandLevel(band);
+                short offset = (voiceFxBandOffsets != null && band < voiceFxBandOffsets.length)
+                        ? voiceFxBandOffsets[band] : 0;
+                short total = (short) Math.max(range[0], Math.min(range[1],
+                        eqBaseBandLevels[band] + offset));
+                equalizer.setBandLevel(band, total);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to sync equalizer base levels", e);
+        }
+    }
+
+    /** The base band level without the voice-FX offset (for panel UI display). */
+    private short getEqBaseBandLevel(short band) {
+        if (eqBaseBandLevels != null && band < eqBaseBandLevels.length) {
+            return eqBaseBandLevels[band];
+        }
+        try {
+            return equalizer != null ? equalizer.getBandLevel(band) : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Noise Reduction via the framework NoiseSuppressor. Many devices do not
+     * support it on media playback sessions, so absence is handled gracefully.
+     */
+    private void applyVoiceNoiseReduction(boolean showError) {
+        if (mediaPlayer == null) {
+            return; // no session yet; re-applied when playback starts
+        }
+        if (!ensureEqualizerInitialized()) {
+            return;
+        }
+        if (noiseSuppressor == null) {
+            if (showError && voiceNoiseReductionEnabled) {
+                Toast.makeText(this, "Noise reduction is not supported on this device",
+                        Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        try {
+            noiseSuppressor.setEnabled(voiceNoiseReductionEnabled);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to apply noise reduction", e);
+        }
+    }
+
+    /**
+     * Vibrato: periodically modulates the playback pitch up and down (about 5.5 Hz,
+     * up to roughly a semitone at full depth) by re-applying playback params on the
+     * active players. The tick loop keeps running while the depth is above zero but
+     * only touches players that are actually playing.
+     */
+    private final Runnable voiceVibratoRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (voiceVibratoDepth <= 0) {
+                return;
+            }
+            float depth = voiceVibratoDepth / 1000f;
+            double elapsedSec = (System.currentTimeMillis() - voiceVibratoStartMs) / 1000.0;
+            float modulation = 1f + 0.06f * depth
+                    * (float) Math.sin(2.0 * Math.PI * 5.5 * elapsedSec);
+            applyVoiceSettingsWithPitchModulation(modulation);
+            handler.postDelayed(this, 50);
+        }
+    };
+
+    private void startVoiceVibratoTicks() {
+        if (voiceVibratoDepth <= 0 || voiceAutoTuneEnabled) {
+            // Auto-tune constrains pitch to exact semitones, which flattens the
+            // vibrato modulation — so vibrato is suspended while auto-tune is on.
+            return;
+        }
+        voiceVibratoStartMs = System.currentTimeMillis();
+        handler.removeCallbacks(voiceVibratoRunnable);
+        handler.post(voiceVibratoRunnable);
+    }
+
+    private void stopVoiceVibratoTicks() {
+        handler.removeCallbacks(voiceVibratoRunnable);
+        // Restore the unmodulated pitch on the active players
+        applyVoiceSettingsToActivePlayers();
+    }
+
+    /** Like {@link #applyVoiceSettingsToActivePlayers()} but with an extra pitch multiplier. */
+    private void applyVoiceSettingsWithPitchModulation(float pitchMod) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return;
+        }
+        if (mediaPlayer != null && isPlayerActuallyPlaying(mediaPlayer)) {
+            float speed = secondAudioActive && useIndividualPlaybackSpeeds
+                    ? primaryPlaybackSpeed
+                    : currentPlaybackSpeed;
+            applyPlaybackParams(mediaPlayer, speed, currentPitch * pitchMod);
+        }
+        if (secondMediaPlayer != null && secondAudioActive && isPlayerActuallyPlaying(secondMediaPlayer)) {
+            float speed = useIndividualPlaybackSpeeds
+                    ? secondaryPlaybackSpeed
+                    : currentPlaybackSpeed;
+            applyPlaybackParams(secondMediaPlayer, speed, currentPitch * pitchMod);
+        }
+    }
+
+    private boolean isPlayerActuallyPlaying(MediaPlayer player) {
+        try {
+            return player != null && player.isPlaying();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private void applyCustomEqualizerPreset(String presetName) {
         if (equalizer == null) {
             return;
@@ -2852,7 +3371,7 @@ public class MainActivity extends AppCompatActivity {
             short cut = (short) (min * 0.35f);
 
             for (short band = 0; band < bands; band++) {
-                equalizer.setBandLevel(band, (short) 0);
+                setEqBandLevel(band, (short) 0);
             }
 
             for (short band = 0; band < bands; band++) {
@@ -2883,7 +3402,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 if (level > max) level = max;
                 if (level < min) level = min;
-                equalizer.setBandLevel(band, level);
+                setEqBandLevel(band, level);
             }
             equalizer.setEnabled(true);
             Toast.makeText(this, presetName + " preset applied", Toast.LENGTH_SHORT).show();
@@ -2952,7 +3471,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 if (level > max) level = max;
                 if (level < min) level = min;
-                equalizer.setBandLevel(band, level);
+                setEqBandLevel(band, level);
             }
             equalizer.setEnabled(true);
             Toast.makeText(this, presetName + " EQ preset applied", Toast.LENGTH_SHORT).show();
@@ -2981,6 +3500,9 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             equalizer.usePreset((short) which);
                             equalizer.setEnabled(true);
+                            // The device preset overwrote the band levels; adopt them
+                            // as the new base and re-apply the voice-FX offsets on top.
+                            syncEqBaseFromCurrentLevels();
                             Toast.makeText(this, "Preset: " + presetNames[which], Toast.LENGTH_SHORT).show();
                         } catch (Exception e) {
                             Log.e(TAG, "Failed to apply device preset", e);
@@ -3006,7 +3528,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 View view = rootView.findViewById(bandSeekIds[band]);
                 if (view instanceof SeekBar) {
-                    short level = equalizer.getBandLevel(band);
+                    short level = getEqBaseBandLevel(band);
                     ((SeekBar) view).setProgress(level - minLevel);
                 }
             }
@@ -3033,6 +3555,16 @@ public class MainActivity extends AppCompatActivity {
                 environmentalReverb.release();
                 environmentalReverb = null;
             }
+            if (echoReverb != null) {
+                echoReverb.release();
+                echoReverb = null;
+            }
+            if (noiseSuppressor != null) {
+                noiseSuppressor.release();
+                noiseSuppressor = null;
+            }
+            voiceFxBandOffsets = null;
+            eqBaseBandLevels = null;
         } catch (Exception e) {
             Log.e(TAG, "Failed to release audio effects", e);
         } finally {
@@ -3882,6 +4414,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (handler != null) {
             handler.removeCallbacks(runnable);
+            handler.removeCallbacks(voiceVibratoRunnable);
         }
 
         // Cancel any active timer
@@ -7576,6 +8109,12 @@ public class MainActivity extends AppCompatActivity {
         if (inPlaylistView && currentPlaylistId != null) {
             currentPlaylistSongs = playlistDbHelper.getPlaylistSongs(currentPlaylistId);
             showPlaylistSongs();
+        }
+
+        // Resume the vibrato modulation loop if it was saved enabled but the
+        // tick chain is not running (e.g. activity recreated while service played).
+        if (voiceVibratoDepth > 0) {
+            startVoiceVibratoTicks();
         }
     }
 
