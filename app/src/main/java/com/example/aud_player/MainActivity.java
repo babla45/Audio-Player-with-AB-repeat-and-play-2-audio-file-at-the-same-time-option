@@ -201,6 +201,15 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout expandedSearchContainer;
     private ImageButton searchExpandButton;
     private boolean searchExpanded = false;
+    // Outside-touch tracking for collapsing the expanded search bar
+    private boolean searchCollapseStartOutside = false;
+    private boolean searchCollapseMoved = false;
+    private float searchCollapseStartRawX = 0f;
+    private float searchCollapseStartRawY = 0f;
+    private float searchCollapseTouchSlopPx = -1f; // computed lazily in dispatchTouchEvent
+    /** Subsequence Search mode: query characters must appear in order, not necessarily consecutive. OFF by default. */
+    private boolean subsequenceSearchMode = false;
+    private ImageView subsequenceSearchToggle;
 
     // Search history elements
     private static final String PREF_SEARCH_HISTORY = "search_history";
@@ -529,22 +538,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Hide the search history and collapse the search field when tapping
-        // anywhere outside the search area. This is a monitor pass-through —
-        // it never consumes the touch.
-        findViewById(android.R.id.content).setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN && searchExpanded) {
-                Rect searchHitRect = new Rect();
-                searchEditText.getHitRect(searchHitRect);
-                Rect historyHitRect = new Rect();
-                searchHistoryContainer.getHitRect(historyHitRect);
-                if (!searchHitRect.contains((int) event.getX(), (int) event.getY())
-                        && !historyHitRect.contains((int) event.getX(), (int) event.getY())) {
-                    collapseSearch();
-                }
-            }
-            return false;
-        });
+        // Note: outside-tap/scroll collapse of the expanded search bar is
+        // handled centrally in dispatchTouchEvent(), which sees all events
+        // (including ones consumed by the RecyclerView and other controls).
 
         // Initialize database helper
         playlistDbHelper = new PlaylistDatabaseHelper(this);
@@ -817,6 +813,7 @@ public class MainActivity extends AppCompatActivity {
             // Search elements
             searchEditText = findViewById(R.id.searchEditText);
             clearSearchButton = findViewById(R.id.clearSearchButton);
+            subsequenceSearchToggle = findViewById(R.id.subsequenceSearchToggle);
 
             // Collapsible app bar search elements
             appTitleText = findViewById(R.id.appTitleText);
@@ -1097,18 +1094,33 @@ public class MainActivity extends AppCompatActivity {
             collapseSearch();
         });
 
+        // Subsequence Search mode toggle (query chars in order, not
+        // necessarily consecutive). OFF by default.
+        subsequenceSearchToggle.setOnClickListener(v -> {
+            subsequenceSearchMode = !subsequenceSearchMode;
+            updateSubsequenceSearchToggleUi();
+            // Re-run the current query under the new matching mode
+            if (searchEditText != null) {
+                filterAudioFiles(searchEditText.getText().toString());
+            }
+            Toast.makeText(this,
+                    subsequenceSearchMode ? "Subsequence Search on" : "Subsequence Search off",
+                    Toast.LENGTH_SHORT).show();
+        });
+
         // Add "enter" key listener for search
         searchEditText.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
                 // Save the query to search history
                 addQueryToSearchHistory(v.getText().toString());
 
-                // Collapse back to the title, clearing the query
-                collapseSearch();
-
-                // Hide keyboard
+                // Hide the keyboard and the history panel, but KEEP the query
+                // and the filtered results — collapsing would clear the query
+                // and restore the full song list.
+                updateSearchHistoryVisibility(false);
                 InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
                 imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                searchEditText.clearFocus();
                 return true;
             }
             return false;
@@ -2277,6 +2289,12 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        // Collapse the expanded search bar when the user taps or scrolls
+        // anywhere outside it. Runs before children consume the event, so it
+        // works even over the RecyclerView and other controls.
+        if (ev != null && searchExpanded) {
+            handleSearchCollapseOnOutsideTouch(ev);
+        }
         if (ev != null && !isBottomSheetMenuVisible() && bottomNavigation != null) {
             final float swipeThresholdPx = MORE_BUTTON_SWIPE_THRESHOLD_DP
                     * getResources().getDisplayMetrics().density;
@@ -2320,6 +2338,77 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return super.dispatchTouchEvent(ev);
+    }
+
+    /**
+     * Collapses the expanded search bar on outside interaction — but ONLY
+     * when the search box is empty. If a query has been typed, the results
+     * stay visible until the user explicitly closes the search (clear/close
+     * icon or clearing the text). Never consumes the event.
+     * - an ACTION_DOWN outside the search bar / search history area;
+     * - a drag (scroll) starting outside the search bar, beyond a small
+     *   slop threshold.
+     * Touches inside the search bar (typing, toggle, clear button, history
+     * chips) are ignored.
+     */
+    private void handleSearchCollapseOnOutsideTouch(MotionEvent ev) {
+        if (searchEditText != null && searchEditText.length() > 0) {
+            // Query typed — keep results; only the close icon exits search.
+            return;
+        }
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                // Use the expanded container (covers the field, the toggle and
+                // the clear button), plus the history chips row. Hit-test in
+                // screen (raw) coordinates — ev.getX()/getY() are window
+                // coordinates while getHitRect() is parent-relative, which
+                // caused false "outside" results for the history chips.
+                Rect searchRect = new Rect();
+                expandedSearchContainer.getHitRect(searchRect);
+                offsetRectToScreen(expandedSearchContainer, searchRect);
+                Rect historyRect = new Rect();
+                searchHistoryContainer.getHitRect(historyRect);
+                offsetRectToScreen(searchHistoryContainer, historyRect);
+
+                int x = (int) ev.getRawX();
+                int y = (int) ev.getRawY();
+                searchCollapseStartOutside = !searchRect.contains(x, y) && !historyRect.contains(x, y);
+                searchCollapseStartRawX = ev.getRawX();
+                searchCollapseStartRawY = ev.getRawY();
+                searchCollapseMoved = false;
+
+                // Immediate collapse on a tap/click outside the search area
+                if (searchCollapseStartOutside) {
+                    collapseSearch();
+                }
+                break;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                // Scrolling outside the search bar also collapses it
+                if (searchCollapseStartOutside && !searchCollapseMoved) {
+                    if (searchCollapseTouchSlopPx < 0f) {
+                        searchCollapseTouchSlopPx =
+                                12 * getResources().getDisplayMetrics().density;
+                    }
+                    float delta = Math.max(Math.abs(ev.getRawX() - searchCollapseStartRawX),
+                            Math.abs(ev.getRawY() - searchCollapseStartRawY));
+                    if (delta > searchCollapseTouchSlopPx) {
+                        searchCollapseMoved = true;
+                        collapseSearch();
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    /** Shifts a view's parent-relative hit rect into screen (raw) coordinates. */
+    private void offsetRectToScreen(View view, Rect rect) {
+        int[] location = new int[2];
+        view.getLocationOnScreen(location);
+        rect.offset(location[0] - view.getLeft(), location[1] - view.getTop());
     }
 
     private void showSortBottomSheet() {
@@ -5266,12 +5355,11 @@ public class MainActivity extends AppCompatActivity {
 
         // Set the click listener
         audioAdapter.setOnItemClickListener(audioFile -> {
-            // Hide search history and collapse the search bar when a song is tapped
+            // Hide the search history chips when a song is tapped, but keep
+            // the search bar and filtered results open — only the exit/close
+            // icon (or clearing the query) closes the search.
             if (searchHistoryContainer != null) {
                 searchHistoryContainer.setVisibility(View.GONE);
-            }
-            if (searchExpanded) {
-                collapseSearch();
             }
 
             // Use the mixer mode to determine behavior
@@ -5821,6 +5909,12 @@ public class MainActivity extends AppCompatActivity {
 
     // Update the updateAudioFilesList method to use the new setupAudioAdapter method
     private void updateAudioFilesList() {
+        // Keep the adapter's yellow search-match highlighting in sync with
+        // the current query and matching mode
+        if (audioAdapter != null && searchEditText != null) {
+            String q = searchEditText.getText().toString();
+            audioAdapter.setSearchQuery(q.isEmpty() ? null : q, subsequenceSearchMode);
+        }
         if (folderViewEnabled) {
             showFolderView();
             return;
@@ -6220,7 +6314,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Filter based on the query - matches against both display name and metadata title
         for (AudioFile audioFile : sourceList) {
-            if (audioFile.matchesSearch(lowerQuery)) {
+            if (subsequenceSearchMode
+                    ? audioFile.matchesSubsequence(lowerQuery)
+                    : audioFile.matchesSearch(lowerQuery)) {
                 filteredAudioFiles.add(audioFile);
             }
         }
@@ -6307,7 +6403,11 @@ public class MainActivity extends AppCompatActivity {
 
             // Tapping a chip fills the search box; the existing TextWatcher
             // then filters the list — no separate search path needed.
-            chip.setOnClickListener(v -> searchEditText.setText(query));
+            // Cursor moves to the end so it sits after the filled text.
+            chip.setOnClickListener(v -> {
+                searchEditText.setText(query);
+                searchEditText.setSelection(searchEditText.getText().length());
+            });
 
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -6342,12 +6442,39 @@ public class MainActivity extends AppCompatActivity {
             searchEditText.requestFocus();
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             imm.showSoftInput(searchEditText, InputMethodManager.SHOW_IMPLICIT);
+            // Show the Subsequence Search toggle while the search box is open
+            updateSubsequenceSearchToggleUi();
         } else {
             // Collapse also clears the query and hides the keyboard
             searchEditText.setText("");
             updateSearchHistoryVisibility(false);
             InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
             imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
+            subsequenceSearchToggle.setVisibility(View.GONE);
+        }
+    }
+
+    /**
+     * Subsequence Search toggle icon state: OFF = small, subtle, low-alpha gray;
+     * ON = full-opacity highlighted accent tint.
+     */
+    private void updateSubsequenceSearchToggleUi() {
+        if (subsequenceSearchToggle == null) {
+            return;
+        }
+        if (!searchExpanded) {
+            subsequenceSearchToggle.setVisibility(View.GONE);
+            return;
+        }
+        subsequenceSearchToggle.setVisibility(View.VISIBLE);
+        if (subsequenceSearchMode) {
+            subsequenceSearchToggle.setColorFilter(
+                    getResources().getColor(R.color.player_seekbar_progress, null));
+            subsequenceSearchToggle.setAlpha(1f);
+        } else {
+            subsequenceSearchToggle.setColorFilter(
+                    getResources().getColor(R.color.text_tertiary, null));
+            subsequenceSearchToggle.setAlpha(0.45f);
         }
     }
 
