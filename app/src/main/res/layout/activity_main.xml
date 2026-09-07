@@ -70,6 +70,20 @@
                     android:paddingStart="10dp"
                     android:singleLine="true" />
 
+                <!-- Subsequence Search toggle: OFF = subtle gray, ON = highlighted -->
+                <ImageView
+                    android:id="@+id/subsequenceSearchToggle"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:padding="6dp"
+                    android:src="@drawable/ic_subsequence_search"
+                    app:tint="@color/text_tertiary"
+                    android:alpha="0.45"
+                    android:visibility="gone"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="Subsequence Search" />
+
                 <ImageView
                     android:id="@+id/clearSearchButton"
                     android:layout_width="28dp"

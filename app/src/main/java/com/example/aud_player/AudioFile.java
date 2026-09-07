@@ -66,6 +66,38 @@ public class AudioFile {
         return false;
     }
 
+    /**
+     * Subsequence matching (Subsequence Search mode): true when the query's
+     * characters appear in the title in the same order, but not necessarily
+     * consecutively. E.g. "apl" matches "Apple" (a → p … l). Checks both the
+     * displayed title and the original metadata title, like matchesSearch.
+     */
+    public boolean matchesSubsequence(String lowerQuery) {
+        if (title != null && isSubsequenceOf(lowerQuery, title)) {
+            return true;
+        }
+        if (originalTitle != null && isSubsequenceOf(lowerQuery, originalTitle)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean isSubsequenceOf(String lowerQuery, String target) {
+        if (lowerQuery == null || lowerQuery.isEmpty()) {
+            return true;
+        }
+        String lowerTarget = target.toLowerCase(java.util.Locale.ROOT);
+        int index = 0;
+        for (char c : lowerQuery.toCharArray()) {
+            index = lowerTarget.indexOf(c, index);
+            if (index < 0) {
+                return false;
+            }
+            index++;
+        }
+        return true;
+    }
+
     public String getDuration() {
         return duration;
     }

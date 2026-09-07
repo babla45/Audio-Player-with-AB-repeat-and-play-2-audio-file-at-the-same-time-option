@@ -42,9 +42,28 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     private int defaultColor;
     // Whether audio is actually playing (vs paused) — drives the equalizer animation
     private boolean playbackActive = false;
+    // Current search query: matched words are highlighted yellow in titles
+    private String searchQuery = "";
+    // Subsequence mode: highlight each query character's in-order match
+    // instead of the whole-word match
+    private boolean subsequenceMode = false;
 
     public AudioAdapter(List<AudioFile> audioFiles) {
         this.audioFiles = new ArrayList<>(audioFiles);
+    }
+
+    /**
+     * Sets the active search query for yellow highlighting of matched words
+     * in song titles. Empty/null disables highlighting.
+     */
+    public void setSearchQuery(String query) {
+        setSearchQuery(query, this.subsequenceMode);
+    }
+
+    public void setSearchQuery(String query, boolean subsequenceMode) {
+        this.searchQuery = query != null ? query.toLowerCase() : "";
+        this.subsequenceMode = subsequenceMode;
+        notifyDataSetChanged();
     }
 
     /**
@@ -114,7 +133,8 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     @Override
     public void onBindViewHolder(@NonNull AudioViewHolder holder, int position) {
         AudioFile audioFile = audioFiles.get(position);
-        holder.titleTextView.setText(audioFile.getTitle());
+        holder.titleTextView.setText(buildHighlightedTitle(
+                audioFile.getTitle(), holder.titleTextView.getContext()));
         
         // Combine duration and file size with a separator
         String durationAndSize = audioFile.getDuration() + " • " + audioFile.getFormattedSize();
@@ -162,6 +182,48 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         holder.optionsMenu.setOnClickListener(v -> {
             showPopupMenu(v, audioFile);
         });
+    }
+
+    /**
+     * Builds the title text with the parts matching the active search query
+     * highlighted in yellow. With no query, returns the plain title.
+     * In subsequence mode, highlights each query character at its in-order
+     * match position (same walk as AudioFile.matchesSubsequence).
+     */
+    private CharSequence buildHighlightedTitle(String title, Context context) {
+        if (searchQuery == null || searchQuery.isEmpty() || title == null) {
+            return title;
+        }
+        String lowerTitle = title.toLowerCase();
+        SpannableString span = new SpannableString(title);
+        int highlightColor = ContextCompat.getColor(
+                context, android.R.color.holo_orange_light);
+
+        if (subsequenceMode) {
+            // Walk the title once, matching query chars in order — mirrors
+            // AudioFile.isSubsequenceOf so highlights match the filtering.
+            int titleIndex = 0;
+            for (char c : searchQuery.toCharArray()) {
+                titleIndex = lowerTitle.indexOf(c, titleIndex);
+                if (titleIndex < 0) {
+                    break;
+                }
+                span.setSpan(new ForegroundColorSpan(highlightColor),
+                        titleIndex, titleIndex + 1,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                titleIndex++;
+            }
+        } else {
+            // Find every occurrence of the query (case-insensitive) and color it
+            int index = lowerTitle.indexOf(searchQuery);
+            while (index >= 0) {
+                span.setSpan(new ForegroundColorSpan(highlightColor),
+                        index, index + searchQuery.length(),
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                index = lowerTitle.indexOf(searchQuery, index + searchQuery.length());
+            }
+        }
+        return span;
     }
 
     /**
