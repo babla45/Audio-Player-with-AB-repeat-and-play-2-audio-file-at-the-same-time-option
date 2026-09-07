@@ -4,8 +4,13 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/player_button_icon">
-    <!-- Counterclockwise circular arrow, open at the bottom for the seconds label. -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M12,5V1L7,6l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H4c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z" />
+    <!-- Standard Material "replay_10" curved arrow (arc only), shifted up
+         1 unit so the open circle is centered at (12,12) — the overlaid
+         seconds TextView centers exactly in the arrow's negative space. -->
+    <group
+        android:translateY="-1">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M11.99,5V1l-5,5 5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6 -6,-2.69 -6,-6H3.99c0,4.42 3.58,8 8,8s8,-3.58 8,-8 -3.58,-8 -8,-8z" />
+    </group>
 </vector>

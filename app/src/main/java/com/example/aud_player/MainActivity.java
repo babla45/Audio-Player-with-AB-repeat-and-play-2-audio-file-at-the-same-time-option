@@ -103,6 +103,7 @@ import android.widget.HorizontalScrollView;
 import android.view.Window;
 import android.view.WindowManager;
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -194,6 +195,20 @@ public class MainActivity extends AppCompatActivity {
 
     // Add this as a class variable
     private ImageView clearSearchButton;
+
+    // Collapsible app bar search elements
+    private TextView appTitleText;
+    private LinearLayout expandedSearchContainer;
+    private ImageButton searchExpandButton;
+    private boolean searchExpanded = false;
+
+    // Search history elements
+    private static final String PREF_SEARCH_HISTORY = "search_history";
+    private static final int MAX_SEARCH_HISTORY = 10;
+    private LinearLayout searchHistoryContainer;
+    private LinearLayout searchHistoryChipsLayout;
+    private ImageView searchHistoryClearButton;
+    private final List<String> searchHistory = new ArrayList<>();
 
     // Add these as class variables
     private TextView mixerToggleButton;
@@ -514,6 +529,23 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // Hide the search history and collapse the search field when tapping
+        // anywhere outside the search area. This is a monitor pass-through —
+        // it never consumes the touch.
+        findViewById(android.R.id.content).setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN && searchExpanded) {
+                Rect searchHitRect = new Rect();
+                searchEditText.getHitRect(searchHitRect);
+                Rect historyHitRect = new Rect();
+                searchHistoryContainer.getHitRect(historyHitRect);
+                if (!searchHitRect.contains((int) event.getX(), (int) event.getY())
+                        && !historyHitRect.contains((int) event.getX(), (int) event.getY())) {
+                    collapseSearch();
+                }
+            }
+            return false;
+        });
+
         // Initialize database helper
         playlistDbHelper = new PlaylistDatabaseHelper(this);
 
@@ -786,6 +818,20 @@ public class MainActivity extends AppCompatActivity {
             searchEditText = findViewById(R.id.searchEditText);
             clearSearchButton = findViewById(R.id.clearSearchButton);
 
+            // Collapsible app bar search elements
+            appTitleText = findViewById(R.id.appTitleText);
+            expandedSearchContainer = findViewById(R.id.expandedSearchContainer);
+            searchExpandButton = findViewById(R.id.searchExpandButton);
+
+            // Expand the search field in place of the title
+            searchExpandButton.setOnClickListener(v -> expandSearch(true));
+
+            // Search history elements
+            searchHistoryContainer = findViewById(R.id.searchHistoryContainer);
+            searchHistoryChipsLayout = findViewById(R.id.searchHistoryChipsLayout);
+            searchHistoryClearButton = findViewById(R.id.searchHistoryClearButton);
+            loadSearchHistory();
+
             // Mixer toggle
             mixerToggleButton = findViewById(R.id.mixerToggleButton);
 
@@ -1029,6 +1075,11 @@ public class MainActivity extends AppCompatActivity {
                 // Update clear button visibility
                 clearSearchButton.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
 
+                // Show search history only while the search bar is focused and empty
+                if (searchEditText.hasFocus()) {
+                    updateSearchHistoryVisibility(s.length() == 0);
+                }
+
                 // Filter audio files based on search query
                 filterAudioFiles(s.toString());
             }
@@ -1041,23 +1092,48 @@ public class MainActivity extends AppCompatActivity {
 
         // Add click listener for clear button
         clearSearchButton.setOnClickListener(v -> {
-            // Clear the search text
-            searchEditText.setText("");
-
-            // Hide keyboard
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
+            // Collapse the search back to the title (also hides history
+            // and clears the query)
+            collapseSearch();
         });
 
         // Add "enter" key listener for search
         searchEditText.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                // Save the query to search history
+                addQueryToSearchHistory(v.getText().toString());
+
+                // Collapse back to the title, clearing the query
+                collapseSearch();
+
                 // Hide keyboard
                 InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
                 imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
                 return true;
             }
             return false;
+        });
+
+        // Clear the entire search history
+        searchHistoryClearButton.setOnClickListener(v -> {
+            searchHistory.clear();
+            saveSearchHistory();
+            buildSearchHistoryChips();
+            updateSearchHistoryVisibility(searchEditText.length() == 0);
+        });
+
+        // Show history when the search bar gains focus, hide when it loses focus
+        // (except when focus moves into the history area itself, e.g. a chip tap)
+        searchEditText.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                updateSearchHistoryVisibility(searchEditText.length() == 0);
+            } else {
+                v.postDelayed(() -> {
+                    if (!searchEditText.hasFocus()) {
+                        updateSearchHistoryVisibility(false);
+                    }
+                }, 200);
+            }
         });
 
         // Add mixer toggle button listener
@@ -5190,6 +5266,14 @@ public class MainActivity extends AppCompatActivity {
 
         // Set the click listener
         audioAdapter.setOnItemClickListener(audioFile -> {
+            // Hide search history and collapse the search bar when a song is tapped
+            if (searchHistoryContainer != null) {
+                searchHistoryContainer.setVisibility(View.GONE);
+            }
+            if (searchExpanded) {
+                collapseSearch();
+            }
+
             // Use the mixer mode to determine behavior
             if (mixerModeActive) {
                 onSecondAudioSelected(audioFile);
@@ -6143,6 +6227,132 @@ public class MainActivity extends AppCompatActivity {
 
         // Update the UI
         updateAudioFilesList();
+    }
+
+    /**
+     * Search history helpers. The history is a simple JSON string in SharedPreferences,
+     * capped at MAX_SEARCH_HISTORY entries (most recent first, deduplicated).
+     */
+    private void loadSearchHistory() {
+        searchHistory.clear();
+        try {
+            String json = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(PREF_SEARCH_HISTORY, "[]");
+            JSONArray array = new JSONArray(json);
+            for (int i = 0; i < array.length(); i++) {
+                searchHistory.add(array.getString(i));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to load search history", e);
+        }
+        buildSearchHistoryChips();
+    }
+
+    private void addQueryToSearchHistory(String query) {
+        if (query == null) return;
+        String trimmed = query.trim();
+        if (trimmed.isEmpty()) return;
+
+        // Move an existing entry to the front instead of duplicating it
+        searchHistory.remove(trimmed);
+        searchHistory.add(0, trimmed);
+
+        // Cap the history size
+        while (searchHistory.size() > MAX_SEARCH_HISTORY) {
+            searchHistory.remove(searchHistory.size() - 1);
+        }
+
+        saveSearchHistory();
+        buildSearchHistoryChips();
+    }
+
+    private void saveSearchHistory() {
+        try {
+            JSONArray array = new JSONArray();
+            for (String q : searchHistory) {
+                array.put(q);
+            }
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(PREF_SEARCH_HISTORY, array.toString())
+                    .apply();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to save search history", e);
+        }
+    }
+
+    private void buildSearchHistoryChips() {
+        if (searchHistoryChipsLayout == null) return;
+        searchHistoryChipsLayout.removeAllViews();
+
+        for (String query : searchHistory) {
+            TextView chip = new TextView(this);
+            chip.setText(query);
+            chip.setTextSize(12);
+            chip.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+            chip.setMaxLines(1);
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setSingleLine(true);
+
+            GradientDrawable chipBg = new GradientDrawable();
+            chipBg.setShape(GradientDrawable.RECTANGLE);
+            chipBg.setColor(ContextCompat.getColor(this, R.color.search_bar_bg));
+            chipBg.setCornerRadius(getResources().getDimensionPixelSize(R.dimen.radius_pill));
+            chip.setBackground(chipBg);
+            chip.setPadding(
+                    getResources().getDimensionPixelSize(R.dimen.chip_padding_horizontal),
+                    getResources().getDimensionPixelSize(R.dimen.chip_padding_vertical),
+                    getResources().getDimensionPixelSize(R.dimen.chip_padding_horizontal),
+                    getResources().getDimensionPixelSize(R.dimen.chip_padding_vertical));
+            chip.setClickable(true);
+
+            // Tapping a chip fills the search box; the existing TextWatcher
+            // then filters the list — no separate search path needed.
+            chip.setOnClickListener(v -> searchEditText.setText(query));
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.rightMargin = getResources().getDimensionPixelSize(R.dimen.chip_padding_horizontal);
+            searchHistoryChipsLayout.addView(chip, lp);
+        }
+    }
+
+    private void updateSearchHistoryVisibility(boolean show) {
+        if (searchHistoryContainer == null) return;
+        searchHistoryContainer.setVisibility(
+                show && !searchHistory.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * Collapsible app bar search. When expanded, the search field replaces the
+     * title in the single-row app bar; when collapsed, the title returns.
+     */
+    private void expandSearch(boolean expand) {
+        if (expand == searchExpanded) return;
+        searchExpanded = expand;
+
+        appTitleText.setVisibility(expand ? View.GONE : View.VISIBLE);
+        expandedSearchContainer.setVisibility(expand ? View.VISIBLE : View.GONE);
+        searchExpandButton.setVisibility(expand ? View.GONE : View.VISIBLE);
+
+        if (expand) {
+            // Show history right away if there is any
+            updateSearchHistoryVisibility(searchEditText.length() == 0);
+            // Focus and open the keyboard
+            searchEditText.requestFocus();
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.showSoftInput(searchEditText, InputMethodManager.SHOW_IMPLICIT);
+        } else {
+            // Collapse also clears the query and hides the keyboard
+            searchEditText.setText("");
+            updateSearchHistoryVisibility(false);
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(searchEditText.getWindowToken(), 0);
+        }
+    }
+
+    private void collapseSearch() {
+        expandSearch(false);
     }
 
     // Add the toggleMixerMode method
@@ -7567,7 +7777,7 @@ public class MainActivity extends AppCompatActivity {
     private void applySeekSkipLabel(TextView label, View button, int seconds, boolean backward) {
         if (label != null) {
             label.setText(formatSeekSecondsLabel(seconds));
-            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, seconds >= 100 ? 7f : 8f);
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, seconds >= 100 ? 8f : 9f);
         }
         if (button != null) {
             String direction = backward ? getString(R.string.seek_backward) : getString(R.string.seek_forward);
@@ -7576,7 +7786,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatSeekSecondsLabel(int seconds) {
-        return seconds >= 100 ? String.valueOf(seconds) : seconds + "s";
+        // Number only — it renders inside the curved skip arrow (replay_10 / forward_10 style).
+        return String.valueOf(seconds);
     }
 
     private void autoScrollToCurrentSongIfEnabled() {
