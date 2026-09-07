@@ -4,7 +4,8 @@
     android:viewportWidth="24.0"
     android:viewportHeight="24.0"
     android:tint="@color/player_button_icon">
+    <!-- Two 4.5-unit bars with a 6-unit gap for a clearer pause glyph. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M6,19h4L10,5L6,5v14zM14,5v14h4L18,5h-4z"/>
-</vector> 
+        android:pathData="M6,19h4.5L10.5,5L6,5v14zM13.5,5v14h4.5L18,5h-4.5z" />
+</vector>

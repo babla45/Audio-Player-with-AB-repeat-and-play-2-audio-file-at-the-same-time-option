@@ -13,50 +13,40 @@
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <!-- App Bar -->
+        <!-- App Bar: single row — [Title] [🔍] [⋮]. Tapping 🔍 expands the search
+             field in place of the title; the internal search structure (bg, icon,
+             EditText, clear button) is unchanged so existing logic keeps working. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:paddingHorizontal="20dp"
+            android:paddingHorizontal="12dp"
             android:background="@color/background">
 
             <TextView
+                android:id="@+id/appTitleText"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:paddingStart="8dp"
                 android:text="Audio Player by Babla"
                 android:textSize="22sp"
                 android:textStyle="bold"
-                android:textColor="@color/text_primary" />
+                android:textColor="@color/text_primary"
+                android:singleLine="true"
+                android:ellipsize="end" />
 
-            <ImageButton
-                android:id="@+id/appBarMenuButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:src="@drawable/ic_more_vert"
-                app:tint="@color/text_secondary"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="More options"
-                android:padding="8dp" />
-        </LinearLayout>
-
-        <!-- Search bar -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingHorizontal="16dp"
-            android:paddingBottom="8dp">
-
+            <!-- Expanded search field (replaces the title when searching) -->
             <LinearLayout
-                android:layout_width="match_parent"
+                android:id="@+id/expandedSearchContainer"
+                android:layout_width="0dp"
                 android:layout_height="44dp"
+                android:layout_weight="1"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:background="@drawable/bg_search_bar">
+                android:background="@drawable/bg_search_bar"
+                android:visibility="gone">
 
                 <ImageView
                     android:layout_width="20dp"
@@ -92,6 +82,64 @@
                     android:focusable="true"
                     android:contentDescription="@string/clear_search" />
             </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/searchExpandButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_search"
+                app:tint="@color/text_secondary"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Search songs"
+                android:padding="8dp" />
+
+            <ImageButton
+                android:id="@+id/appBarMenuButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_more_vert"
+                app:tint="@color/text_secondary"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="More options"
+                android:padding="8dp" />
+        </LinearLayout>
+
+        <!-- Search history chips (visible only when search box is empty and history exists) -->
+        <LinearLayout
+            android:id="@+id/searchHistoryContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp"
+            android:paddingBottom="4dp"
+            android:layout_marginBottom="4dp"
+            android:visibility="gone">
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:scrollbars="none"
+                android:overScrollMode="never">
+
+                <LinearLayout
+                    android:id="@+id/searchHistoryChipsLayout"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <ImageView
+                android:id="@+id/searchHistoryClearButton"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="6dp"
+                android:src="@drawable/ic_delete"
+                app:tint="@color/text_tertiary"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Clear search history" />
         </LinearLayout>
 
         <!-- Playlist info banner (hidden by default) -->
@@ -403,7 +451,7 @@
                     android:background="@drawable/bg_control_button"
                     android:contentDescription="Previous"
                     android:padding="10dp"
-                    android:src="@android:drawable/ic_media_previous"
+                    android:src="@drawable/ic_rewind"
                     app:tint="@color/text_primary" />
 
                 <FrameLayout
@@ -420,7 +468,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:contentDescription="@null"
-                        android:padding="4dp"
+                        android:padding="2dp"
                         android:src="@drawable/ic_skip_back_seconds"
                         app:tint="@color/text_primary" />
 
@@ -430,9 +478,9 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="center"
                         android:includeFontPadding="false"
-                        android:text="10s"
+                        android:text="10"
                         android:textColor="@color/text_primary"
-                        android:textSize="8sp"
+                        android:textSize="10sp"
                         android:textStyle="bold" />
                 </FrameLayout>
 
@@ -462,7 +510,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="match_parent"
                         android:contentDescription="@null"
-                        android:padding="4dp"
+                        android:padding="2dp"
                         android:src="@drawable/ic_skip_forward_seconds"
                         app:tint="@color/text_primary" />
 
@@ -472,9 +520,9 @@
                         android:layout_height="wrap_content"
                         android:layout_gravity="center"
                         android:includeFontPadding="false"
-                        android:text="10s"
+                        android:text="10"
                         android:textColor="@color/text_primary"
-                        android:textSize="8sp"
+                        android:textSize="10sp"
                         android:textStyle="bold" />
                 </FrameLayout>
 
@@ -485,7 +533,7 @@
                     android:background="@drawable/bg_control_button"
                     android:contentDescription="Next"
                     android:padding="10dp"
-                    android:src="@android:drawable/ic_media_next"
+                    android:src="@drawable/ic_fast_forward"
                     app:tint="@color/text_primary" />
             </LinearLayout>
 
