@@ -236,6 +236,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_NAME = "audio_player_prefs";
     private static final String PREF_NOW_PLAYING_URI = "now_playing_uri";
     private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
+    private static final String PREF_NOW_PLAYING_POSITION = "now_playing_position";
+    private static final String PREF_NOW_PLAYING_DURATION = "now_playing_duration";
     private static final String PREF_ALLOW_AUDIO_MIX = "allow_audio_mix";
     private static final String PREF_AUTO_SLIDE_TO_CURRENT = "auto_slide_to_current_song";
     private static final String PREF_THEME_MODE = "theme_mode";
@@ -520,6 +522,25 @@ public class MainActivity extends AppCompatActivity {
     // Add this as a class field
     private boolean shouldAutoPlay = false;
 
+    /**
+     * Playback position (ms) saved from the previous session. When the app is
+     * relaunched with no live MediaPlayer and the user presses play, the fresh
+     * player seeks to this position instead of restarting the track from 0:00.
+     * Consumed (cleared) once applied in onPrepared or on error.
+     */
+    private int pendingRestoreSeekMs = 0;
+
+    // Throttle for periodic position persistence during playback (every ~2s)
+    private long lastPositionSaveAtMs = 0L;
+
+    /**
+     * URI of the track the current primary MediaPlayer was last prepared for.
+     * Lets saveNowPlayingPrefs() know whether the player's position belongs to
+     * the currently selected track (it briefly doesn't right after a new file
+     * is picked but before its onPrepared fires).
+     */
+    private Uri playerPreparedUri = null;
+
     private static class SavedMixerPreset {
         String name;
         String primaryUri;
@@ -694,6 +715,8 @@ public class MainActivity extends AppCompatActivity {
                 if ("PLAYBACK_PAUSED".equals(intent.getAction())) {
                     isPlaying = false;
                     safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                    // Persist position when paused externally (notification / headset / focus loss)
+                    saveNowPlayingPrefs();
                 } else if ("PLAYBACK_RESUMED".equals(intent.getAction())) {
                     isPlaying = true;
                     safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
@@ -714,7 +737,27 @@ public class MainActivity extends AppCompatActivity {
             SharedPreferences.Editor editor = prefs.edit();
             editor.putString(PREF_NOW_PLAYING_URI, selectedAudioUri != null ? selectedAudioUri.toString() : null);
             editor.putString(PREF_NOW_PLAYING_TITLE, fileNameText != null ? fileNameText.getText().toString() : null);
+
+            // Persist the exact playback position and duration so the app can
+            // restore the paused state (timestamps + seekbar) after being closed.
+            if (mediaPlayer != null && selectedAudioUri != null
+                    && selectedAudioUri.equals(playerPreparedUri)) {
+                // Live player matches the selected track — save its real position
+                try {
+                    editor.putInt(PREF_NOW_PLAYING_POSITION,
+                            Math.max(0, mediaPlayer.getCurrentPosition()));
+                    editor.putInt(PREF_NOW_PLAYING_DURATION,
+                            Math.max(0, mediaPlayer.getDuration()));
+                } catch (Exception ignored) {}
+            } else if (mediaPlayer != null && selectedAudioUri != null) {
+                // A new track was selected but its player isn't prepared yet —
+                // reset the saved position so the new track restores from 0:00.
+                editor.putInt(PREF_NOW_PLAYING_POSITION, 0);
+                editor.putInt(PREF_NOW_PLAYING_DURATION, 0);
+            }
+            // (no live player → keep the previously saved values untouched)
             editor.apply();
+            lastPositionSaveAtMs = System.currentTimeMillis();
         } catch (Exception e) {
             Log.e(TAG, "Failed to save now playing prefs", e);
         }
@@ -738,6 +781,31 @@ public class MainActivity extends AppCompatActivity {
                     fileNameText.setText(title);
                 }
             }
+
+            // Restore the saved playback position / duration into the UI when
+            // there is no live MediaPlayer (fresh launch). The mini player and
+            // expanded player then show the correct paused-state timestamps and
+            // seekbar position instead of "0:00 / 0:00".
+            if (mediaPlayer == null) {
+                int savedPosition = prefs.getInt(PREF_NOW_PLAYING_POSITION, 0);
+                int savedDuration = prefs.getInt(PREF_NOW_PLAYING_DURATION, 0);
+
+                if (savedDuration > 0 && savedPosition >= 0
+                        && selectedAudioUri != null && uriStr != null
+                        && selectedAudioUri.toString().equals(uriStr)) {
+                    int position = Math.min(savedPosition, savedDuration);
+                    if (seekBar != null) {
+                        seekBar.setMax(savedDuration);
+                        seekBar.setProgress(position);
+                    }
+                    if (miniProgressBar != null) {
+                        miniProgressBar.setMax(savedDuration);
+                        miniProgressBar.setProgress(position);
+                    }
+                    updateTimeText(position, savedDuration);
+                }
+            }
+
             updateMiniPlayer();
         } catch (Exception e) {
             Log.e(TAG, "Failed to restore now playing prefs", e);
@@ -756,6 +824,8 @@ public class MainActivity extends AppCompatActivity {
                     // Throws IllegalStateException if the instance was released
                     svcMain.getAudioSessionId();
                     mediaPlayer = svcMain;
+                    // The adopted player is playing the restored selection
+                    playerPreparedUri = selectedAudioUri;
                 } catch (IllegalStateException e) {
                     Log.w(TAG, "Service player is released, will create a fresh one");
                 }
@@ -1030,6 +1100,8 @@ public class MainActivity extends AppCompatActivity {
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;
                         startPlaybackService("ACTION_PAUSE");
+                        // Persist the paused position so the app restores here after exit
+                        saveNowPlayingPrefs();
                     } else {
                         mediaPlayer.start();
 
@@ -1053,6 +1125,14 @@ public class MainActivity extends AppCompatActivity {
                 } catch (IllegalStateException e) {
                     Log.e(TAG, "Error with play/pause", e);
                     shouldAutoPlay = true;
+                    // The old player instance is dead — resume from the last
+                    // persisted position instead of restarting the track
+                    try {
+                        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                        if (selectedAudioUri.toString().equals(prefs.getString(PREF_NOW_PLAYING_URI, null))) {
+                            pendingRestoreSeekMs = prefs.getInt(PREF_NOW_PLAYING_POSITION, 0);
+                        }
+                    } catch (Exception ignored) {}
                     prepareMediaPlayer();
                 }
             } else if (selectedAudioUri != null) {
@@ -1060,11 +1140,20 @@ public class MainActivity extends AppCompatActivity {
                 // In that case, rebuild and prepare the player so play works from mini player/main button.
                 try {
                     shouldAutoPlay = true;
+                    // Resume from the position saved in the previous session (if any)
+                    // instead of restarting the track from the beginning.
+                    try {
+                        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                        if (selectedAudioUri.toString().equals(prefs.getString(PREF_NOW_PLAYING_URI, null))) {
+                            pendingRestoreSeekMs = prefs.getInt(PREF_NOW_PLAYING_POSITION, 0);
+                        }
+                    } catch (Exception ignored) {}
                     initMediaPlayer();
                     prepareMediaPlayer();
                 } catch (Exception e) {
                     Log.e(TAG, "Failed to restore playback from saved selection", e);
                     shouldAutoPlay = false;
+                    pendingRestoreSeekMs = 0;
                     Toast.makeText(this, "Unable to resume this file", Toast.LENGTH_SHORT).show();
                 }
             } else {
@@ -1211,6 +1300,9 @@ public class MainActivity extends AppCompatActivity {
                         if (serviceBound && audioService != null) {
                             audioService.notifyAppSeek();
                         }
+
+                        // Persist the new position so exit/restore reflects this seek
+                        saveNowPlayingPrefs();
                     } catch (IllegalStateException e) {
                         Log.e(TAG, "Error seeking media player", e);
                     }
@@ -1444,6 +1536,10 @@ public class MainActivity extends AppCompatActivity {
                     openAudioEffectSession(mp.getAudioSessionId());
                     ensureEqualizerInitialized();
 
+                    // Track which URI this player is now prepared for (used by
+                    // saveNowPlayingPrefs to attribute the position correctly)
+                    playerPreparedUri = requestUri;
+
                     // Set the seekbar maximum to the total duration
                     int duration = mp.getDuration();
                     seekBar.setMax(duration);
@@ -1456,6 +1552,23 @@ public class MainActivity extends AppCompatActivity {
 
                     // Check if we should auto-play
                     if (shouldAutoPlay) {
+                        // Restore a position saved from a previous session (or a
+                        // dead player) before starting so playback resumes there
+                        if (pendingRestoreSeekMs > 0) {
+                            try {
+                                int target = pendingRestoreSeekMs;
+                                if (duration > 0 && target > duration) {
+                                    target = duration;
+                                }
+                                mp.seekTo(target);
+                                seekBar.setProgress(target);
+                                updateTimeText(target, duration);
+                                updateMiniPlayer();
+                            } catch (Exception seekEx) {
+                                Log.w(TAG, "Restore seek failed, starting from 0", seekEx);
+                            }
+                            pendingRestoreSeekMs = 0;
+                        }
                         // Start playing automatically
                         mp.start();
                         safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
@@ -1523,6 +1636,7 @@ public class MainActivity extends AppCompatActivity {
                 safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                 isPlaying = false;
                 shouldAutoPlay = false; // Reset flag on error
+                pendingRestoreSeekMs = 0;
                 return true; // Error handled
             });
 
@@ -1982,6 +2096,13 @@ public class MainActivity extends AppCompatActivity {
                 // Update mini player
                 updateMiniPlayer();
 
+                // Periodically persist the playback position (throttled to
+                // ~2s) so an abrupt exit (swipe away / process kill) still
+                // restores close to the last heard position.
+                if (System.currentTimeMillis() - lastPositionSaveAtMs > 2000L) {
+                    saveNowPlayingPrefs();
+                }
+
                 if (mediaPlayer.isPlaying()) {
                     runnable = () -> updateSeekBar();
                     // Keep A-B repeat responsive for short loop ranges.
@@ -2137,6 +2258,7 @@ public class MainActivity extends AppCompatActivity {
                 releaseEqualizerEffects();
                 mediaPlayer.release();
                 mediaPlayer = null;
+                playerPreparedUri = null;
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing media player", e);
             }
@@ -5221,6 +5343,16 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        // Persist the current now-playing state (uri, title, position, duration)
+        // before teardown so the app can restore the paused position on relaunch.
+        // onDestroy may not run on a force-kill, which is why the position is
+        // also saved periodically during playback and on pause/seek.
+        try {
+            saveNowPlayingPrefs();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to save now playing state on destroy", e);
+        }
+
         // Unregister phone state receiver
         if (phoneStateReceiver != null) {
             try {
