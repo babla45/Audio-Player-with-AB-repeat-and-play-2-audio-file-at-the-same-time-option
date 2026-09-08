@@ -18,6 +18,8 @@
     <color name="surface_700">#FFF7F7F7</color>
     <color name="surface_600">#FFEFEFEF</color>
     <color name="surface_500">#FFE5E5E5</color>
+    <!-- Seek bar's unfinished (background) track — light but visible -->
+    <color name="track_unfinished">#FFA8A8AD</color>
 
     <!-- Accent Colors -->
     <color name="accent_primary">#6C63FF</color>

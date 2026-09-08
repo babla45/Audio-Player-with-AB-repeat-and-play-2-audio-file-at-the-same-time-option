@@ -41,18 +41,64 @@
             android:textColor="@color/text_primary"
             android:layout_marginStart="12dp" />
 
-        <ImageView
-            android:id="@+id/ab_step_btn"
-            android:layout_width="32dp"
+        <!-- Inline fine-tune step control: [-] [input] [+] (seconds),
+             replaces the old tune-icon popup dialog -->
+        <LinearLayout
+            android:id="@+id/ab_step_container"
+            android:layout_width="wrap_content"
             android:layout_height="32dp"
-            android:padding="4dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginEnd="8dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="true"
-            android:focusable="true"
-            android:contentDescription="Set nudge step"
-            android:src="@drawable/ic_tune"
-            app:tint="@color/text_secondary" />
+            android:background="@drawable/bg_icon_container"
+            android:paddingHorizontal="2dp">
+
+            <ImageView
+                android:id="@+id/ab_step_minus"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:padding="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Decrease step"
+                android:src="@drawable/ic_nudge_minus"
+                app:tint="@color/text_secondary" />
+
+            <EditText
+                android:id="@+id/ab_step_input"
+                android:layout_width="52dp"
+                android:layout_height="match_parent"
+                android:background="@android:color/transparent"
+                android:gravity="center"
+                android:hint="1"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:inputType="numberDecimal"
+                android:singleLine="true"
+                android:imeOptions="actionDone"
+                android:contentDescription="Fine-tune step in seconds" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="s"
+                android:textSize="12sp"
+                android:textColor="@color/text_tertiary" />
+
+            <ImageView
+                android:id="@+id/ab_step_plus"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:padding="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:focusable="true"
+                android:contentDescription="Increase step"
+                android:src="@drawable/ic_nudge_plus"
+                app:tint="@color/text_secondary" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/ab_status_badge"
@@ -100,6 +146,97 @@
         android:paddingHorizontal="16dp"
         android:progressTint="@color/accent_primary"
         android:thumbTint="@color/accent_primary" />
+
+    <!-- Position nudge: step the playback position by ±3s (default) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="20dp"
+        android:layout_marginTop="2dp"
+        android:paddingBottom="4dp">
+
+        <ImageView
+            android:id="@+id/ab_position_minus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Seek backward 3 seconds"
+            android:src="@drawable/ic_nudge_minus"
+            app:tint="@color/text_secondary" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Tapping opens the keyboard to type a custom seek step (seconds).
+             Compact: no stretch, tight "3s" grouping with the suffix. -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/ab_position_step_label"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:minWidth="18dp"
+                android:gravity="center"
+                android:background="@android:color/transparent"
+                android:padding="0dp"
+                android:text="3"
+                android:textSize="11sp"
+                android:textColor="@color/text_tertiary"
+                android:inputType="numberDecimal"
+                android:singleLine="true"
+                android:imeOptions="actionDone"
+                android:contentDescription="Seek step in seconds" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="s"
+                android:textSize="11sp"
+                android:textColor="@color/text_tertiary" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <ImageView
+            android:id="@+id/ab_position_plus"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Seek forward 3 seconds"
+            android:src="@drawable/ic_nudge_plus"
+            app:tint="@color/text_secondary" />
+
+        <!-- Small play/pause toggle -->
+        <ImageView
+            android:id="@+id/ab_play_pause"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:padding="6dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:contentDescription="Play or pause"
+            android:src="@drawable/ic_play"
+            app:tint="@color/success" />
+    </LinearLayout>
 
     <!-- A-B range: slide the two handles to adjust Point A and Point B -->
     <LinearLayout
@@ -195,6 +332,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:padding="6dp"
+            android:layout_marginEnd="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:focusable="true"
@@ -206,15 +344,13 @@
             android:id="@+id/ab_play_a"
             android:layout_width="32dp"
             android:layout_height="32dp"
-            android:padding="4dp"
-            android:layout_marginStart="4dp"
+            android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:focusable="true"
             android:contentDescription="Play from Point A"
-            android:src="@drawable/ic_play"
-            app:tint="@color/success" />
-
+            android:src="@drawable/ic_jump_to_a"
+            app:tint="@color/accent_primary" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ab_set_a_btn"
             style="@style/Widget.Material3.Button.TonalButton"
@@ -274,6 +410,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp"
             android:padding="6dp"
+            android:layout_marginEnd="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:focusable="true"
@@ -285,14 +422,13 @@
             android:id="@+id/ab_play_b"
             android:layout_width="32dp"
             android:layout_height="32dp"
-            android:padding="4dp"
-            android:layout_marginStart="4dp"
+            android:padding="6dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:focusable="true"
             android:contentDescription="Play from Point B"
-            android:src="@drawable/ic_play"
-            app:tint="@color/success" />
+            android:src="@drawable/ic_jump_to_b"
+            app:tint="@color/accent_primary" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ab_set_b_btn"
