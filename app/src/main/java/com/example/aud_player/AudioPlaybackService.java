@@ -1083,10 +1083,15 @@ public class AudioPlaybackService extends Service {
         }
     }
 
+    /** Remaining sleep-timer time in ms; 0 when no timer is running. */
+    public long getRemainingTimerTime() {
+        long left = timerEndTime - System.currentTimeMillis();
+        return Math.max(0, left);
+    }
+
     public void setTimer(long endTimeMillis, int action) {
         timerEndTime = endTimeMillis;
         timerAction = action;
-        
         // Cancel any existing timer
         if (timerRunnable != null) {
             timerHandler.removeCallbacks(timerRunnable);
