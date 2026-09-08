@@ -295,6 +295,24 @@ public class AudioPlaybackService extends Service {
                     break;
                 case ACTION_NEXT:
                     try {
+                        // Always stop the current track BEFORE requesting the next
+                        // one — this guarantees the previous song can never keep
+                        // playing under the new one, even if the UI-side handler
+                        // is slow, duplicated, or missing after an app restart.
+                        if (mediaPlayer != null) {
+                            try {
+                                if (mediaPlayer.isPlaying()) {
+                                    mediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                        if (!secondAudioActive && secondMediaPlayer != null) {
+                            try {
+                                if (secondMediaPlayer.isPlaying()) {
+                                    secondMediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
+                        }
                         Intent nextIntent = new Intent("MEDIA_NEXT");
                         sendLocalBroadcast(nextIntent);
                     } catch (Exception e) {
@@ -303,6 +321,22 @@ public class AudioPlaybackService extends Service {
                     break;
                 case ACTION_PREV:
                     try {
+                        // Same as ACTION_NEXT: stop the current track first so a
+                        // stale/lagging handler can never leave two songs playing.
+                        if (mediaPlayer != null) {
+                            try {
+                                if (mediaPlayer.isPlaying()) {
+                                    mediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                        if (!secondAudioActive && secondMediaPlayer != null) {
+                            try {
+                                if (secondMediaPlayer.isPlaying()) {
+                                    secondMediaPlayer.stop();
+                                }
+                            } catch (Exception ignored) {}
+                        }
                         Intent prevIntent = new Intent("MEDIA_PREV");
                         sendLocalBroadcast(prevIntent);
                     } catch (Exception e) {
@@ -349,7 +383,15 @@ public class AudioPlaybackService extends Service {
                                 }
                             } catch (Exception ignored) {}
                         }
-                        
+
+                        // Kill EVERY remaining player in the process — including
+                        // orphans this service has no reference to (e.g. created
+                        // by a stale activity instance after a close → reopen
+                        // cycle). Nothing may keep playing after the app closes.
+                        try {
+                            PlaybackRegistry.stopAll();
+                        } catch (Exception ignored) {}
+
                         // Stop the service directly - don't use handler delay
                         stopSelf();
                         abandonAudioFocus();
@@ -1012,6 +1054,11 @@ public class AudioPlaybackService extends Service {
             }
             secondAudioActive = false;
             isPlaying = false;
+            // Also kill any orphaned players that were never handed to this
+            // service, so tearing the service down can never leave audio running.
+            try {
+                PlaybackRegistry.stopAll();
+            } catch (Exception ignored) {}
             abandonAudioFocus();
             if (mediaSession != null) {
                 mediaSession.setActive(false);
@@ -1145,7 +1192,13 @@ public class AudioPlaybackService extends Service {
                             if (secondMediaPlayer != null && secondMediaPlayer.isPlaying()) {
                                 secondMediaPlayer.stop();
                             }
-                            
+
+                            // Also kill any orphaned players this service doesn't
+                            // know about so nothing survives the app closing.
+                            try {
+                                PlaybackRegistry.stopAll();
+                            } catch (Exception ignored) {}
+
                             // Send broadcast to update UI with action
                             Intent finishedIntent = new Intent("TIMER_FINISHED");
                             finishedIntent.putExtra("TIMER_ACTION", timerAction);

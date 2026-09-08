@@ -576,6 +576,7 @@ public class MainActivity extends AppCompatActivity {
     // Add a new class variable for the receiver
     private BroadcastReceiver closeAppReceiver;
     private BroadcastReceiver mediaControlsReceiver;
+    private BroadcastReceiver pausedStateReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -690,6 +691,9 @@ public class MainActivity extends AppCompatActivity {
         mediaControlsReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
+                // A destroyed activity's leaked receiver must never trigger
+                // playback — that would start a second, orphaned MediaPlayer.
+                if (isFinishing() || isDestroyed()) return;
                 String action = intent.getAction();
                 if ("MEDIA_NEXT".equals(action)) {
                     playNextFromContext();
@@ -712,6 +716,8 @@ public class MainActivity extends AppCompatActivity {
         BroadcastReceiver pausedReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
+                // Guard against a leaked receiver firing on a destroyed activity
+                if (isFinishing() || isDestroyed()) return;
                 if ("PLAYBACK_PAUSED".equals(intent.getAction())) {
                     isPlaying = false;
                     safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
@@ -728,6 +734,7 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter pausedFilter = new IntentFilter();
         pausedFilter.addAction("PLAYBACK_PAUSED");
         pausedFilter.addAction("PLAYBACK_RESUMED");
+        pausedStateReceiver = pausedReceiver;
         ContextCompat.registerReceiver(this, pausedReceiver, pausedFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
@@ -1103,6 +1110,14 @@ public class MainActivity extends AppCompatActivity {
                         // Persist the paused position so the app restores here after exit
                         saveNowPlayingPrefs();
                     } else {
+                        // Mixer off → kill any orphaned players left over from a
+                        // previous lifecycle before this one starts, so resume
+                        // can never overlap with a leftover track
+                        if (!mixerModeActive || !secondAudioActive) {
+                            PlaybackRegistry.stopAllExcept(mediaPlayer, null);
+                        } else {
+                            PlaybackRegistry.stopAllExcept(mediaPlayer, secondMediaPlayer);
+                        }
                         mediaPlayer.start();
 
                         // Also start the second audio if it's ready (unless it already
@@ -1474,6 +1489,7 @@ public class MainActivity extends AppCompatActivity {
     private void initMediaPlayer() {
         if (mediaPlayer == null) {
             mediaPlayer = new MediaPlayer();
+            PlaybackRegistry.register(mediaPlayer);
         }
     }
 
@@ -1498,10 +1514,13 @@ public class MainActivity extends AppCompatActivity {
                     // so future songs still play instead of failing until the app
                     // is force-closed.
                     Log.w(TAG, "Stale MediaPlayer instance, creating a new one", e);
+                    PlaybackRegistry.unregister(mediaPlayer);
                     mediaPlayer = new MediaPlayer();
+                    PlaybackRegistry.register(mediaPlayer);
                 }
             } else {
                 mediaPlayer = new MediaPlayer();
+                PlaybackRegistry.register(mediaPlayer);
             }
 
             // If the second track isn't active (mixer off / cleared), make sure a
@@ -1513,6 +1532,16 @@ public class MainActivity extends AppCompatActivity {
                         secondMediaPlayer.pause();
                     }
                 } catch (Exception ignored) {}
+            }
+
+            // Enforce a single active playback instance when the mixer is off:
+            // stop and release ANY other player left over from a previous
+            // activity/service lifecycle (e.g. close → reopen) before this
+            // track starts. With the mixer on, keep the second track alive.
+            if (!mixerModeActive || !secondAudioActive) {
+                PlaybackRegistry.stopAllExcept(mediaPlayer, null);
+            } else {
+                PlaybackRegistry.stopAllExcept(mediaPlayer, secondMediaPlayer);
             }
 
             // Update the adapter to highlight the current track
@@ -2256,11 +2285,13 @@ public class MainActivity extends AppCompatActivity {
             try {
                 closeAudioEffectSession(mediaPlayer.getAudioSessionId());
                 releaseEqualizerEffects();
+                PlaybackRegistry.unregister(mediaPlayer);
                 mediaPlayer.release();
                 mediaPlayer = null;
                 playerPreparedUri = null;
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing media player", e);
+                PlaybackRegistry.unregister(mediaPlayer);
             }
         }
     }
@@ -5170,15 +5201,18 @@ public class MainActivity extends AppCompatActivity {
         // Release existing second player if needed
         if (secondMediaPlayer != null) {
             try {
+                PlaybackRegistry.unregister(secondMediaPlayer);
                 secondMediaPlayer.release();
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing second media player", e);
+                PlaybackRegistry.unregister(secondMediaPlayer);
             }
             secondMediaPlayer = null;
         }
 
         // Create new second media player - use a completely separate instance creation
         secondMediaPlayer = new MediaPlayer();
+        PlaybackRegistry.register(secondMediaPlayer);
 
         try {
             // Use a completely separate preparation path for the second player
@@ -5237,9 +5271,11 @@ public class MainActivity extends AppCompatActivity {
                 secondAudioActive = false;
                 if (secondMediaPlayer != null) {
                     try {
+                        PlaybackRegistry.unregister(secondMediaPlayer);
                         secondMediaPlayer.release();
                     } catch (Exception e) {
                         Log.e(TAG, "Error releasing second player after error", e);
+                        PlaybackRegistry.unregister(secondMediaPlayer);
                     }
                     secondMediaPlayer = null;
                 }
@@ -5365,9 +5401,15 @@ public class MainActivity extends AppCompatActivity {
         // Release audio focus
         abandonAudioFocus();
 
-        // Unbind from the service
+        // Unbind from the service (guarded: an exception here must never
+        // abort the rest of the teardown, or receivers leak and a closed
+        // app would later answer MEDIA_NEXT with a second playback)
         if (serviceBound) {
-            unbindService(serviceConnection);
+            try {
+                unbindService(serviceConnection);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unbinding service on destroy", e);
+            }
             serviceBound = false;
         }
 
@@ -5379,10 +5421,12 @@ public class MainActivity extends AppCompatActivity {
         // Only release second MediaPlayer if it's not playing
         if (secondMediaPlayer != null && !secondMediaPlayer.isPlaying()) {
             try {
+                PlaybackRegistry.unregister(secondMediaPlayer);
                 secondMediaPlayer.release();
                 secondMediaPlayer = null;
             } catch (Exception e) {
                 Log.e(TAG, "Error releasing second media player", e);
+                PlaybackRegistry.unregister(secondMediaPlayer);
             }
         }
 
@@ -5398,7 +5442,11 @@ public class MainActivity extends AppCompatActivity {
 
         // Unregister the broadcast receivers
         if (playbackStoppedReceiver != null) {
-            unregisterReceiver(playbackStoppedReceiver);
+            try {
+                unregisterReceiver(playbackStoppedReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering playback stopped receiver", e);
+            }
         }
 
         // Unregister the timer update receiver
@@ -5416,6 +5464,26 @@ public class MainActivity extends AppCompatActivity {
                 unregisterReceiver(closeAppReceiver);
             } catch (Exception e) {
                 Log.e(TAG, "Error unregistering close app receiver", e);
+            }
+        }
+
+        // Unregister the media controls (next/prev/seek) receiver. If this is
+        // missed, a closed-then-reopened app ends up with TWO live receivers,
+        // so one notification Next/Previous press plays TWO songs at once.
+        if (mediaControlsReceiver != null) {
+            try {
+                unregisterReceiver(mediaControlsReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering media controls receiver", e);
+            }
+        }
+
+        // Unregister the paused/resumed state receiver (kept as a field for this)
+        if (pausedStateReceiver != null) {
+            try {
+                unregisterReceiver(pausedStateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering paused state receiver", e);
             }
         }
 
@@ -8684,7 +8752,12 @@ public class MainActivity extends AppCompatActivity {
     private void clearSecondAudio() {
         // Release second media player
         if (secondMediaPlayer != null) {
-            secondMediaPlayer.release();
+            try {
+                PlaybackRegistry.unregister(secondMediaPlayer);
+                secondMediaPlayer.release();
+            } catch (Exception ignored) {
+                PlaybackRegistry.unregister(secondMediaPlayer);
+            }
             secondMediaPlayer = null;
         }
         
