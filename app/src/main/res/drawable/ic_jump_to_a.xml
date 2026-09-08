@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Jump to Point A: arrow pointing LEFT with the vertical bar on the RIGHT
+     (mirror of ic_jump_to_b) = "go back and play from Point A". -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- Bold left-pointing arrow -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M14,5 L5,12 L14,19 Z" />
+
+    <!-- Vertical marker bar on the right (mirror of Point B icon) -->
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M17,4 L19,4 L19,20 L17,20 Z" />
+</vector>

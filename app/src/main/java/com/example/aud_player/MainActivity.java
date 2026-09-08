@@ -108,6 +108,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -169,6 +170,12 @@ public class MainActivity extends AppCompatActivity {
     private int pointA = -1;
     private int pointB = -1;
     private boolean abRepeatActive = false;
+    // While the user drags the range slider's B handle (before enabling the
+    // loop), playback pauses exactly at B instead of running past it.
+    private boolean abPauseAtBEnabled = false;
+    // Green A→B band overlay on the main seek bar while A-B repeat is enabled.
+    // Cached so we only re-inset, not recreate, on every poll tick.
+    private LayerDrawable abGreenBand;
     private TextView abRepeatIndicator;
     private MediaPlayer secondMediaPlayer = null;
     private Uri secondAudioUri = null;
@@ -1939,10 +1946,16 @@ public class MainActivity extends AppCompatActivity {
                             secondMediaPlayer.seekTo(secondPositionA);
                         }
                     }
+                } else if (pointB != -1 && abPauseAtBEnabled && currentPosition >= pointB) {
+                    // Pre-enable behavior: while dragging the slider (or
+                    // otherwise setting B before enabling the loop), playback
+                    // stops exactly at B instead of running past it.
+                    pausePlaybackAtB();
                 }
 
                 seekBar.setProgress(currentPosition);
                 updateTimeText(currentPosition, mediaPlayer.getDuration());
+                updateABGreenBand(mediaPlayer.getDuration(), currentPosition);
 
                 // Update mini player
                 updateMiniPlayer();
@@ -1956,6 +1969,120 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "Error updating seek bar", e);
             }
         }
+    }
+
+    /** Pauses playback right at Point B (used before the A-B loop is enabled). */
+    private void pausePlaybackAtB() {
+        try {
+            if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+                isPlaying = false;
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                updateMiniPlayer();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error pausing at Point B", e);
+        }
+    }
+
+    /**
+     * Colors the A→B range of the MAIN seek bar green while A-B repeat is
+     * enabled. Uses the default drawable's own shapes — the standard
+     * rounded track/progress layers — so only COLORS change, never the
+     * bar's shape. Implementation: keep the platform drawable but drive
+     * its three layers directly via levels, which preserves every corner
+     * radius and padding exactly as the default look.
+     */
+    private void updateABGreenBand(int duration, int position) {
+        if (seekBar == null || duration <= 0) {
+            return;
+        }
+        boolean show = abRepeatActive && pointA >= 0 && pointB > pointA;
+        if (!show) {
+            if (abGreenBand != null) {
+                abGreenBand = null;
+                // Restore default progress (drives the platform drawable)
+                seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(
+                        ContextCompat.getColor(this, R.color.accent_primary)));
+                seekBar.setSecondaryProgress(0);
+                seekBar.setProgress(position);
+            }
+            return;
+        }
+
+        int trackWidth = seekBar.getWidth()
+                - seekBar.getPaddingStart() - seekBar.getPaddingEnd();
+        if (trackWidth <= 0) {
+            return; // not laid out yet; the next poll tick retries
+        }
+
+        if (abGreenBand == null) {
+            // Take the platform's own progress drawable (default rounded
+            // shapes intact) and re-tint the secondaryProgress layer green.
+            // secondaryProgress renders BEHIND progress, so the normal
+            // accent progress draws on top of it — the classic buffered-bar
+            // look, reused here as the A→B marker.
+            Drawable current = seekBar.getProgressDrawable();
+            if (current instanceof LayerDrawable) {
+                abGreenBand = (LayerDrawable) current.mutate();
+                // The platform tint applies to the WHOLE LayerDrawable, so
+                // clear it first — we set per-layer colors below instead.
+                abGreenBand.setTintList(null);
+                android.graphics.drawable.ClipDrawable secondary =
+                        (android.graphics.drawable.ClipDrawable)
+                                abGreenBand.findDrawableByLayerId(android.R.id.secondaryProgress);
+                if (secondary != null) {
+                    Drawable inner = secondary.getDrawable();
+                    if (inner instanceof android.graphics.drawable.GradientDrawable) {
+                        // Direct color on the layer's own shape: rounded
+                        // corners stay, and the color is unmistakably green
+                        ((android.graphics.drawable.GradientDrawable) inner.mutate())
+                                .setColor(ContextCompat.getColor(this, R.color.success));
+                    } else if (inner != null) {
+                        inner.mutate().setTintList(null);
+                        inner.setTint(ContextCompat.getColor(this, R.color.success));
+                    }
+                }
+                // The progress layer keeps the normal accent color
+                android.graphics.drawable.ClipDrawable progress =
+                        (android.graphics.drawable.ClipDrawable)
+                                abGreenBand.findDrawableByLayerId(android.R.id.progress);
+                if (progress != null) {
+                    Drawable pInner = progress.getDrawable();
+                    if (pInner instanceof android.graphics.drawable.GradientDrawable) {
+                        ((android.graphics.drawable.GradientDrawable) pInner.mutate())
+                                .setColor(ContextCompat.getColor(this, R.color.accent_primary));
+                    } else if (pInner != null) {
+                        pInner.mutate().setTintList(null);
+                        pInner.setTint(ContextCompat.getColor(this, R.color.accent_primary));
+                    }
+                }
+                // Background layer: light gray so the unfinished part of the
+                // bar is clearly visible against the white background
+                Drawable background = abGreenBand
+                        .findDrawableByLayerId(android.R.id.background);
+                if (background != null) {
+                    if (background instanceof android.graphics.drawable.GradientDrawable) {
+                        ((android.graphics.drawable.GradientDrawable) background.mutate())
+                                .setColor(ContextCompat.getColor(this, R.color.track_unfinished));
+                    } else {
+                        background.mutate().setTintList(null);
+                        background.setTint(ContextCompat.getColor(this, R.color.track_unfinished));
+                    }
+                }
+            } else {
+                // Custom drawable without layers: fall back to just a solid
+                // green secondary tint (still no shape change).
+                seekBar.setSecondaryProgressTintList(
+                        android.content.res.ColorStateList.valueOf(
+                                ContextCompat.getColor(this, R.color.success)));
+            }
+        }
+
+        // Secondary progress shows the A→B range: A clips it from the left,
+        // B is where it ends.
+        seekBar.setSecondaryProgress(pointB);
+        seekBar.setProgress(position);
     }
 
     private void updateTimeText(int currentPosition, int duration) {
@@ -2461,8 +2588,20 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onToggleABRepeat() {
                 if (abRepeatActive) {
+                    // Disable behaves like Clear: fully reset the A-B state
                     abRepeatActive = false;
+                    pointA = -1;
+                    pointB = -1;
+                    abPauseAtBEnabled = false;
                     updateABRepeatIndicator();
+                    // Refresh the bar so the green A→B band disappears
+                    // immediately instead of on the next poll tick
+                    if (mediaPlayer != null) {
+                        try {
+                            updateABGreenBand(mediaPlayer.getDuration(),
+                                    mediaPlayer.getCurrentPosition());
+                        } catch (Exception ignored) {}
+                    }
                 } else {
                     enableABRepeat();
                 }
@@ -2500,6 +2639,14 @@ public class MainActivity extends AppCompatActivity {
                 if (mediaPlayer != null) {
                     try {
                         mediaPlayer.seekTo(position);
+                        // When playback is being held at Point B (pre-enable
+                        // slider hold), seeking to a spot before B restarts
+                        // playback automatically so the user can re-listen.
+                        if (abPauseAtBEnabled && !abRepeatActive
+                                && pointB != -1 && position < pointB
+                                && !mediaPlayer.isPlaying()) {
+                            resumePlayback();
+                        }
                         updateSeekBar();
                     } catch (Exception e) {
                         Log.e(TAG, "Error seeking in A-B sheet", e);
@@ -2539,8 +2686,60 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onMovePointB(int positionMs) { moveABPoint(false, positionMs); }
+
+            @Override
+            public void onTogglePlayPause() {
+                if (mediaPlayer == null) {
+                    return;
+                }
+                try {
+                    if (mediaPlayer.isPlaying()) {
+                        pausePlaybackFromSheet();
+                    } else {
+                        resumePlaybackFromSheet();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error toggling play/pause from A-B sheet", e);
+                }
+            }
+
+            @Override
+            public boolean isPlaying() {
+                try {
+                    return mediaPlayer != null && mediaPlayer.isPlaying();
+                } catch (Exception e) {
+                    return false;
+                }
+            }
         });
         abSheet.show(getSupportFragmentManager(), "ABRepeatBottomSheet");
+    }
+
+    /** Pauses playback when toggled from the A-B repeat sheet (no toast spam). */
+    private void pausePlaybackFromSheet() {
+        try {
+            mediaPlayer.pause();
+            isPlaying = false;
+            safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+            updateMiniPlayer();
+        } catch (Exception e) {
+            Log.e(TAG, "Error pausing from A-B sheet", e);
+        }
+    }
+
+    /** Resumes playback when toggled from the A-B repeat sheet. */
+    private void resumePlaybackFromSheet() {
+        try {
+            if (requestAudioFocus()) {
+                mediaPlayer.start();
+                isPlaying = true;
+                safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                updateMiniPlayer();
+                updateSeekBar();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error resuming from A-B sheet", e);
+        }
     }
 
     private void showSpeedBottomSheet() {
@@ -8646,6 +8845,16 @@ public class MainActivity extends AppCompatActivity {
             pointB = currentPosition;
             String pointBTime = formatTime(pointB);
 
+            // Pause playback so the song does not keep advancing past the
+            // just-marked Point B while the user reviews/enables the loop.
+            if (mediaPlayer.isPlaying()) {
+                mediaPlayer.pause();
+                isPlaying = false;
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                updateMiniPlayer();
+            }
+            abPauseAtBEnabled = true;
+
             // Log point setting
             Log.d(TAG, "Set A-B repeat point B: " + pointBTime + " (" + pointB + "ms)");
 
@@ -8688,12 +8897,11 @@ public class MainActivity extends AppCompatActivity {
                     pointB = -1;
                     abRepeatActive = false;
                     updateABRepeatIndicator();
-                    Toast.makeText(this, "Point A: " + formatTimePrecise(pointA) + " (Point B cleared)", Toast.LENGTH_SHORT).show();
+                   
                     return;
                 }
                 pointA = newA;
                 updateABRepeatIndicator();
-                Toast.makeText(this, "Point A: " + formatTimePrecise(pointA), Toast.LENGTH_SHORT).show();
             } else {
                 if (pointB == -1) {
                     Toast.makeText(this, "Set Point B first", Toast.LENGTH_SHORT).show();
@@ -8706,7 +8914,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 pointB = Math.min(newB, maxPoint);
                 updateABRepeatIndicator();
-                Toast.makeText(this, "Point B: " + formatTimePrecise(pointB), Toast.LENGTH_SHORT).show();
+               
             }
         } catch (Exception e) {
             Log.e(TAG, "Error nudging A-B point", e);
@@ -8788,6 +8996,21 @@ public class MainActivity extends AppCompatActivity {
                     newMs = Math.min(maxPoint, pointA + 200);
                 }
                 pointB = newMs;
+                // Dragging/selecting B with the slider (before the loop is
+                // enabled): hold playback exactly at B instead of running past.
+                if (!abRepeatActive) {
+                    abPauseAtBEnabled = true;
+                    // If already past the newly selected B, clamp back to it
+                    try {
+                        if (mediaPlayer.isPlaying() || isPlaying) {
+                            int pos = mediaPlayer.getCurrentPosition();
+                            if (pos >= pointB) {
+                                mediaPlayer.seekTo(pointB);
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    updateSeekBar();
+                }
             }
             updateABRepeatIndicator();
         } catch (Exception e) {
@@ -8799,6 +9022,7 @@ public class MainActivity extends AppCompatActivity {
         pointA = -1;
         pointB = -1;
         abRepeatActive = false;
+        abPauseAtBEnabled = false;
 
         updateABRepeatIndicator();
 
@@ -8824,6 +9048,7 @@ public class MainActivity extends AppCompatActivity {
     private void enableABRepeat() {
         if (pointA != -1 && pointB != -1) {
             abRepeatActive = true;
+            abPauseAtBEnabled = false; // the enabled loop takes over at B
             updateABRepeatIndicator();
             Toast.makeText(this, "A-B repeat active", Toast.LENGTH_SHORT).show();
 
@@ -8831,8 +9056,13 @@ public class MainActivity extends AppCompatActivity {
             if (mediaPlayer != null) {
                 try {
                     mediaPlayer.seekTo(pointA);
-                    if (!mediaPlayer.isPlaying() && isPlaying) {
+                    // The loop should always start playing from A — even if
+                    // playback was paused at B while setting points.
+                    if (!mediaPlayer.isPlaying()) {
                         mediaPlayer.start();
+                        isPlaying = true;
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                        updateMiniPlayer();
                     }
                     updateSeekBar();
                 } catch (Exception e) {

@@ -50,6 +50,8 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
         void onSetPointBAt(int positionMs);
         void onMovePointA(int positionMs);
         void onMovePointB(int positionMs);
+        void onTogglePlayPause();
+        boolean isPlaying();
     }
 
     private ABRepeatListener listener;
@@ -84,6 +86,16 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
 
     /** Fine-tuning step for the (-)/(+) buttons, in milliseconds (supports fractional seconds). */
     private int nudgeStepMs = Math.round(DEFAULT_NUDGE_STEP_SECONDS * 1000);
+    /** Inline step input in the header: [−] [1] [s] [+]. */
+    private EditText stepInput;
+
+    /** Seek step for the ± position nudge row under the progress bar, ms. */
+    private static final float DEFAULT_POSITION_NUDGE_STEP_MS = 3000f;
+    private int positionNudgeStepMs = (int) DEFAULT_POSITION_NUDGE_STEP_MS;
+    /** Editable "3s" step label; tapping it opens the keyboard. */
+    private EditText positionStepInput;
+    /** Small play/pause toggle at the right of the nudge row. */
+    private ImageView playPauseBtn;
 
     public void setABRepeatListener(ABRepeatListener listener) {
         this.listener = listener;
@@ -107,6 +119,7 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
         nudgeAPlus = view.findViewById(R.id.ab_nudge_a_plus);
         nudgeBMinus = view.findViewById(R.id.ab_nudge_b_minus);
         nudgeBPlus = view.findViewById(R.id.ab_nudge_b_plus);
+        stepInput = view.findViewById(R.id.ab_step_input);
 
         loadNudgeStep();
 
@@ -134,7 +147,8 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
             dismiss();
         });
 
-        view.findViewById(R.id.ab_step_btn).setOnClickListener(v -> showNudgeStepDialog());
+        setupInlineStepControl(view);
+        setupPositionNudgeButtons(view);
 
         // Tapping a timestamp opens a dialog to type the time manually
         pointAValue.setOnClickListener(v -> showEditPointDialog(true));
@@ -241,50 +255,209 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
         });
     }
 
-    /** Dialog for configuring the (-)/(+) step; accepts fractional seconds like 0.1, 0.3, 1.5. */
-    private void showNudgeStepDialog() {
-        Context context = getContext();
-        if (context == null) {
-            return;
+    /**
+     * Inline fine-tune step control in the sheet header: [−] [input] [s] [+].
+     * Typing a value (or tapping −/+) applies immediately — no popup dialog.
+     * The −/+ buttons step by 0.1s below 1s and 0.5s/1s above, quick to reach
+     * common steps; typed values accept any decimal between 0.1 and 60.
+     */
+    private void setupInlineStepControl(View root) {
+        ImageView minus = root.findViewById(R.id.ab_step_minus);
+        ImageView plus = root.findViewById(R.id.ab_step_plus);
+
+        if (stepInput != null) {
+            stepInput.setText(formatStepSeconds(nudgeStepMs));
+            stepInput.setOnEditorActionListener((v, actionId, event) -> {
+                // Done (✓) key or the Enter key: apply the value, then
+                // dismiss the keyboard and leave the field.
+                boolean done = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE;
+                boolean enterKey = event != null
+                        && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                        && (event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+                            || event.getKeyCode() == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER);
+                if (done || enterKey) {
+                    applyStepFromInput();
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager)
+                                    requireContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                    imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                    v.clearFocus();
+                    return true;
+                }
+                return false;
+            });
+            stepInput.setOnFocusChangeListener((v, hasFocus) -> {
+                if (!hasFocus) {
+                    applyStepFromInput();
+                }
+            });
         }
 
-        TextInputLayout inputLayout = new TextInputLayout(context);
-        inputLayout.setHint("Step in seconds (e.g. 0.1, 0.5, 1, 2.5)");
-        inputLayout.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
-        inputLayout.setPadding(
-                (int) (16 * getResources().getDisplayMetrics().density),
-                (int) (8 * getResources().getDisplayMetrics().density),
-                (int) (16 * getResources().getDisplayMetrics().density),
-                0);
+        if (minus != null) {
+            minus.setOnClickListener(v -> {
+                float next = stepDown(nudgeStepMs / 1000f);
+                if (next > 0f) {
+                    applyNudgeStep(next);
+                    syncStepInput();
+                }
+            });
+        }
+        if (plus != null) {
+            plus.setOnClickListener(v -> {
+                applyNudgeStep(stepUp(nudgeStepMs / 1000f));
+                syncStepInput();
+            });
+        }
+    }
 
-        TextInputEditText input = new TextInputEditText(inputLayout.getContext());
-        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        input.setText(formatStepSeconds(nudgeStepMs));
-        input.setSelection(input.getText() != null ? input.getText().length() : 0);
-        inputLayout.addView(input);
+    /**
+     * ± seek-step row under the progress bar: [−] … [3s] … [+] [▶].
+     * The −/+ buttons seek the playback position by the step; the centered
+     * "3s" is an EditText, so tapping it opens the keyboard to type a custom
+     * step (0.1–60s). The right-most button toggles play/pause.
+     */
+    private void setupPositionNudgeButtons(View root) {
+        ImageView minus = root.findViewById(R.id.ab_position_minus);
+        ImageView plus = root.findViewById(R.id.ab_position_plus);
+        positionStepInput = root.findViewById(R.id.ab_position_step_label);
+        playPauseBtn = root.findViewById(R.id.ab_play_pause);
 
-        new MaterialAlertDialogBuilder(context)
-                .setTitle("Fine-tune step")
-                .setMessage("How many seconds the (-)/(+) buttons should move Point A and Point B.")
-                .setView(inputLayout)
-                .setPositiveButton("Save", (dialog, which) -> {
-                    CharSequence text = input.getText();
-                    float seconds = 0f;
-                    if (text != null) {
-                        try {
-                            seconds = Float.parseFloat(text.toString().trim());
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
-                    if (seconds <= 0f || seconds > 60f) {
-                        android.widget.Toast.makeText(context,
-                                "Enter a value between 0 and 60 seconds", android.widget.Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    saveNudgeStep(seconds);
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
+        if (minus != null) {
+            minus.setOnClickListener(v -> seekBy(-positionNudgeStepMs));
+        }
+        if (plus != null) {
+            plus.setOnClickListener(v -> seekBy(positionNudgeStepMs));
+        }
+
+        if (positionStepInput != null) {
+            positionStepInput.setText(formatStepSeconds(positionNudgeStepMs));
+            positionStepInput.setOnEditorActionListener((v, actionId, event) -> {
+                boolean done = actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE;
+                boolean enterKey = event != null
+                        && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                        && (event.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER
+                            || event.getKeyCode() == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER);
+                if (done || enterKey) {
+                    applyPositionStepFromInput();
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager)
+                                    requireContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+                    imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+                    v.clearFocus();
+                    return true;
+                }
+                return false;
+            });
+            positionStepInput.setOnFocusChangeListener((v, hasFocus) -> {
+                if (!hasFocus) {
+                    applyPositionStepFromInput();
+                }
+            });
+        }
+
+        if (playPauseBtn != null) {
+            playPauseBtn.setOnClickListener(v -> {
+                if (listener != null) {
+                    listener.onTogglePlayPause();
+                    syncPlayPauseIcon();
+                }
+            });
+            syncPlayPauseIcon();
+        }
+    }
+
+    /** Seeks the playback position by deltaMs, clamped to the song bounds. */
+    private void seekBy(int deltaMs) {
+        if (listener == null) {
+            return;
+        }
+        int duration = Math.max(0, listener.getDuration());
+        int position = Math.max(0, listener.getCurrentPosition());
+        int target = Math.min(Math.max(position + deltaMs, 0), Math.max(0, duration - 1));
+        listener.onSeekTo(target);
+        refreshProgress();
+    }
+
+    /** Reads the "3s" input and applies it as the seek step (clamped 0.1–60s). */
+    private void applyPositionStepFromInput() {
+        if (positionStepInput == null) {
+            return;
+        }
+        CharSequence text = positionStepInput.getText();
+        float seconds = 0f;
+        if (text != null) {
+            try {
+                seconds = Float.parseFloat(text.toString().trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (seconds > 0f && seconds <= 60f) {
+            positionNudgeStepMs = Math.round(seconds * 1000f);
+        }
+        positionStepInput.setText(formatStepSeconds(positionNudgeStepMs));
+    }
+
+    /** Play/pause icon: pause (accent) while playing, play (success) when paused. */
+    private void syncPlayPauseIcon() {
+        if (playPauseBtn == null) {
+            return;
+        }
+        boolean playing = listener != null && listener.isPlaying();
+        playPauseBtn.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+        playPauseBtn.setColorFilter(
+                getResources().getColor(playing ? R.color.accent_primary : R.color.success, null));
+    }
+
+    /** Reads the inline input and applies it as the new step (clamped 0.1–60s). */    private void applyStepFromInput() {
+        if (stepInput == null) {
+            return;
+        }
+        CharSequence text = stepInput.getText();
+        float seconds = 0f;
+        if (text != null) {
+            try {
+                seconds = Float.parseFloat(text.toString().trim());
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (seconds <= 0f || seconds > 60f) {
+            Context context = getContext();
+            if (context != null) {
+                android.widget.Toast.makeText(context,
+                        "Step must be 0.1–60 seconds", android.widget.Toast.LENGTH_SHORT).show();
+            }
+            syncStepInput(); // restore the last valid value
+            return;
+        }
+        saveNudgeStep(seconds);
+    }
+
+    /** Keeps the visible input in sync after −/+ changes. */
+    private void syncStepInput() {
+        if (stepInput != null) {
+            stepInput.setText(formatStepSeconds(nudgeStepMs));
+        }
+    }
+
+    private float stepDown(float currentSeconds) {
+        // Nice stepping: 0.1 increments under 1s, 0.5 under 5s, then 1s
+        if (currentSeconds > 5f) {
+            return Math.max(5f, currentSeconds - 1f);
+        }
+        if (currentSeconds > 1f) {
+            return Math.max(1f, currentSeconds - 0.5f);
+        }
+        return Math.max(0.1f, currentSeconds - 0.1f);
+    }
+
+    private float stepUp(float currentSeconds) {
+        if (currentSeconds < 1f) {
+            return Math.min(1f, currentSeconds + 0.1f);
+        }
+        if (currentSeconds < 5f) {
+            return Math.min(5f, currentSeconds + 0.5f);
+        }
+        return Math.min(60f, currentSeconds + 1f);
     }
 
     /** Dual-handle slider that adjusts Point A and Point B by dragging, applied live. */
@@ -519,6 +692,7 @@ public class ABRepeatBottomSheet extends BottomSheetDialogFragment {
         if (listener == null) {
             return;
         }
+        syncPlayPauseIcon();
         int position = Math.max(0, listener.getCurrentPosition());
         int duration = Math.max(0, listener.getDuration());
         if (duration > 0) {

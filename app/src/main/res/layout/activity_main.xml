@@ -317,7 +317,7 @@
             android:paddingStart="8dp"
             android:paddingEnd="8dp"
             android:progressTint="@color/accent_primary"
-            android:progressBackgroundTint="@color/surface_600"
+            android:progressBackgroundTint="@color/track_unfinished"
             android:thumbTint="@color/accent_primary"
             android:splitTrack="false"
             android:max="100"
@@ -422,7 +422,7 @@
                 android:layout_marginTop="8dp"
                 android:progressTint="@color/accent_primary"
                 android:thumbTint="@color/accent_primary"
-                android:progressBackgroundTint="@color/surface_600" />
+                android:progressBackgroundTint="@color/track_unfinished" />
 
             <!-- Time display -->
             <LinearLayout
