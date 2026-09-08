@@ -479,6 +479,30 @@ public class AudioPlaybackService extends Service {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Public hook so the Activity can refresh the MediaSession playback state
+     * (and thus the notification's seekbar position) after the app-side UI
+     * seekbar is moved. Slightly delayed because MediaPlayer.seekTo() is async
+     * and getCurrentPosition() may still report the old value immediately.
+     */
+    public void notifyAppSeek() {
+        if (appSeekHandler == null) {
+            appSeekHandler = new Handler(Looper.getMainLooper());
+        }
+        appSeekHandler.removeCallbacks(applyAppSeek);
+        // Post twice: a quick refresh and one after the seek has settled
+        appSeekHandler.postDelayed(applyAppSeek, 100);
+        appSeekHandler.postDelayed(applyAppSeek, 400);
+    }
+
+    private final Runnable applyAppSeek = new Runnable() {
+        @Override
+        public void run() {
+            updatePlaybackState();
+        }
+    };
+    private Handler appSeekHandler;
+
     private void seekToPosition(long pos) {
         if (mediaPlayer == null) {
             return;

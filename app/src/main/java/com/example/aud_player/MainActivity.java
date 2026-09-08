@@ -1206,6 +1206,11 @@ public class MainActivity extends AppCompatActivity {
                         if (secondMediaPlayer != null && secondAudioActive) {
                             syncSecondPlayerPosition();
                         }
+
+                        // Keep the notification's seekbar in sync with app-side seeks
+                        if (serviceBound && audioService != null) {
+                            audioService.notifyAppSeek();
+                        }
                     } catch (IllegalStateException e) {
                         Log.e(TAG, "Error seeking media player", e);
                     }
@@ -4382,6 +4387,10 @@ public class MainActivity extends AppCompatActivity {
                     }
                     if (secondMediaPlayer != null && secondAudioActive) {
                         syncSecondPlayerPosition();
+                    }
+                    // Keep the notification's seekbar in sync with mini-player seeks
+                    if (serviceBound && audioService != null) {
+                        audioService.notifyAppSeek();
                     }
                 } catch (IllegalStateException e) {
                     Log.e(TAG, "Error seeking from mini player", e);
