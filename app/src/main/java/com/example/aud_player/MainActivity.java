@@ -530,6 +530,23 @@ public class MainActivity extends AppCompatActivity {
         float globalSpeed;
         float primarySpeed;
         float secondarySpeed;
+        // Voice changer settings captured at save time
+        float pitch;
+        float formant;
+        int bass;
+        int reverb;
+        int treble;
+        int clarity;
+        int echo;
+        int distortion;
+        int vibrato;
+        int depth;
+        boolean robot;
+        boolean noiseReduction;
+        boolean autoTune;
+        // Sleep timer captured at save time (minutes; 0 = no timer)
+        float timerMinutes;
+        int timerActionValue;
     }
 
     private BroadcastReceiver playbackStoppedReceiver;
@@ -6682,9 +6699,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Add the toggleMixerMode method
+    // Snapshot of the settings that were active right before a saved mixer
+    // preset was applied — restored when mixer mode is turned off.
+    private SavedMixerPreset preMixerSettings = null;
+
     private void toggleMixerMode() {
         mixerModeActive = !mixerModeActive;
-        
         // Update UI elements
         mixerToggleButton.setTextColor(mixerModeActive ? 
                 getResources().getColor(R.color.player_seekbar_progress) : 
@@ -6704,6 +6724,59 @@ public class MainActivity extends AppCompatActivity {
             // media-session actions never restart the deactivated second track
             if (serviceBound && audioService != null) {
                 audioService.setSecondAudioActive(false);
+            }
+        }
+
+        // Turning the mixer OFF restores the settings that were active just
+        // before the mixer preset was applied (speed, voice changer, timer)
+        if (!mixerModeActive && preMixerSettings != null) {
+            SavedMixerPreset restore = preMixerSettings;
+            preMixerSettings = null; // one-shot: only restore once
+
+            currentPlaybackSpeed = restore.globalSpeed;
+            useIndividualPlaybackSpeeds = restore.useIndividualSpeeds;
+            primaryPlaybackSpeed = restore.primarySpeed;
+            secondaryPlaybackSpeed = restore.secondarySpeed;
+            setPlaybackSpeed(currentPlaybackSpeed);
+
+            currentPitch = restore.pitch;
+            currentFormant = restore.formant;
+            voiceBassStrength = restore.bass;
+            voiceReverbLevel = restore.reverb;
+            voiceTrebleLevel = restore.treble;
+            voiceClarityLevel = restore.clarity;
+            voiceEchoLevel = restore.echo;
+            voiceDistortionLevel = restore.distortion;
+            voiceVibratoDepth = restore.vibrato;
+            voiceDepthLevel = restore.depth;
+            voiceRobotEnabled = restore.robot;
+            voiceNoiseReductionEnabled = restore.noiseReduction;
+            voiceAutoTuneEnabled = restore.autoTune;
+            SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+            prefs.edit()
+                    .putFloat("playback_pitch", currentPitch)
+                    .putFloat(PREF_VOICE_FORMANT, currentFormant)
+                    .putInt(PREF_VOICE_BASS, voiceBassStrength)
+                    .putInt(PREF_VOICE_REVERB, voiceReverbLevel)
+                    .putInt(PREF_VOICE_TREBLE, voiceTrebleLevel)
+                    .putInt(PREF_VOICE_CLARITY, voiceClarityLevel)
+                    .putInt(PREF_VOICE_ECHO, voiceEchoLevel)
+                    .putInt(PREF_VOICE_DISTORTION, voiceDistortionLevel)
+                    .putInt(PREF_VOICE_VIBRATO, voiceVibratoDepth)
+                    .putInt(PREF_VOICE_DEPTH, voiceDepthLevel)
+                    .putBoolean(PREF_VOICE_ROBOT, voiceRobotEnabled)
+                    .putBoolean(PREF_VOICE_NOISE_REDUCTION, voiceNoiseReductionEnabled)
+                    .putBoolean(PREF_VOICE_AUTOTUNE, voiceAutoTuneEnabled)
+                    .apply();
+            applyVoiceSettingsToActivePlayers();
+
+            // Restore the pre-mixer sleep timer state
+            if (timerActive || sleepTimer != null) {
+                cancelSleepTimer();
+            }
+            if (restore.timerMinutes > 0f) {
+                timerAction = restore.timerActionValue;
+                setSleepTimer(restore.timerMinutes);
             }
         }
     }
@@ -8662,6 +8735,31 @@ public class MainActivity extends AppCompatActivity {
         preset.globalSpeed = currentPlaybackSpeed;
         preset.primarySpeed = primaryPlaybackSpeed;
         preset.secondarySpeed = secondaryPlaybackSpeed;
+        // Snapshot the current voice changer settings
+        preset.pitch = currentPitch;
+        preset.formant = currentFormant;
+        preset.bass = voiceBassStrength;
+        preset.reverb = voiceReverbLevel;
+        preset.treble = voiceTrebleLevel;
+        preset.clarity = voiceClarityLevel;
+        preset.echo = voiceEchoLevel;
+        preset.distortion = voiceDistortionLevel;
+        preset.vibrato = voiceVibratoDepth;
+        preset.depth = voiceDepthLevel;
+        preset.robot = voiceRobotEnabled;
+        preset.noiseReduction = voiceNoiseReductionEnabled;
+        preset.autoTune = voiceAutoTuneEnabled;
+        // Snapshot the active sleep timer, if any
+        preset.timerMinutes = 0f;
+        preset.timerActionValue = timerAction;
+        if (timerActive && audioService != null) {
+            try {
+                long timeLeftMs = audioService.getRemainingTimerTime();
+                if (timeLeftMs > 0) {
+                    preset.timerMinutes = timeLeftMs / 60000f;
+                }
+            } catch (Exception ignored) {}
+        }
 
         List<SavedMixerPreset> presets = loadSavedMixerPresets();
         presets.add(0, preset);
@@ -8676,6 +8774,41 @@ public class MainActivity extends AppCompatActivity {
         if (preset == null || TextUtils.isEmpty(preset.primaryUri) || TextUtils.isEmpty(preset.secondaryUri)) {
             Toast.makeText(this, "Saved mixer is invalid", Toast.LENGTH_SHORT).show();
             return;
+        }
+
+        // Snapshot the pre-mixer settings so that turning the mixer OFF
+        // restores exactly what was playing before the preset was applied
+        // (speed, voice changer, timer). Only taken when not already in
+        // mixer mode, so consecutive preset loads don't overwrite it.
+        if (!mixerModeActive) {
+            preMixerSettings = new SavedMixerPreset();
+            preMixerSettings.globalSpeed = currentPlaybackSpeed;
+            preMixerSettings.useIndividualSpeeds = useIndividualPlaybackSpeeds;
+            preMixerSettings.primarySpeed = primaryPlaybackSpeed;
+            preMixerSettings.secondarySpeed = secondaryPlaybackSpeed;
+            preMixerSettings.pitch = currentPitch;
+            preMixerSettings.formant = currentFormant;
+            preMixerSettings.bass = voiceBassStrength;
+            preMixerSettings.reverb = voiceReverbLevel;
+            preMixerSettings.treble = voiceTrebleLevel;
+            preMixerSettings.clarity = voiceClarityLevel;
+            preMixerSettings.echo = voiceEchoLevel;
+            preMixerSettings.distortion = voiceDistortionLevel;
+            preMixerSettings.vibrato = voiceVibratoDepth;
+            preMixerSettings.depth = voiceDepthLevel;
+            preMixerSettings.robot = voiceRobotEnabled;
+            preMixerSettings.noiseReduction = voiceNoiseReductionEnabled;
+            preMixerSettings.autoTune = voiceAutoTuneEnabled;
+            preMixerSettings.timerMinutes = 0f;
+            preMixerSettings.timerActionValue = timerAction;
+            if (timerActive && audioService != null) {
+                try {
+                    long timeLeftMs = audioService.getRemainingTimerTime();
+                    if (timeLeftMs > 0) {
+                        preMixerSettings.timerMinutes = timeLeftMs / 60000f;
+                    }
+                } catch (Exception ignored) {}
+            }
         }
 
         try {
@@ -8694,6 +8827,50 @@ public class MainActivity extends AppCompatActivity {
         useIndividualPlaybackSpeeds = preset.useIndividualSpeeds;
         primaryPlaybackSpeed = preset.primarySpeed;
         secondaryPlaybackSpeed = preset.secondarySpeed;
+
+        // Restore voice changer settings exactly as they were at save time
+        currentPitch = preset.pitch;
+        currentFormant = preset.formant;
+        voiceBassStrength = preset.bass;
+        voiceReverbLevel = preset.reverb;
+        voiceTrebleLevel = preset.treble;
+        voiceClarityLevel = preset.clarity;
+        voiceEchoLevel = preset.echo;
+        voiceDistortionLevel = preset.distortion;
+        voiceVibratoDepth = preset.vibrato;
+        voiceDepthLevel = preset.depth;
+        voiceRobotEnabled = preset.robot;
+        voiceNoiseReductionEnabled = preset.noiseReduction;
+        voiceAutoTuneEnabled = preset.autoTune;
+        // Persist them so the voice sheet reflects the restored values too
+        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        prefs.edit()
+                .putFloat("playback_pitch", currentPitch)
+                .putFloat(PREF_VOICE_FORMANT, currentFormant)
+                .putInt(PREF_VOICE_BASS, voiceBassStrength)
+                .putInt(PREF_VOICE_REVERB, voiceReverbLevel)
+                .putInt(PREF_VOICE_TREBLE, voiceTrebleLevel)
+                .putInt(PREF_VOICE_CLARITY, voiceClarityLevel)
+                .putInt(PREF_VOICE_ECHO, voiceEchoLevel)
+                .putInt(PREF_VOICE_DISTORTION, voiceDistortionLevel)
+                .putInt(PREF_VOICE_VIBRATO, voiceVibratoDepth)
+                .putInt(PREF_VOICE_DEPTH, voiceDepthLevel)
+                .putBoolean(PREF_VOICE_ROBOT, voiceRobotEnabled)
+                .putBoolean(PREF_VOICE_NOISE_REDUCTION, voiceNoiseReductionEnabled)
+                .putBoolean(PREF_VOICE_AUTOTUNE, voiceAutoTuneEnabled)
+                .apply();
+        // Apply the restored voice processing to both players
+        applyVoiceSettingsToActivePlayers();
+
+        // Restore the sleep timer snapshot: cancel any current timer first,
+        // then re-arm it with the saved action
+        if (timerActive || sleepTimer != null) {
+            cancelSleepTimer();
+        }
+        if (preset.timerMinutes > 0f) {
+            timerAction = preset.timerActionValue;
+            setSleepTimer(preset.timerMinutes);
+        }
 
         fileNameText.setText(getFileNameFromUri(selectedAudioUri));
         TextView secondFileNameText = findViewById(R.id.secondFileNameText);
@@ -8763,6 +8940,23 @@ public class MainActivity extends AppCompatActivity {
         preset.globalSpeed = (float) obj.optDouble("globalSpeed", 1.0);
         preset.primarySpeed = (float) obj.optDouble("primarySpeed", 1.0);
         preset.secondarySpeed = (float) obj.optDouble("secondarySpeed", 1.0);
+        // Voice changer settings (defaults keep old presets unchanged)
+        preset.pitch = (float) obj.optDouble("pitch", 1.0);
+        preset.formant = (float) obj.optDouble("formant", 1.0);
+        preset.bass = obj.optInt("bass", 0);
+        preset.reverb = obj.optInt("reverb", 0);
+        preset.treble = obj.optInt("treble", 0);
+        preset.clarity = obj.optInt("clarity", 0);
+        preset.echo = obj.optInt("echo", 0);
+        preset.distortion = obj.optInt("distortion", 0);
+        preset.vibrato = obj.optInt("vibrato", 0);
+        preset.depth = obj.optInt("depth", 0);
+        preset.robot = obj.optBoolean("robot", false);
+        preset.noiseReduction = obj.optBoolean("noiseReduction", false);
+        preset.autoTune = obj.optBoolean("autoTune", false);
+        // Sleep timer snapshot (0 = none)
+        preset.timerMinutes = (float) obj.optDouble("timerMinutes", 0.0);
+        preset.timerActionValue = obj.optInt("timerActionValue", TIMER_ACTION_PAUSE);
 
         if (!TextUtils.isEmpty(preset.primaryUri) && !TextUtils.isEmpty(preset.secondaryUri)) {
             presets.add(preset);
@@ -8783,6 +8977,23 @@ public class MainActivity extends AppCompatActivity {
                 obj.put("globalSpeed", preset.globalSpeed);
                 obj.put("primarySpeed", preset.primarySpeed);
                 obj.put("secondarySpeed", preset.secondarySpeed);
+                // Voice changer settings
+                obj.put("pitch", preset.pitch);
+                obj.put("formant", preset.formant);
+                obj.put("bass", preset.bass);
+                obj.put("reverb", preset.reverb);
+                obj.put("treble", preset.treble);
+                obj.put("clarity", preset.clarity);
+                obj.put("echo", preset.echo);
+                obj.put("distortion", preset.distortion);
+                obj.put("vibrato", preset.vibrato);
+                obj.put("depth", preset.depth);
+                obj.put("robot", preset.robot);
+                obj.put("noiseReduction", preset.noiseReduction);
+                obj.put("autoTune", preset.autoTune);
+                // Sleep timer snapshot
+                obj.put("timerMinutes", preset.timerMinutes);
+                obj.put("timerActionValue", preset.timerActionValue);
                 array.put(obj);
             } catch (JSONException e) {
                 Log.e(TAG, "Failed to save mixer preset item", e);
