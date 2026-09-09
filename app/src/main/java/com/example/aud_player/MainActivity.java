@@ -244,6 +244,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
     private static final String PREF_CUSTOM_APP_COLOR = "custom_app_color";
     private static final String PREF_CUSTOM_MINI_PLAYER_COLOR = "custom_mini_player_color";
+    // Saved custom themes stored as a JSON array (name + full theme state)
+    private static final String PREF_SAVED_THEMES = "saved_custom_themes";
     private static final String PREF_RESET_SPEED = "reset_button_speed";
     private static final String PREF_RESET_PITCH = "reset_button_pitch";
     private static final String PREF_RESET_EQUALIZER = "reset_button_equalizer";
@@ -7659,6 +7661,165 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    /**
+     * Reads the saved custom themes list from prefs; returns an empty array
+     * when nothing is stored yet (or the stored JSON is unreadable).
+     */
+    private JSONArray getSavedThemesArray(SharedPreferences prefs) {
+        String raw = prefs.getString(PREF_SAVED_THEMES, null);
+        if (raw == null) {
+            return new JSONArray();
+        }
+        try {
+            return new JSONArray(raw);
+        } catch (JSONException e) {
+            return new JSONArray();
+        }
+    }
+
+    /**
+     * Saves a full theme configuration under a name. If an identical
+     * configuration is already saved, no duplicate is created. If the name
+     * is already taken by a different configuration, a numbered suffix is
+     * appended.
+     */
+    private void saveCustomTheme(SharedPreferences prefs, String name, int themeMode,
+                                 int miniTheme, int appColor, int miniColor) {
+        try {
+            JSONArray themes = getSavedThemesArray(prefs);
+            for (int i = 0; i < themes.length(); i++) {
+                JSONObject existing = themes.optJSONObject(i);
+                if (existing == null) continue;
+                if (existing.optInt("themeMode") == themeMode
+                        && existing.optInt("miniTheme") == miniTheme
+                        && existing.optInt("appColor") == appColor
+                        && existing.optInt("miniColor") == miniColor) {
+                    Toast.makeText(this, "Already saved as \"" + existing.optString("name") + "\"",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+            // Avoid overwriting a different theme that uses the same name
+            String finalName = name;
+            int suffix = 2;
+            while (true) {
+                boolean nameTaken = false;
+                for (int i = 0; i < themes.length(); i++) {
+                    JSONObject existing = themes.optJSONObject(i);
+                    if (existing != null && finalName.equals(existing.optString("name"))) {
+                        nameTaken = true;
+                        break;
+                    }
+                }
+                if (!nameTaken) break;
+                finalName = name + " (" + suffix++ + ")";
+            }
+
+            JSONObject theme = new JSONObject();
+            theme.put("name", finalName);
+            theme.put("themeMode", themeMode);
+            theme.put("miniTheme", miniTheme);
+            theme.put("appColor", appColor);
+            theme.put("miniColor", miniColor);
+            themes.put(theme);
+            prefs.edit().putString(PREF_SAVED_THEMES, themes.toString()).apply();
+            Toast.makeText(this, "Theme saved as \"" + finalName + "\"", Toast.LENGTH_SHORT).show();
+        } catch (JSONException e) {
+            Toast.makeText(this, "Failed to save theme", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Rebuilds the horizontally scrollable saved-theme chips row. Tapping a
+     * chip restores that theme's full configuration and applies it via the
+     * existing theme apply mechanism.
+     */
+    private void populateSavedThemesRow(LinearLayout row, SharedPreferences prefs,
+                                        RadioGroup appGroup, RadioGroup miniGroup,
+                                        int currentThemeMode, int currentMiniTheme) {
+        row.removeAllViews();
+        JSONArray themes = getSavedThemesArray(prefs);
+        if (themes.length() == 0) {
+            TextView empty = new TextView(this);
+            empty.setText("No saved themes yet");
+            empty.setTextSize(13f);
+            empty.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+            int vPad = (int) dpToPx(10);
+            empty.setPadding(0, vPad, 0, vPad);
+            row.addView(empty);
+            return;
+        }
+        int chipPadH = (int) dpToPx(14);
+        int chipPadV = (int) dpToPx(8);
+        int chipMargin = (int) dpToPx(6);
+        for (int i = 0; i < themes.length(); i++) {
+            final JSONObject theme = themes.optJSONObject(i);
+            if (theme == null) continue;
+            TextView chip = new TextView(this);
+            chip.setText(theme.optString("name"));
+            chip.setTextSize(13f);
+            chip.setTypeface(Typeface.DEFAULT_BOLD);
+            chip.setSingleLine(true);
+            chip.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+            chip.setPadding(chipPadH, chipPadV, chipPadH, chipPadV);
+            // Subtle bordered chip with a soft shadow and 5dp corner radius
+            chip.setBackgroundResource(R.drawable.bg_saved_theme_chip);
+            chip.setElevation(dpToPx(2));
+            chip.setOnClickListener(v -> applySavedCustomTheme(prefs, theme, appGroup, miniGroup,
+                    currentThemeMode, currentMiniTheme));
+            LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            chipLp.setMargins(0, chipMargin, chipMargin, chipMargin);
+            row.addView(chip, chipLp);
+        }
+    }
+
+    /**
+     * Applies a saved theme: writes its full configuration into the theme
+     * prefs and reuses the existing applyThemeSelection() flow (night-mode
+     * switch, mini player theme, custom overlays). Playback is never
+     * touched. The dialog radios are synced so UI and applied state match.
+     */
+    private void applySavedCustomTheme(SharedPreferences prefs, JSONObject theme,
+                                       RadioGroup appGroup, RadioGroup miniGroup,
+                                       int currentThemeMode, int currentMiniTheme) {
+        int themeMode = theme.optInt("themeMode", THEME_MODE_BLUISH_BLACK);
+        if (themeMode < THEME_MODE_WHITE || themeMode > THEME_MODE_CUSTOM) {
+            themeMode = THEME_MODE_BLUISH_BLACK;
+        }
+        int miniTheme = theme.optInt("miniTheme", MINI_PLAYER_THEME_CURRENT);
+        if (miniTheme < MINI_PLAYER_THEME_CURRENT || miniTheme > MINI_PLAYER_THEME_CUSTOM) {
+            miniTheme = MINI_PLAYER_THEME_CURRENT;
+        }
+        // Write the full saved configuration first so the existing apply
+        // mechanism (custom color overlays / mini player gradient) reads it
+        prefs.edit()
+                .putInt(PREF_CUSTOM_APP_COLOR, theme.optInt("appColor", DEFAULT_CUSTOM_APP_COLOR))
+                .putInt(PREF_CUSTOM_MINI_PLAYER_COLOR,
+                        theme.optInt("miniColor", DEFAULT_CUSTOM_MINI_PLAYER_COLOR))
+                .apply();
+
+        // Keep the dialog radios in sync with the applied theme
+        checkRadioByTag(appGroup, themeMode);
+        checkRadioByTag(miniGroup, miniTheme);
+
+        applyThemeSelection(prefs, themeMode, miniTheme, currentThemeMode, currentMiniTheme);
+        Toast.makeText(this, "Theme \"" + theme.optString("name") + "\" applied",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Checks the radio button whose tag matches the given value. */
+    private void checkRadioByTag(RadioGroup group, int value) {
+        if (group == null) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof RadioButton && value == (int) child.getTag()) {
+                group.check(child.getId());
+                return;
+            }
+        }
+    }
+
     private void showResetOptionsSettingsDialog() {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_reset_options, null);
         CheckBox speedCheck = dialogView.findViewById(R.id.check_reset_speed);
@@ -7728,6 +7889,10 @@ public class MainActivity extends AppCompatActivity {
         container.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) dpToPx(16);
         container.setPadding(pad, pad, pad, 0);
+        // Match-parent width so the horizontal scroll view below measures
+        // its children at full text width instead of clipping/overlapping
+        container.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView appHeader = new TextView(this);
         appHeader.setText("App Theme");
@@ -7782,9 +7947,103 @@ public class MainActivity extends AppCompatActivity {
         helper.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
         container.addView(helper);
 
+        // ── Save Theme (compact button) ─────────────────────────────────
+        TextView saveThemeBtn = new TextView(this);
+        saveThemeBtn.setText("Save Current Theme");
+        saveThemeBtn.setGravity(android.view.Gravity.CENTER);
+        saveThemeBtn.setTextSize(14f);
+        saveThemeBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        saveThemeBtn.setTextColor(ContextCompat.getColor(this, R.color.text_primary));
+        saveThemeBtn.setBackgroundResource(R.drawable.bg_saved_mixer_item);
+        int btnPadH = (int) dpToPx(16);
+        int btnPadV = (int) dpToPx(10);
+        saveThemeBtn.setPadding(btnPadH, btnPadV, btnPadH, btnPadV);
+        LinearLayout.LayoutParams saveBtnLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        saveBtnLp.topMargin = (int) dpToPx(12);
+        container.addView(saveThemeBtn, saveBtnLp);
+
+        // ── Saved Themes (horizontal scrollable chips) ──────────────────
+        TextView savedHeader = new TextView(this);
+        savedHeader.setText("Saved Themes");
+        savedHeader.setTextSize(16f);
+        savedHeader.setPadding(0, (int) dpToPx(14), 0, 0);
+        container.addView(savedHeader);
+
+        HorizontalScrollView savedThemesScroll = new HorizontalScrollView(this);
+        savedThemesScroll.setHorizontalScrollBarEnabled(false);
+        final LinearLayout savedThemesRow = new LinearLayout(this);
+        savedThemesRow.setOrientation(LinearLayout.HORIZONTAL);
+        int rowPad = (int) dpToPx(4);
+        savedThemesRow.setPadding(rowPad, rowPad, rowPad, rowPad);
+        // Explicit wrap-content params so the row can grow wider than the
+        // scroll view and children are measured at their full text width
+        savedThemesRow.setLayoutParams(new HorizontalScrollView.LayoutParams(
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT,
+                HorizontalScrollView.LayoutParams.WRAP_CONTENT));
+        savedThemesScroll.addView(savedThemesRow);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        scrollLp.topMargin = (int) dpToPx(4);
+        container.addView(savedThemesScroll, scrollLp);
+
+        final RadioGroup appGroupRef = appGroup;
+        final RadioGroup miniGroupRef = miniGroup;
+
+        // Save the configuration currently selected in this dialog (which
+        // also covers saving the currently applied theme — the radios and
+        // saved custom colors default to it)
+        saveThemeBtn.setOnClickListener(v -> {
+            int checkedApp = appGroupRef.getCheckedRadioButtonId();
+            int checkedMini = miniGroupRef.getCheckedRadioButtonId();
+            if (checkedApp == View.NO_ID || checkedMini == View.NO_ID) {
+                return;
+            }
+            RadioButton appButton = appGroupRef.findViewById(checkedApp);
+            RadioButton miniButton = miniGroupRef.findViewById(checkedMini);
+            if (appButton == null || miniButton == null) {
+                return;
+            }
+            final int themeMode = (int) appButton.getTag();
+            final int miniTheme = (int) miniButton.getTag();
+            final int appColor = getSavedCustomAppColor();
+            final int miniColor = getSavedCustomMiniPlayerColor();
+
+            // Ask for a theme name
+            final EditText nameInput = new EditText(this);
+            nameInput.setHint("Theme name");
+            LinearLayout nameContainer = new LinearLayout(this);
+            nameContainer.setOrientation(LinearLayout.VERTICAL);
+            nameContainer.setPadding(pad, pad, pad, 0);
+            nameContainer.addView(nameInput);
+            new AlertDialog.Builder(this)
+                    .setTitle("Save Theme")
+                    .setView(nameContainer)
+                    .setPositiveButton(R.string.save, (d, w) -> {
+                        String name = nameInput.getText().toString().trim();
+                        if (name.isEmpty()) {
+                            name = "My Theme";
+                        }
+                        saveCustomTheme(prefs, name, themeMode, miniTheme, appColor, miniColor);
+                        populateSavedThemesRow(savedThemesRow, prefs, appGroupRef, miniGroupRef,
+                                currentThemeMode, currentMiniTheme);
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        });
+
+        populateSavedThemesRow(savedThemesRow, prefs, appGroup, miniGroup,
+                currentThemeMode, currentMiniTheme);
+
+        // Wrap in a ScrollView so the whole content (including Saved Themes
+        // at the bottom) stays reachable and never hides behind the dialog's
+        // Apply/Cancel button bar on small screens
+        ScrollView themeScroll = new ScrollView(this);
+        themeScroll.addView(container);
+
         new AlertDialog.Builder(this)
                 .setTitle("Theme")
-                .setView(container)
+                .setView(themeScroll)
                 .setPositiveButton("Apply", (dialog, which) -> {
                     int checkedApp = appGroup.getCheckedRadioButtonId();
                     int checkedMini = miniGroup.getCheckedRadioButtonId();
