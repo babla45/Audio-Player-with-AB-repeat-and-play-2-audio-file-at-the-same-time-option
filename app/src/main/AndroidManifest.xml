@@ -5,6 +5,10 @@
     <!-- Permissions based on Android version -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Needed only on Android 9 and below to write the settings backup
+         file into shared storage (.aud_player folder) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- All files access: lets rename/delete write directly to MediaStore/SD card
          without per-file consent prompts (requires user grant via Settings) -->

@@ -7615,6 +7615,12 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_song_list_icon) {
                 showSongListIconSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_export) {
+                exportSettingsToBackup();
+                return true;
+            } else if (itemId == R.id.settings_import) {
+                importSettingsFromBackup();
+                return true;
             } else if (itemId == R.id.settings_theme) {
                 showThemeSettingsDialog();
                 return true;
@@ -7629,6 +7635,108 @@ public class MainActivity extends AppCompatActivity {
         });
 
         popup.show();
+    }
+
+    /**
+     * Settings → Export Settings: writes all app preferences to a JSON
+     * backup inside the .aud_player folder in shared storage (survives
+     * app uninstall).
+     */
+    private void exportSettingsToBackup() {
+        // Older Androids need WRITE_EXTERNAL_STORAGE to write to shared storage
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this,
+                    "Grant storage permission, then tap Export Settings again",
+                    Toast.LENGTH_LONG).show();
+            requestPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            return;
+        }
+
+        // Ask for a custom backup name
+        final EditText nameInput = new EditText(this);
+        nameInput.setHint("Backup name");
+        LinearLayout nameContainer = new LinearLayout(this);
+        nameContainer.setOrientation(LinearLayout.VERTICAL);
+        int namePad = (int) dpToPx(16);
+        nameContainer.setPadding(namePad, namePad, namePad, 0);
+        nameContainer.addView(nameInput);
+        new AlertDialog.Builder(this)
+                .setTitle("Export Settings")
+                .setMessage("Save a backup of all your settings to the .aud_player folder.")
+                .setView(nameContainer)
+                .setPositiveButton("Export", (dialog, which) -> {
+                    String name = nameInput.getText().toString().trim();
+                    String result = SettingsBackupManager.exportSettings(this, name);
+                    if (result == null) {
+                        Toast.makeText(this,
+                                "Settings exported to .aud_player folder",
+                                Toast.LENGTH_LONG).show();
+                    } else if ("warning:app-specific".equals(result)) {
+                        Toast.makeText(this,
+                                "Saved to app folder only (storage permission missing) — this will NOT survive uninstall",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(this, result, Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Settings → Import Settings: restores preferences from the .aud_player
+     * backup file. The backup is validated before anything is applied; on
+     * success the activity is recreated so the restored settings (theme,
+     * UI, etc.) take full effect.
+     */
+    private void importSettingsFromBackup() {
+        final List<SettingsBackupManager.BackupEntry> backups =
+                SettingsBackupManager.listBackups(this);
+        if (backups.isEmpty()) {
+            Toast.makeText(this,
+                    "No backup files found in .aud_player folder",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        // Show available backup files to pick from
+        CharSequence[] names = new CharSequence[backups.size()];
+        java.text.DateFormat fmt = java.text.DateFormat.getDateTimeInstance(
+                java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT);
+        for (int i = 0; i < backups.size(); i++) {
+            SettingsBackupManager.BackupEntry entry = backups.get(i);
+            names[i] = entry.lastModified > 0
+                    ? entry.displayName + "  (" + fmt.format(new java.util.Date(entry.lastModified)) + ")"
+                    : entry.displayName;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Import Settings")
+                .setItems(names, (dialog, which) ->
+                        confirmImportBackup(backups.get(which)))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmImportBackup(SettingsBackupManager.BackupEntry entry) {
+        new AlertDialog.Builder(this)
+                .setTitle("Import Settings")
+                .setMessage("Restore all settings from \"" + entry.displayName
+                        + "\"? Current settings will be replaced.")
+                .setPositiveButton("Import", (dialog, which) -> {
+                    String result = SettingsBackupManager.importSettings(this, entry);
+                    if (result == null) {
+                        Toast.makeText(this,
+                                "Settings restored successfully", Toast.LENGTH_SHORT).show();
+                        // Recreate so theme and every preference-driven UI reloads
+                        recreate();
+                    } else {
+                        Toast.makeText(this, result, Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 
     private void showSongListIconSettingsDialog() {
