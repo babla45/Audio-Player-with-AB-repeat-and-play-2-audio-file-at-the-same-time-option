@@ -282,6 +282,9 @@ public class MainActivity extends AppCompatActivity {
 
     // New redesigned UI elements
     private LinearLayout miniPlayerBar;
+    // True when the user dismissed the in-app mini player with a left swipe;
+    // restored by notification tap or picking a song from the list
+    private boolean miniPlayerDismissed = false;
     private LinearLayout expandedPlayerControls;
     private TextView miniPlayerTitle;
     private TextView miniPlayerSubtitle;
@@ -2531,6 +2534,7 @@ public class MainActivity extends AppCompatActivity {
                     float deltaX = event.getRawX() - downX[0];
                     float deltaY = event.getRawY() - downY[0];
                     boolean verticalSwipe = Math.abs(deltaY) > Math.abs(deltaX) * 1.15f;
+                    boolean leftSwipe = Math.abs(deltaX) > Math.abs(deltaY) * 1.15f;
                     if (verticalSwipe && Math.abs(deltaY) >= swipeThresholdPx) {
                         if (deltaY < 0) {
                             setPlayerExpanded(true);
@@ -2539,11 +2543,41 @@ public class MainActivity extends AppCompatActivity {
                         }
                         return true;
                     }
+                    // Left swipe dismisses the in-app mini player (playback
+                    // keeps running; notification player stays available)
+                    if (leftSwipe && deltaX <= -swipeThresholdPx) {
+                        dismissMiniPlayer();
+                        return true;
+                    }
                     return false;
                 default:
                     return false;
             }
         });
+    }
+
+    /**
+     * Hides the in-app mini player (left swipe). This is a pure UI state
+     * change: playback, the notification mini player and all controls keep
+     * working unchanged.
+     */
+    private void dismissMiniPlayer() {
+        miniPlayerDismissed = true;
+        if (miniPlayerBar != null) {
+            miniPlayerBar.setVisibility(View.GONE);
+        }
+    }
+
+    /**
+     * Restores the in-app mini player after it was dismissed. Called when
+     * the user taps the notification mini player or picks a song from the
+     * list. Never touches playback state.
+     */
+    private void restoreMiniPlayer() {
+        miniPlayerDismissed = false;
+        if (miniPlayerBar != null && miniPlayerBar.getVisibility() != View.VISIBLE) {
+            miniPlayerBar.setVisibility(View.VISIBLE);
+        }
     }
 
     private void setupBottomNavSwipeGesture(View target) {
@@ -5786,6 +5820,10 @@ public class MainActivity extends AppCompatActivity {
             if (searchHistoryContainer != null) {
                 searchHistoryContainer.setVisibility(View.GONE);
             }
+
+            // Picking a song always brings the mini player back if it was
+            // dismissed with a left swipe (pure UI state, playback untouched)
+            restoreMiniPlayer();
 
             // Use the mixer mode to determine behavior
             if (mixerModeActive) {
@@ -9727,6 +9765,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        // Tapping the notification mini player brings the app forward —
+        // bring back the in-app mini player if the user had dismissed it.
+        // UI-only change; playback state is never touched here.
+        restoreMiniPlayer();
         handleIntent(intent);
     }
 
