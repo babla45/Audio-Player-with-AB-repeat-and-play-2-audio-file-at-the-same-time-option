@@ -82,7 +82,11 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.content.ComponentName;
@@ -8918,11 +8922,155 @@ public class MainActivity extends AppCompatActivity {
 
     private void showHowToUseDialog() {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_how_to_use, null);
+        EditText searchBox = dialogView.findViewById(R.id.howToUseSearch);
+        ImageButton prevButton = dialogView.findViewById(R.id.howToUsePrevMatch);
+        ImageButton nextButton = dialogView.findViewById(R.id.howToUseNextMatch);
+        ScrollView scrollView = dialogView.findViewById(R.id.howToUseScroll);
+        ViewGroup content = dialogView.findViewById(R.id.howToUseContent);
+
+        // Remember every TextView's original text so highlights can be
+        // rebuilt (or removed) on each keystroke without losing content
+        final List<TextView> textViews = new ArrayList<>();
+        final List<CharSequence> originalTexts = new ArrayList<>();
+        collectTextViewsForSearch(content, textViews, originalTexts);
+
+        final int matchColor = ContextCompat.getColor(this, R.color.accent_primary);
+        final int currentColor = ContextCompat.getColor(this, R.color.accent_secondary);
+        // Each match: {textViewIndex, matchStart}
+        final List<int[]> matches = new ArrayList<>();
+        final int[] currentMatch = {-1};
+        final int[] matchLength = {0};
+
+        if (searchBox != null && content != null) {
+            searchBox.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                }
+
+                @Override
+                public void afterTextChanged(Editable s) {
+                    String query = s.toString().trim().toLowerCase();
+                    matchLength[0] = findHowToUseMatches(query, textViews, originalTexts, matches);
+                    currentMatch[0] = matches.isEmpty() ? -1 : 0;
+                    renderHowToUseMatches(textViews, originalTexts, matches, currentMatch[0],
+                            matchLength[0], matchColor, currentColor);
+                    updateHowToUseNavButtons(prevButton, nextButton, matches.isEmpty());
+                    if (!matches.isEmpty()) {
+                        scrollHowToUseToMatch(scrollView, textViews, matches, currentMatch[0]);
+                    }
+                }
+            });
+        }
+
+        View.OnClickListener navigate = v -> {
+            if (matches.isEmpty()) return;
+            boolean backward = v.getId() == R.id.howToUsePrevMatch;
+            if (backward) {
+                currentMatch[0] = currentMatch[0] <= 0 ? matches.size() - 1 : currentMatch[0] - 1;
+            } else {
+                currentMatch[0] = (currentMatch[0] + 1) % matches.size();
+            }
+            renderHowToUseMatches(textViews, originalTexts, matches, currentMatch[0],
+                    matchLength[0], matchColor, currentColor);
+            scrollHowToUseToMatch(scrollView, textViews, matches, currentMatch[0]);
+        };
+        if (prevButton != null) prevButton.setOnClickListener(navigate);
+        if (nextButton != null) nextButton.setOnClickListener(navigate);
+        updateHowToUseNavButtons(prevButton, nextButton, true);
+
         new AlertDialog.Builder(this)
                 .setTitle("How to use AudPlayer")
                 .setView(dialogView)
                 .setPositiveButton("OK", null)
                 .show();
+    }
+
+    /** Recursively gathers the manual's TextViews and their original texts. */
+    private void collectTextViewsForSearch(ViewGroup group, List<TextView> out,
+                                           List<CharSequence> originals) {
+        if (group == null) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView) {
+                out.add((TextView) child);
+                originals.add(((TextView) child).getText());
+            } else if (child instanceof ViewGroup) {
+                collectTextViewsForSearch((ViewGroup) child, out, originals);
+            }
+        }
+    }
+
+    /**
+     * Finds every case-insensitive occurrence of the query across the
+     * manual's TextViews. Returns the match length (0 when the query is
+     * empty, in which case no matches are collected).
+     */
+    private int findHowToUseMatches(String query, List<TextView> textViews,
+                                    List<CharSequence> originalTexts, List<int[]> outMatches) {
+        outMatches.clear();
+        if (query.isEmpty()) return 0;
+        for (int i = 0; i < textViews.size(); i++) {
+            String lower = originalTexts.get(i).toString().toLowerCase();
+            int idx = 0;
+            while ((idx = lower.indexOf(query, idx)) != -1) {
+                outMatches.add(new int[]{i, idx});
+                idx += query.length();
+            }
+        }
+        return query.length();
+    }
+
+    /**
+     * Restores the original texts, then colors every match. The currently
+     * selected match uses a distinct color so the prev/next navigation is
+     * easy to follow.
+     */
+    private void renderHowToUseMatches(List<TextView> textViews, List<CharSequence> originalTexts,
+                                       List<int[]> matches, int currentMatch, int matchLength,
+                                       int matchColor, int currentColor) {
+        for (int i = 0; i < textViews.size(); i++) {
+            textViews.get(i).setText(originalTexts.get(i));
+        }
+        if (matches.isEmpty() || matchLength <= 0) return;
+        for (int i = 0; i < textViews.size(); i++) {
+            SpannableString span = null;
+            for (int m = 0; m < matches.size(); m++) {
+                int[] mm = matches.get(m);
+                if (mm[0] != i) continue;
+                if (span == null) span = new SpannableString(originalTexts.get(i));
+                int color = m == currentMatch ? currentColor : matchColor;
+                span.setSpan(new ForegroundColorSpan(color), mm[1], mm[1] + matchLength,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                span.setSpan(new StyleSpan(Typeface.BOLD), mm[1], mm[1] + matchLength,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (span != null) textViews.get(i).setText(span);
+        }
+    }
+
+    /** Enables/disables and dims the prev/next match buttons. */
+    private void updateHowToUseNavButtons(ImageButton prevButton, ImageButton nextButton,
+                                          boolean disabled) {
+        if (prevButton != null) {
+            prevButton.setEnabled(!disabled);
+            prevButton.setAlpha(disabled ? 0.3f : 1f);
+        }
+        if (nextButton != null) {
+            nextButton.setEnabled(!disabled);
+            nextButton.setAlpha(disabled ? 0.3f : 1f);
+        }
+    }
+
+    /** Smoothly scrolls the manual so the selected match is in view. */
+    private void scrollHowToUseToMatch(ScrollView scrollView, List<TextView> textViews,
+                                       List<int[]> matches, int currentMatch) {
+        if (scrollView == null || currentMatch < 0 || currentMatch >= matches.size()) return;
+        TextView target = textViews.get(matches.get(currentMatch)[0]);
+        scrollView.post(() -> scrollView.smoothScrollTo(0, Math.max(0, target.getTop() - 60)));
     }
 
     private void updateSeekSkipButtonLabels() {
