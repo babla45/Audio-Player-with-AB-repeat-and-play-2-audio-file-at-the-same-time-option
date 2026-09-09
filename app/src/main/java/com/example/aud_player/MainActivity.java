@@ -395,6 +395,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean useIndividualPlaybackSpeeds = false;
     private float currentPitch = 1.0f;
     private float currentFormant = 1.0f;
+    // Voice-changer listener (lazily created) — kept in a field so the
+    // bottom-sheet Reset button can reuse its reset logic
+    private PitchBottomSheet.PitchListener pitchListener;
     private int voiceBassStrength = 0;
     private int voiceReverbLevel = 0;
     private int voiceTrebleLevel = 0;      // -1000..1000 per-mille (-100%..+100%)
@@ -2971,7 +2974,18 @@ public class MainActivity extends AppCompatActivity {
 
     private void showPitchBottomSheet() {
         PitchBottomSheet pitchSheet = new PitchBottomSheet();
-        pitchSheet.setPitchListener(new PitchBottomSheet.PitchListener() {
+        pitchSheet.setPitchListener(getPitchListener());
+        pitchSheet.show(getSupportFragmentManager(), "PitchBottomSheet");
+    }
+
+    /**
+     * Lazily creates the voice-changer listener so its reset logic can also
+     * be reused from the bottom-sheet Reset button (resetAudioSettings)
+     * without opening the pitch sheet first.
+     */
+    private PitchBottomSheet.PitchListener getPitchListener() {
+        if (pitchListener == null) {
+            pitchListener = new PitchBottomSheet.PitchListener() {
             @Override
             public void onPitchChanged(float pitch) {
                 currentPitch = pitch;
@@ -3210,9 +3224,9 @@ public class MainActivity extends AppCompatActivity {
             public void onEqPresetSelected(String presetName) {
                 applyVoiceEqPreset(presetName);
             }
-        });
-
-        pitchSheet.show(getSupportFragmentManager(), "PitchBottomSheet");
+            };
+        }
+        return pitchListener;
     }
 
     private void showBoostBottomSheet() {
@@ -3861,11 +3875,6 @@ public class MainActivity extends AppCompatActivity {
         boolean resetEqualizer = prefs.getBoolean(PREF_RESET_EQUALIZER, true);
         boolean resetBoost = prefs.getBoolean(PREF_RESET_BOOST, true);
 
-        if (!resetSpeed && !resetPitch && !resetEqualizer && !resetBoost) {
-            Toast.makeText(this, R.string.reset_nothing_selected, Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         List<String> resetItems = new ArrayList<>();
 
         if (resetSpeed) {
@@ -3927,6 +3936,29 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "Failed to reset equalizer during audio reset", e);
             }
         }
+
+        // Voice changer: same full reset as the pitch sheet's master reset
+        // button (formant, bass, reverb, treble, clarity, echo, distortion,
+        // vibrato, voice depth, volume boost, robot/noise-reduction/auto-tune
+        // and the voice EQ preset)
+        PitchBottomSheet.PitchListener voice = getPitchListener();
+        voice.onPitchChanged(1.0f);
+        voice.onFormantChanged(1.0f);
+        voice.onSpeedChanged(1.0f);
+        voice.onBassChanged(0);
+        voice.onReverbChanged(0);
+        voice.onTrebleChanged(0);
+        voice.onVocalClarityChanged(0);
+        voice.onEchoChanged(0);
+        voice.onDistortionChanged(0);
+        voice.onVibratoChanged(0);
+        voice.onVolumeBoostChanged(1.0f);
+        voice.onVoiceDepthChanged(0);
+        voice.onRobotToggled(false);
+        voice.onNoiseReductionToggled(false);
+        voice.onAutoTuneToggled(false);
+        voice.onEqPresetSelected("None");
+        resetItems.add("Voice Changer");
 
         if (!resetItems.isEmpty()) {
             Toast.makeText(this,
