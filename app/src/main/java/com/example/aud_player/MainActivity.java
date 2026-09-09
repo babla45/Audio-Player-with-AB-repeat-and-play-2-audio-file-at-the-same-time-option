@@ -7807,15 +7807,63 @@ public class MainActivity extends AppCompatActivity {
      */
     private JSONArray getSavedThemesArray(SharedPreferences prefs) {
         String raw = prefs.getString(PREF_SAVED_THEMES, null);
-        if (raw == null) {
-            return new JSONArray();
-        }
+        JSONArray themes;
         try {
-            return new JSONArray(raw);
+            themes = raw != null ? new JSONArray(raw) : new JSONArray();
         } catch (JSONException e) {
-            return new JSONArray();
+            themes = new JSONArray();
         }
+
+        // Always keep the built-in default themes available (by name), even
+        // after a reset or an import that didn't include them
+        try {
+            JSONArray defaults = new JSONArray(DEFAULT_SAVED_THEMES);
+            boolean changed = false;
+            for (int i = 0; i < defaults.length(); i++) {
+                JSONObject def = defaults.optJSONObject(i);
+                if (def == null) continue;
+                String defName = def.optString("name");
+                boolean exists = false;
+                for (int j = 0; j < themes.length(); j++) {
+                    JSONObject existing = themes.optJSONObject(j);
+                    if (existing != null && existing.optString("name").equals(defName)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    themes.put(def);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                prefs.edit().putString(PREF_SAVED_THEMES, themes.toString()).apply();
+            }
+        } catch (JSONException ignored) {
+        }
+        return themes;
     }
+
+    /** Returns the name with its first letter uppercased for display. */
+    private String capitalizeThemeName(String name) {
+        if (name == null || name.isEmpty()) return name;
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
+    }
+
+    /**
+     * Built-in themes that ship with the app. They are always kept in the
+     * saved themes list (fresh install, reset or import), alongside
+     * whatever the user saves later.
+     */
+    private static final String DEFAULT_SAVED_THEMES =
+            "[{\"name\":\"Light Green\",\"themeMode\":3,\"miniTheme\":2,"
+                    + "\"appColor\":-3351495,\"miniColor\":-7910838},"
+            + "{\"name\":\"milk\",\"themeMode\":2,\"miniTheme\":2,"
+                    + "\"appColor\":-3351495,\"miniColor\":-7910838},"
+            + "{\"name\":\"bluish black\",\"themeMode\":1,\"miniTheme\":0,"
+                    + "\"appColor\":-3351495,\"miniColor\":-7910838},"
+            + "{\"name\":\"white\",\"themeMode\":0,\"miniTheme\":2,"
+                    + "\"appColor\":-3351495,\"miniColor\":-7910838}]";
 
     /**
      * Saves a full theme configuration under a name. If an identical
@@ -7896,7 +7944,7 @@ public class MainActivity extends AppCompatActivity {
             final JSONObject theme = themes.optJSONObject(i);
             if (theme == null) continue;
             TextView chip = new TextView(this);
-            chip.setText(theme.optString("name"));
+            chip.setText(capitalizeThemeName(theme.optString("name")));
             chip.setTextSize(13f);
             chip.setTypeface(Typeface.DEFAULT_BOLD);
             chip.setSingleLine(true);
@@ -7944,7 +7992,7 @@ public class MainActivity extends AppCompatActivity {
         checkRadioByTag(miniGroup, miniTheme);
 
         applyThemeSelection(prefs, themeMode, miniTheme, currentThemeMode, currentMiniTheme);
-        Toast.makeText(this, "Theme \"" + theme.optString("name") + "\" applied",
+        Toast.makeText(this, "Theme \"" + capitalizeThemeName(theme.optString("name")) + "\" applied",
                 Toast.LENGTH_SHORT).show();
     }
 
