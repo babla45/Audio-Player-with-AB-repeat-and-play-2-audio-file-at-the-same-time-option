@@ -3,10 +3,13 @@ package com.example.aud_player;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.AnimationDrawable;
 import android.graphics.drawable.Drawable;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -28,9 +31,18 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHolder> {
+
+    // SharedPreferences key: when true, song rows show embedded album art
+    // instead of the default music note icon (falls back to the icon if a
+    // song has no embedded artwork)
+    public static final String PREF_SONG_LIST_ALBUM_ART = "song_list_album_art";
 
     private List<AudioFile> audioFiles;
     private OnItemClickListener listener;
@@ -47,9 +59,34 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     // Subsequence mode: highlight each query character's in-order match
     // instead of the whole-word match
     private boolean subsequenceMode = false;
+    // Whether rows should prefer embedded album art over the music note icon
+    // (default on; falls back to the icon for songs without artwork)
+    private boolean showAlbumArt = true;
+    // Background executor for reading embedded artwork off the main thread
+    private final ExecutorService artExecutor = Executors.newSingleThreadExecutor();
+    // Cache of loaded artwork keyed by audio URI; empty value = no artwork
+    private final Map<Uri, Bitmap> artCache = new HashMap<>();
 
     public AudioAdapter(List<AudioFile> audioFiles) {
         this.audioFiles = new ArrayList<>(audioFiles);
+    }
+
+    /**
+     * Reads the user's song-list icon preference (album art vs default icon).
+     */
+    public static boolean shouldShowAlbumArt(Context context) {
+        return context.getSharedPreferences("audio_player_prefs", Context.MODE_PRIVATE)
+                .getBoolean(PREF_SONG_LIST_ALBUM_ART, true);
+    }
+
+    /**
+     * Updates whether rows prefer embedded album art and refreshes the list.
+     */
+    public void setShowAlbumArt(boolean show) {
+        if (this.showAlbumArt != show) {
+            this.showAlbumArt = show;
+            notifyDataSetChanged();
+        }
     }
 
     /**
@@ -126,7 +163,10 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         Context context = parent.getContext();
         highlightColor = ContextCompat.getColor(context, R.color.colorPlayingHighlight);
         defaultColor = ContextCompat.getColor(context, R.color.colorCardBackground);
-                
+        // Pick up the current album-art preference so every adapter instance
+        // (main list, folder list, playlists) respects the setting
+        showAlbumArt = shouldShowAlbumArt(context);
+
         return new AudioViewHolder(view);
     }
 
@@ -135,6 +175,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         AudioFile audioFile = audioFiles.get(position);
         holder.titleTextView.setText(buildHighlightedTitle(
                 audioFile.getTitle(), holder.titleTextView.getContext()));
+        bindRowIcon(holder, audioFile, position);
         
         // Combine duration and file size with a separator
         String durationAndSize = audioFile.getDuration() + " • " + audioFile.getFormattedSize();
@@ -150,17 +191,14 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             showEqualizerIndicator(holder, true);
             // Accent color for title
             holder.titleTextView.setTextColor(
-                ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary));
-            // Append an accent "Now Playing" tag to the duration/size line
-            String base = durationAndSize;
-            String tag = "  •  Now Playing";
-            SpannableString span = new SpannableString(base + tag);
-            int accent = ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary);
-            span.setSpan(new ForegroundColorSpan(accent), base.length(), span.length(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            span.setSpan(new StyleSpan(Typeface.BOLD), base.length(), span.length(),
-                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            holder.durationTextView.setText(span);
+                ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary2));
+            // Duration/size stay static; the "Now Playing" tag scrolls beside them.
+            // Text is repeated so it overflows the view, engaging the marquee.
+            holder.durationTextView.setText(durationAndSize);
+            // Long repeated text overflows the tag view, so the native
+            // marquee scrolls it forever: "Now Playing  Now Playing  ..."
+            holder.nowPlayingTag.setText(buildRepeatingTagText());
+            holder.nowPlayingTag.setVisibility(View.VISIBLE);
         } else {
             // Default state - use design system background
             holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item);
@@ -170,6 +208,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
                 ContextCompat.getColor(holder.itemContainer.getContext(), R.color.text_primary));
             holder.durationTextView.setTextColor(
                 ContextCompat.getColor(holder.itemContainer.getContext(), R.color.text_secondary));
+            holder.nowPlayingTag.setVisibility(View.GONE);
         }
         
         holder.itemContainer.setOnClickListener(v -> {
@@ -224,6 +263,97 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             }
         }
         return span;
+    }
+
+    /**
+     * Shows the embedded album art in the row icon when the album-art
+     * setting is on and the song actually has artwork; otherwise falls back
+     * to the default music note icon. Artwork is read off the main thread
+     * and cached per URI.
+     */
+    private void bindRowIcon(AudioViewHolder holder, AudioFile audioFile, int position) {
+        // Reset recycled views first
+        holder.albumArtIcon.setImageDrawable(null);
+        holder.albumArtIcon.setVisibility(View.GONE);
+        holder.albumArtIcon.setTag(null);
+
+        if (!showAlbumArt) {
+            holder.musicNoteIcon.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        Bitmap cached = artCache.get(audioFile.getUri());
+        if (cached != null) {
+            holder.musicNoteIcon.setVisibility(View.GONE);
+            holder.albumArtIcon.setVisibility(View.VISIBLE);
+            holder.albumArtIcon.setImageBitmap(cached);
+            return;
+        }
+
+        // Show the default icon while artwork loads in the background
+        holder.musicNoteIcon.setVisibility(View.VISIBLE);
+        final Uri artUri = audioFile.getUri();
+        final String tag = artUri.toString();
+        holder.albumArtIcon.setTag(tag);
+        artExecutor.execute(() -> {
+            Bitmap art = loadEmbeddedArtwork(holder.albumArtIcon.getContext(), artUri);
+            synchronized (artCache) {
+                if (artCache.size() > 200) {
+                    artCache.clear();
+                }
+                artCache.put(artUri, art);
+            }
+            holder.albumArtIcon.post(() -> {
+                // Only apply if this view is still showing the same song
+                if (!tag.equals(String.valueOf(holder.albumArtIcon.getTag()))) {
+                    return;
+                }
+                if (art != null) {
+                    holder.musicNoteIcon.setVisibility(View.GONE);
+                    holder.albumArtIcon.setVisibility(View.VISIBLE);
+                    holder.albumArtIcon.setImageBitmap(art);
+                }
+                // No artwork: keep the default music note icon visible
+            });
+        });
+    }
+
+    /**
+     * Extracts the embedded cover art bitmap for an audio URI, or null if
+     * the file has none (or can't be read).
+     */
+    private Bitmap loadEmbeddedArtwork(Context context, Uri uri) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            try {
+                retriever.setDataSource(context, uri);
+            } catch (Exception e) {
+                return null;
+            }
+            byte[] data = retriever.getEmbeddedPicture();
+            if (data == null || data.length == 0) {
+                return null;
+            }
+            return BitmapFactory.decodeByteArray(data, 0, data.length);
+        } catch (Exception e) {
+            return null;
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Builds the marquee text: "Now Playing" repeated with spacing so the
+     * string always overflows the tag view and scrolls indefinitely.
+     */
+    private String buildRepeatingTagText() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            sb.append("Now Playing     ");
+        }
+        return sb.toString();
     }
 
     /**
@@ -293,17 +423,23 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     static class AudioViewHolder extends RecyclerView.ViewHolder {
         TextView titleTextView;
         TextView durationTextView;
+        TextView nowPlayingTag;
         ImageView optionsMenu;
         View itemContainer;
         ImageView nowPlayingIcon;
+        ImageView musicNoteIcon;
+        ImageView albumArtIcon;
 
         AudioViewHolder(View itemView) {
             super(itemView);
             titleTextView = itemView.findViewById(R.id.audioTitle);
             durationTextView = itemView.findViewById(R.id.audioDuration);
+            nowPlayingTag = itemView.findViewById(R.id.nowPlayingTag);
             optionsMenu = itemView.findViewById(R.id.fileOptionsMenu);
             itemContainer = itemView.findViewById(R.id.innerLayout);
             nowPlayingIcon = itemView.findViewById(R.id.nowPlayingIcon);
+            musicNoteIcon = itemView.findViewById(R.id.musicNoteIcon);
+            albumArtIcon = itemView.findViewById(R.id.albumArtIcon);
         }
     }
 }

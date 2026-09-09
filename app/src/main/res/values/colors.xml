@@ -23,6 +23,7 @@
 
     <!-- Accent Colors -->
     <color name="accent_primary">#6C63FF</color>
+    <color name="accent_primary2">#DD720E</color>
     <color name="accent_secondary">#E040FB</color>
     <color name="accent_primary_dim">#336C63FF</color>
     <color name="accent_surface">#1A6C63FF</color>

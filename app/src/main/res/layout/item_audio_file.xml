@@ -28,6 +28,7 @@
             app:layout_constraintBottom_toBottomOf="parent">
 
             <ImageView
+                android:id="@+id/musicNoteIcon"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_gravity="center"
@@ -36,15 +37,12 @@
                 android:contentDescription="@string/audio_icon" />
 
             <ImageView
-                android:id="@+id/nowPlayingIcon"
+                android:id="@+id/albumArtIcon"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:padding="10dp"
-                android:src="@drawable/ic_equalizer_static"
-                android:contentDescription="Now playing"
+                android:scaleType="centerCrop"
                 android:visibility="gone"
-                android:background="@drawable/bg_now_playing_icon_overlay"
-                app:tint="@color/accent_primary" />
+                android:contentDescription="Album art" />
         </FrameLayout>
 
         <!-- Text content -->
@@ -69,13 +67,46 @@
                 android:ellipsize="end"
                 android:maxLines="1" />
 
-            <TextView
-                android:id="@+id/audioDuration"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:textSize="13sp"
-                android:textColor="@color/text_secondary" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="3dp">
+
+                <TextView
+                    android:id="@+id/audioDuration"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="@color/text_secondary"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <!-- Scrolling "Now Playing" tag, shown only on the playing row -->
+                <com.example.aud_player.MarqueeTextView
+                    android:id="@+id/nowPlayingTag"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:text="Now Playing"
+                    android:textColor="#27ff13"
+                    android:visibility="gone" />
+
+                <!-- Small now-playing equalizer, shown after the text -->
+                <ImageView
+                    android:id="@+id/nowPlayingIcon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="6dp"
+                    android:src="@drawable/ic_equalizer_static"
+                    android:contentDescription="Now playing"
+                    android:visibility="gone"
+                    app:tint="#ffa34d" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- Options menu -->

@@ -7540,6 +7540,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.settings_auto_slide_current) {
                 showAutoSlideSettingsDialog();
                 return true;
+            } else if (itemId == R.id.settings_song_list_icon) {
+                showSongListIconSettingsDialog();
+                return true;
             } else if (itemId == R.id.settings_theme) {
                 showThemeSettingsDialog();
                 return true;
@@ -7554,6 +7557,68 @@ public class MainActivity extends AppCompatActivity {
         });
 
         popup.show();
+    }
+
+    private void showSongListIconSettingsDialog() {
+        final String[] labels = {"Default music icon", "Album art (if available)"};
+        final boolean[] values = {false, true};
+
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean saved = prefs.getBoolean(AudioAdapter.PREF_SONG_LIST_ALBUM_ART, false);
+
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) dpToPx(16);
+        container.setPadding(pad, pad, pad, 0);
+
+        TextView header = new TextView(this);
+        header.setText("Song List Icon");
+        header.setTextSize(16f);
+        container.addView(header);
+
+        RadioGroup group = new RadioGroup(this);
+        group.setOrientation(RadioGroup.VERTICAL);
+        int checkedId = View.NO_ID;
+        for (int i = 0; i < labels.length; i++) {
+            RadioButton rb = new RadioButton(this);
+            rb.setId(View.generateViewId());
+            rb.setText(labels[i]);
+            rb.setTag(values[i]);
+            group.addView(rb);
+            if (values[i] == saved) {
+                checkedId = rb.getId();
+            }
+        }
+        if (checkedId != View.NO_ID) {
+            group.check(checkedId);
+        }
+        container.addView(group);
+
+        TextView helper = new TextView(this);
+        helper.setText("Album art shows the song's embedded cover art; songs without artwork keep the default icon.");
+        helper.setPadding(0, (int) dpToPx(12), 0, 0);
+        helper.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
+        container.addView(helper);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Song List Icon")
+                .setView(container)
+                .setPositiveButton(R.string.save, (dialog, which) -> {
+                    int checked = group.getCheckedRadioButtonId();
+                    if (checked == View.NO_ID) return;
+                    RadioButton selected = group.findViewById(checked);
+                    if (selected == null) return;
+                    boolean useAlbumArt = (boolean) selected.getTag();
+                    prefs.edit()
+                            .putBoolean(AudioAdapter.PREF_SONG_LIST_ALBUM_ART, useAlbumArt)
+                            .apply();
+                    if (audioAdapter != null) {
+                        audioAdapter.setShowAlbumArt(useAlbumArt);
+                    }
+                    Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 
     private void showResetOptionsSettingsDialog() {
