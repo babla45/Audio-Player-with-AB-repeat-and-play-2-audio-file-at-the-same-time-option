@@ -31,11 +31,10 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import androidx.collection.LruCache;
 
 public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHolder> {
 
@@ -64,8 +63,14 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     private boolean showAlbumArt = true;
     // Background executor for reading embedded artwork off the main thread
     private final ExecutorService artExecutor = Executors.newSingleThreadExecutor();
-    // Cache of loaded artwork keyed by audio URI; empty value = no artwork
-    private final Map<Uri, Bitmap> artCache = new HashMap<>();
+    // LRU cache of loaded artwork keyed by audio URI.
+    // Max ~50 entries (~50 × ~64KB ≈ 3MB); null value = no artwork for that URI.
+    private final LruCache<Uri, Bitmap> artCache = new LruCache<Uri, Bitmap>(50) {
+        @Override protected int sizeOf(Uri key, Bitmap value) { return 1; }
+        @Override protected void entryRemoved(boolean evicted, Uri key, Bitmap oldValue, Bitmap newValue) {
+            // Don't recycle — the ImageView may still reference it
+        }
+    };
 
     public AudioAdapter(List<AudioFile> audioFiles) {
         this.audioFiles = new ArrayList<>(audioFiles);
@@ -138,8 +143,24 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
      * @param uri URI of the currently playing audio
      */
     public void setCurrentlyPlayingUri(Uri uri) {
+        Uri oldUri = this.currentlyPlayingUri;
         this.currentlyPlayingUri = uri;
-        notifyDataSetChanged(); // Refresh all items to update highlight
+        // Only rebind the old and new highlighted rows instead of the entire list
+        if (oldUri != null) {
+            int oldPos = findPositionByUri(oldUri);
+            if (oldPos >= 0) notifyItemChanged(oldPos);
+        }
+        if (uri != null) {
+            int newPos = findPositionByUri(uri);
+            if (newPos >= 0) notifyItemChanged(newPos);
+        }
+    }
+
+    private int findPositionByUri(Uri uri) {
+        for (int i = 0; i < audioFiles.size(); i++) {
+            if (uri.equals(audioFiles.get(i).getUri())) return i;
+        }
+        return -1;
     }
 
     /**
@@ -149,7 +170,12 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     public void setPlaybackActive(boolean active) {
         if (this.playbackActive != active) {
             this.playbackActive = active;
-            notifyDataSetChanged();
+            // Only rebind the currently playing row — the equalizer
+            // animation only affects that one item.
+            if (currentlyPlayingUri != null) {
+                int pos = findPositionByUri(currentlyPlayingUri);
+                if (pos >= 0) notifyItemChanged(pos);
+            }
         }
     }
 
@@ -297,12 +323,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         holder.albumArtIcon.setTag(tag);
         artExecutor.execute(() -> {
             Bitmap art = loadEmbeddedArtwork(holder.albumArtIcon.getContext(), artUri);
-            synchronized (artCache) {
-                if (artCache.size() > 200) {
-                    artCache.clear();
-                }
-                artCache.put(artUri, art);
-            }
+            artCache.put(artUri, art);
             holder.albumArtIcon.post(() -> {
                 // Only apply if this view is still showing the same song
                 if (!tag.equals(String.valueOf(holder.albumArtIcon.getTag()))) {

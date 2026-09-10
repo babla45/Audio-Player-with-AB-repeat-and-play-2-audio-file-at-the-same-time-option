@@ -76,6 +76,13 @@ public class AudioPlaybackService extends Service {
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private Bitmap notificationArtwork;
+    // Cached PendingIntents — recreated only on first use or after service restart.
+    // Prevents rebuilding identical PendingIntent objects on every notification update.
+    private PendingIntent cachedContentIntent;
+    private PendingIntent cachedPrevIntent;
+    private PendingIntent cachedNextIntent;
+    private PendingIntent cachedStopIntent;
+    private boolean pendingIntentsNeedRebuild = true;
     private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -515,9 +522,18 @@ public class AudioPlaybackService extends Service {
         }
     }
 
+    private int lastPlaybackState = -1;
+    private long lastPlaybackPosition = -1;
+
     private void updatePlaybackState() {
         if (mediaSession == null || playbackStateBuilder == null) return;
         int state = isPlaying ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED;
+        long position = 0;
+        try { position = mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0; } catch (Exception ignored) {}
+        // Skip update if neither state nor position changed meaningfully
+        if (state == lastPlaybackState && Math.abs(position - lastPlaybackPosition) < 1000) return;
+        lastPlaybackState = state;
+        lastPlaybackPosition = position;
         try {
             mediaSession.setPlaybackState(
                     playbackStateBuilder
@@ -530,7 +546,7 @@ public class AudioPlaybackService extends Service {
                                     PlaybackStateCompat.ACTION_STOP |
                                     PlaybackStateCompat.ACTION_SEEK_TO
                             )
-                            .setState(state, mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0, 1f)
+                            .setState(state, position, 1f)
                             .build()
             );
         } catch (Exception ignored) {}
@@ -907,48 +923,44 @@ public class AudioPlaybackService extends Service {
         updatePlaybackState();
     }
 
-    private Notification createNotification() {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        // If the activity was swiped away from recents, tapping the notification
-        // will recreate it. CLEAR_TOP helps reuse an existing instance if present.
-        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-
-        // Use FLAG_IMMUTABLE on API 23+; FLAG_UPDATE_CURRENT alone on older APIs
-        int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+    /**
+     * Rebuild cached PendingIntents. Called once on first notification creation
+     * and again if the service is restarted (to pick up fresh request codes).
+     */
+    private void ensurePendingIntents() {
+        if (!pendingIntentsNeedRebuild) return;
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
+            flags |= PendingIntent.FLAG_IMMUTABLE;
         }
+        Intent content = new Intent(this, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        cachedContentIntent = PendingIntent.getActivity(this, 0, content, flags);
 
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-            this, 0, notificationIntent, pendingFlags
-        );
+        Intent prev = new Intent(this, AudioPlaybackService.class).setAction(ACTION_PREV);
+        cachedPrevIntent = PendingIntent.getService(this, 3, prev, flags);
 
-        // Previous
-        Intent prevIntent = new Intent(this, AudioPlaybackService.class);
-        prevIntent.setAction(ACTION_PREV);
-        PendingIntent prevPendingIntent = PendingIntent.getService(
-            this, 3, prevIntent, pendingFlags
-        );
+        Intent next = new Intent(this, AudioPlaybackService.class).setAction(ACTION_NEXT);
+        cachedNextIntent = PendingIntent.getService(this, 4, next, flags);
 
-        // Create play/pause intent
-        Intent playPauseIntent = new Intent(this, AudioPlaybackService.class);
-        playPauseIntent.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
+        Intent stop = new Intent(this, AudioPlaybackService.class).setAction(ACTION_STOP);
+        cachedStopIntent = PendingIntent.getService(this, 2, stop, flags);
+
+        pendingIntentsNeedRebuild = false;
+    }
+
+    private Notification createNotification() {
+        ensurePendingIntents();
+
+        // Play/pause intent changes with isPlaying — always rebuild this one
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        Intent playPauseIntent = new Intent(this, AudioPlaybackService.class)
+                .setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent playPausePendingIntent = PendingIntent.getService(
-            this, 1, playPauseIntent, pendingFlags
-        );
-
-        // Next
-        Intent nextIntent = new Intent(this, AudioPlaybackService.class);
-        nextIntent.setAction(ACTION_NEXT);
-        PendingIntent nextPendingIntent = PendingIntent.getService(
-            this, 4, nextIntent, pendingFlags
-        );
-
-        // Create stop intent
-        Intent stopIntent = new Intent(this, AudioPlaybackService.class);
-        stopIntent.setAction(ACTION_STOP);
-        PendingIntent stopPendingIntent = PendingIntent.getService(
-            this, 2, stopIntent, pendingFlags
+            this, 1, playPauseIntent, flags
         );
 
         // Use ic_music_note as small icon — it's a proper 24dp monochrome vector.
@@ -960,7 +972,7 @@ public class AudioPlaybackService extends Service {
             .setSubText("AudPlayer Mini Player")
             .setSmallIcon(R.drawable.ic_music_note)
             .setLargeIcon(getOrCreateNotificationArtwork())
-            .setContentIntent(pendingIntent)
+            .setContentIntent(cachedContentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -969,13 +981,13 @@ public class AudioPlaybackService extends Service {
             .setColor(0xFF7C4DFF)
             .setColorized(true)
             // Add prev, play/pause, next
-            .addAction(android.R.drawable.ic_media_previous, "Previous", prevPendingIntent)
+            .addAction(android.R.drawable.ic_media_previous, "Previous", cachedPrevIntent)
             .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play,
                       isPlaying ? "Pause" : "Play",
                       playPausePendingIntent)
-            .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
+            .addAction(android.R.drawable.ic_media_next, "Next", cachedNextIntent)
             // Add stop
-            .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent);
+            .addAction(R.drawable.ic_stop, "Stop", cachedStopIntent);
 
 
 

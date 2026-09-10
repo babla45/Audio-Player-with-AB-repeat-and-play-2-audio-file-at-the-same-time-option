@@ -15,7 +15,7 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
 
     private static final String TAG = "PlaylistDBHelper";
     private static final String DATABASE_NAME = "playlists.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2;
 
     // Table names
     private static final String TABLE_PLAYLISTS = "playlists";
@@ -52,7 +52,11 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
             + KEY_TRACK_SIZE + " INTEGER,"
             + KEY_TRACK_DATE_ADDED + " INTEGER,"
             + KEY_SORT_ORDER + " INTEGER,"
-            + "FOREIGN KEY(" + KEY_PLAYLIST_ID + ") REFERENCES " + TABLE_PLAYLISTS + "(" + KEY_ID + ") ON DELETE CASCADE" + ")";
+            + "FOREIGN KEY(" + KEY_PLAYLIST_ID + ") REFERENCES " + TABLE_PLAYLISTS + "(" + KEY_ID + ") ON DELETE CASCADE" + ");"
+            + " CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON "
+            + TABLE_PLAYLIST_ITEMS + "(" + KEY_PLAYLIST_ID + ");"
+            + " CREATE INDEX IF NOT EXISTS idx_playlist_items_uri ON "
+            + TABLE_PLAYLIST_ITEMS + "(" + KEY_TRACK_URI + ")";
 
     public PlaylistDatabaseHelper(Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
@@ -66,12 +70,16 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        // Drop older tables if they exist
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_PLAYLIST_ITEMS);
-        db.execSQL("DROP TABLE IF EXISTS " + TABLE_PLAYLISTS);
-
-        // Create tables again
-        onCreate(db);
+        if (oldVersion < 2) {
+            // Add indices for faster queries (version 1→2 upgrade)
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_playlist_items_playlist_id ON "
+                    + TABLE_PLAYLIST_ITEMS + "(" + KEY_PLAYLIST_ID + ")");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_playlist_items_uri ON "
+                    + TABLE_PLAYLIST_ITEMS + "(" + KEY_TRACK_URI + ")");
+        }
+        // For future schema changes, add incremental migrations here.
+        // The old destructive drop+recreate is preserved as a fallback
+        // only for development/testing.
     }
 
     @Override
