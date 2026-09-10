@@ -33,25 +33,32 @@ public class BoostBottomSheet extends BottomSheetDialogFragment {
         TextView currentValue = view.findViewById(R.id.boost_current_value);
         SeekBar seekBar = view.findViewById(R.id.boost_seekbar);
 
-        // preset chips
+        // B027 FIX: Removed chips above 3.0x to match shared boost range.
         com.google.android.material.chip.Chip c150 = view.findViewById(R.id.boost_chip_150);
         com.google.android.material.chip.Chip c200 = view.findViewById(R.id.boost_chip_200);
         com.google.android.material.chip.Chip c250 = view.findViewById(R.id.boost_chip_250);
         com.google.android.material.chip.Chip c300 = view.findViewById(R.id.boost_chip_300);
-        com.google.android.material.chip.Chip c350 = view.findViewById(R.id.boost_chip_350);
-        com.google.android.material.chip.Chip c400 = view.findViewById(R.id.boost_chip_400);
-        com.google.android.material.chip.Chip c450 = view.findViewById(R.id.boost_chip_450);
-        com.google.android.material.chip.Chip c500 = view.findViewById(R.id.boost_chip_500);
 
-        com.google.android.material.chip.Chip[] chips = new com.google.android.material.chip.Chip[] { c150, c200, c250, c300, c350, c400, c450, c500 };
+        com.google.android.material.chip.Chip[] chips = new com.google.android.material.chip.Chip[] { c150, c200, c250, c300 };
 
+        // Hide chips above the shared BOOST_MAX (3.0x)
+        int[] hideChipIds = { R.id.boost_chip_350, R.id.boost_chip_400, R.id.boost_chip_450, R.id.boost_chip_500 };
+        for (int id : hideChipIds) {
+            View chipView = view.findViewById(id);
+            if (chipView != null) chipView.setVisibility(View.GONE);
+        }
+
+        // B027 FIX: Use shared BOOST_MIN/BOOST_MAX constants (matching
+        // MainActivity and AudioPlaybackService) so all UIs stay in sync.
+        int seekMin = Math.round(MainActivity.BOOST_MIN * 100);
+        int seekMax = Math.round(MainActivity.BOOST_MAX * 100);
         float currentBoost = listener != null ? listener.getCurrentBoost() : 1.0f;
         currentValue.setText(String.format("%.2fx", currentBoost));
 
         int progress = Math.round(currentBoost * 100);
-        seekBar.setMin(100);
-        seekBar.setMax(500);
-        seekBar.setProgress(Math.max(100, Math.min(500, progress)));
+        seekBar.setMin(seekMin);
+        seekBar.setMax(seekMax);
+        seekBar.setProgress(Math.max(seekMin, Math.min(seekMax, progress)));
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override

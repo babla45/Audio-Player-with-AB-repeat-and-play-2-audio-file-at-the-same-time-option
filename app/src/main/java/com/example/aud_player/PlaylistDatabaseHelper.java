@@ -113,23 +113,21 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
         String selectQuery = "SELECT * FROM " + TABLE_PLAYLISTS + " WHERE " + KEY_ID + " = ?";
         
         Cursor c = db.rawQuery(selectQuery, new String[] { playlistId });
-        
-        if (c != null && c.moveToFirst()) {
-            String id = c.getString(c.getColumnIndexOrThrow(KEY_ID));
-            String name = c.getString(c.getColumnIndexOrThrow(KEY_PLAYLIST_NAME));
-            long dateCreated = c.getLong(c.getColumnIndexOrThrow(KEY_DATE_CREATED));
-            
-            Playlist playlist = new Playlist(id, name, dateCreated);
-            
-            // Load playlist songs
-            playlist.getSongs().addAll(getPlaylistSongs(id));
-            
-            c.close();
-            return playlist;
-        }
-        
-        if (c != null) {
-            c.close();
+        try {
+            if (c != null && c.moveToFirst()) {
+                String id = c.getString(c.getColumnIndexOrThrow(KEY_ID));
+                String name = c.getString(c.getColumnIndexOrThrow(KEY_PLAYLIST_NAME));
+                long dateCreated = c.getLong(c.getColumnIndexOrThrow(KEY_DATE_CREATED));
+                
+                Playlist playlist = new Playlist(id, name, dateCreated);
+                
+                // Load playlist songs
+                playlist.getSongs().addAll(getPlaylistSongs(id));
+                
+                return playlist;
+            }
+        } finally {
+            if (c != null) c.close();
         }
         
         return null;
@@ -145,23 +143,24 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
         
         SQLiteDatabase db = this.getReadableDatabase();
         Cursor c = db.rawQuery(selectQuery, null);
-        
-        if (c.moveToFirst()) {
-            do {
-                String id = c.getString(c.getColumnIndexOrThrow(KEY_ID));
-                String name = c.getString(c.getColumnIndexOrThrow(KEY_PLAYLIST_NAME));
-                long dateCreated = c.getLong(c.getColumnIndexOrThrow(KEY_DATE_CREATED));
-                
-                Playlist playlist = new Playlist(id, name, dateCreated);
-                
-                // Load playlist songs count for display
-                playlist.getSongs().addAll(getPlaylistSongs(id));
-                
-                playlists.add(playlist);
-            } while (c.moveToNext());
+        try {
+            if (c.moveToFirst()) {
+                do {
+                    String id = c.getString(c.getColumnIndexOrThrow(KEY_ID));
+                    String name = c.getString(c.getColumnIndexOrThrow(KEY_PLAYLIST_NAME));
+                    long dateCreated = c.getLong(c.getColumnIndexOrThrow(KEY_DATE_CREATED));
+                    
+                    Playlist playlist = new Playlist(id, name, dateCreated);
+                    
+                    // Load playlist songs count for display
+                    playlist.getSongs().addAll(getPlaylistSongs(id));
+                    
+                    playlists.add(playlist);
+                } while (c.moveToNext());
+            }
+        } finally {
+            c.close();
         }
-        
-        c.close();
         return playlists;
     }
 
@@ -246,23 +245,24 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
         
         SQLiteDatabase db = this.getReadableDatabase();
         Cursor c = db.rawQuery(selectQuery, new String[] { playlistId });
-        
-        if (c.moveToFirst()) {
-            do {
-                String uriString = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_URI));
-                String title = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_TITLE));
-                String duration = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_DURATION));
-                long size = c.getLong(c.getColumnIndexOrThrow(KEY_TRACK_SIZE));
-                long dateAdded = c.getLong(c.getColumnIndexOrThrow(KEY_TRACK_DATE_ADDED));
-                
-                Uri uri = Uri.parse(uriString);
-                
-                AudioFile audioFile = new AudioFile(title, duration, uri, 0, size, dateAdded);
-                songs.add(audioFile);
-            } while (c.moveToNext());
+        try {
+            if (c.moveToFirst()) {
+                do {
+                    String uriString = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_URI));
+                    String title = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_TITLE));
+                    String duration = c.getString(c.getColumnIndexOrThrow(KEY_TRACK_DURATION));
+                    long size = c.getLong(c.getColumnIndexOrThrow(KEY_TRACK_SIZE));
+                    long dateAdded = c.getLong(c.getColumnIndexOrThrow(KEY_TRACK_DATE_ADDED));
+                    
+                    Uri uri = Uri.parse(uriString);
+                    
+                    AudioFile audioFile = new AudioFile(title, duration, uri, 0, size, dateAdded);
+                    songs.add(audioFile);
+                } while (c.moveToNext());
+            }
+        } finally {
+            c.close();
         }
-        
-        c.close();
         return songs;
     }
 
@@ -279,11 +279,13 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
                 " WHERE " + KEY_PLAYLIST_ID + " = ? AND " + KEY_TRACK_URI + " = ?";
         
         Cursor cursor = db.rawQuery(selectQuery, new String[] { playlistId, uri.toString() });
-        cursor.moveToFirst();
-        int count = cursor.getInt(0);
-        cursor.close();
-        
-        return count > 0;
+        try {
+            cursor.moveToFirst();
+            int count = cursor.getInt(0);
+            return count > 0;
+        } finally {
+            cursor.close();
+        }
     }
 
     /**
@@ -299,12 +301,13 @@ public class PlaylistDatabaseHelper extends SQLiteOpenHelper {
         
         Cursor cursor = db.rawQuery(selectQuery, new String[] { playlistId });
         int sortOrder = 0;
-        
-        if (cursor.moveToFirst()) {
-            sortOrder = cursor.getInt(0);
+        try {
+            if (cursor.moveToFirst()) {
+                sortOrder = cursor.getInt(0);
+            }
+        } finally {
+            cursor.close();
         }
-        
-        cursor.close();
         return sortOrder;
     }
 } 

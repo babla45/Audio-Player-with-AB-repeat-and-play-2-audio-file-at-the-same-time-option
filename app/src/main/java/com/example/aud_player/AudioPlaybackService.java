@@ -48,6 +48,11 @@ public class AudioPlaybackService extends Service {
     private static final String ACTION_NEXT = "ACTION_NEXT";
     private static final String ACTION_PREV = "ACTION_PREV";
 
+    // Shared boost range — must match MainActivity's BOOST_MIN / BOOST_MAX
+    // so the slider, service, presets and voice-changer all agree.
+    public static final float BOOST_MIN = 1.0f;
+    public static final float BOOST_MAX = 3.0f;
+
     private MediaPlayer mediaPlayer;
     private MediaPlayer secondMediaPlayer;
     private final IBinder binder = new LocalBinder();
@@ -113,6 +118,7 @@ public class AudioPlaybackService extends Service {
                     }
                     if (!isAllowAudioMixEnabled()) {
                         isPlaying = false;
+                        unregisterBecomingNoisy(); // No audio playing → unregister
                         updateNotification();
                         // Notify UI to reflect paused state
                         try {
@@ -131,10 +137,19 @@ public class AudioPlaybackService extends Service {
                         TelephonyManager telephonyManager = (TelephonyManager) getSystemService(Context.TELEPHONY_SERVICE);
                         int callState = telephonyManager != null ? telephonyManager.getCallState() : TelephonyManager.CALL_STATE_IDLE;
                         if (callState == TelephonyManager.CALL_STATE_IDLE) {
-                            if (mediaPlayer != null && !mediaPlayer.isPlaying()) mediaPlayer.start();
-                            if (secondMediaPlayer != null && secondAudioActive && !secondMediaPlayer.isPlaying()) secondMediaPlayer.start();
+                            if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
+                                try { mediaPlayer.start(); } catch (IllegalStateException e) {
+                                    Log.w(TAG, "Failed to resume on focus gain", e);
+                                }
+                            }
+                            if (secondMediaPlayer != null && secondAudioActive && !secondMediaPlayer.isPlaying()) {
+                                try { secondMediaPlayer.start(); } catch (IllegalStateException e) {
+                                    Log.w(TAG, "Failed to resume second on focus gain", e);
+                                }
+                            }
                             isPlaying = true;
                             pausedByAudioFocusLoss = false;
+                            registerBecomingNoisy(); // re-register since playback resumed
                             updateNotification();
                             // Notify UI to reflect resumed state
                             try {
@@ -278,7 +293,7 @@ public class AudioPlaybackService extends Service {
                                 }
                                 isPlaying = false;
                                 abandonAudioFocus();
-                                unregisterBecomingNoisy();
+                                unregisterBecomingNoisy(); // No audio playing → unregister
                                 // Re-post foreground notification now that isPlaying changed
                                 startForeground(NOTIFICATION_ID, createNotification());
                             } catch (IllegalStateException e) {
@@ -830,8 +845,9 @@ public class AudioPlaybackService extends Service {
     public void setBoost(float boost) {
         try {
             if (boost <= 0f) boost = 1.0f;
-            // constrain to 1.0 - 5.0
-            boost = Math.max(1.0f, Math.min(5.0f, boost));
+            // Use shared BOOST_MIN/BOOST_MAX so the service, MainActivity
+            // slider, presets and voice-changer all clamp to the same range.
+            boost = Math.max(BOOST_MIN, Math.min(BOOST_MAX, boost));
             currentBoost = boost;
 
             // Persist preference

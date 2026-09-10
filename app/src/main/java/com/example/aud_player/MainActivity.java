@@ -143,6 +143,12 @@ public class MainActivity extends AppCompatActivity {
     private static final int TIMER_ACTION_CLOSE_APP = 1;
     private static final int TIMER_ACTION_END_OF_SONG = 2; // New action for end of song
     private int timerAction = TIMER_ACTION_CLOSE_APP; // Default is close app
+    // B009 FIX: Snapshot the action at timer-set time so the receiver
+    // always uses the action that was configured when the timer was started.
+    private int activeTimerAction = TIMER_ACTION_CLOSE_APP;
+    // B011 FIX: Flag-based end-of-song timer — handleSongCompletion()
+    // checks this instead of replacing the completion listener.
+    private boolean endOfSongTimerActive = false;
 
     private static final int PLAYBACK_MODE_REPEAT_CURRENT = 0;
     private static final int PLAYBACK_MODE_NEXT_IN_LIST = 1;
@@ -180,6 +186,9 @@ public class MainActivity extends AppCompatActivity {
     // Green A→B band overlay on the main seek bar while A-B repeat is enabled.
     // Cached so we only re-inset, not recreate, on every poll tick.
     private LayerDrawable abGreenBand;
+    private Drawable abGreenBandOriginalBg;
+    private long lastBottomSheetMenuShowMs = 0;
+    private Runnable searchDebounceRunnable;
     private TextView abRepeatIndicator;
     private MediaPlayer secondMediaPlayer = null;
     private Uri secondAudioUri = null;
@@ -238,6 +247,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean serviceBound = false;
 
     private static final String PREFS_NAME = "audio_player_prefs";
+    // B027 FIX: Shared boost range constants for voice changer and BoostBottomSheet.
+    public static final float BOOST_MIN = 1.0f;
+    public static final float BOOST_MAX = 3.0f;
     private static final String PREF_NOW_PLAYING_URI = "now_playing_uri";
     private static final String PREF_NOW_PLAYING_TITLE = "now_playing_title";
     private static final String PREF_NOW_PLAYING_POSITION = "now_playing_position";
@@ -721,6 +733,9 @@ public class MainActivity extends AppCompatActivity {
         mediaFilter.addAction("MEDIA_NEXT");
         mediaFilter.addAction("MEDIA_PREV");
         mediaFilter.addAction("PLAYBACK_SEEKED");
+        // B018: Use RECEIVER_NOT_EXPORTED — the service uses
+        // intent.setPackage(getPackageName()) so same-app broadcasts
+        // are received correctly on all Android versions.
         ContextCompat.registerReceiver(this, mediaControlsReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
 
         // Update UI when playback is paused/resumed outside the UI (notification,
@@ -1055,19 +1070,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void clearBottomNavSelectionSoon2() {
-        if (bottomNavigation == null) return;
-        bottomNavigation.postDelayed(() -> {
-            try {
-                Menu menu = bottomNavigation.getMenu();
-                for (int i = 0; i < menu.size(); i++) {
-                    menu.getItem(i).setChecked(false);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to clear bottom nav selection", e);
-            }
-        }, 0);
-    }
+    // B025 FIX: Removed dead clearBottomNavSelectionSoon2() method
+    // (identical to clearBottomNavSelectionSoon but with postDelayed(..., 0)).
 
     private void clearBottomNavSelectionSoon() {
         if (bottomNavigation == null) return;
@@ -1472,7 +1476,8 @@ public class MainActivity extends AppCompatActivity {
             String filename = null;
 
             // For content URIs, try to get the actual filename
-            if (uri.getScheme().equals("content")) {
+            // B015 FIX: Use null-safe comparison to avoid NPE when scheme is null.
+            if ("content".equals(uri.getScheme())) {
                 Cursor cursor = getContentResolver().query(uri, null, null, null, null);
                 if (cursor != null && cursor.moveToFirst()) {
                     int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
@@ -1554,6 +1559,13 @@ public class MainActivity extends AppCompatActivity {
                 PlaybackRegistry.stopAllExcept(mediaPlayer, null);
             } else {
                 PlaybackRegistry.stopAllExcept(mediaPlayer, secondMediaPlayer);
+            }
+
+            // B004 FIX: Clear service's player references before creating new
+            // player so it doesn't hold a stale MediaPlayer. onPrepared will
+            // re-set them once the new player is ready.
+            if (serviceBound && audioService != null) {
+                try { audioService.setMediaPlayers(null, null, null); } catch (Exception ignored) {}
             }
 
             // Update the adapter to highlight the current track
@@ -1733,6 +1745,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleSongCompletion() {
+        // B011 FIX: If end-of-song timer is active, pause instead of advancing.
+        if (endOfSongTimerActive) {
+            endOfSongTimerActive = false;
+            if (mediaPlayer != null) {
+                mediaPlayer.pause();
+                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
+                isPlaying = false;
+            }
+            if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
+                secondMediaPlayer.pause();
+            }
+            timerActive = false;
+            timerIndicator.setVisibility(View.GONE);
+            Toast.makeText(this, "Sleep timer: end of song reached", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         // Keep A-B repeat authoritative even when MediaPlayer triggers completion
         // (e.g. when point B is close to the end of the track).
         if (abRepeatActive && pointA != -1 && pointB != -1 && pointB > pointA && mediaPlayer != null) {
@@ -1769,7 +1798,12 @@ public class MainActivity extends AppCompatActivity {
                 if (mediaPlayer != null) {
                     mediaPlayer.seekTo(0);
                     mediaPlayer.start();
+                    isPlaying = true;
+                    safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                    updateMiniPlayer();
+                    updateSeekBar();
                 }
+                return;
             } else if (currentPlaybackMode == PLAYBACK_MODE_NEXT_IN_LIST) {
                 // Go to the next song from current context (search results, playlist, or all songs)
                 List<AudioFile> playlistContextList = getPlaybackContextList();
@@ -1789,6 +1823,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             } else if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
                 // Pick a random song from current context (search results, playlist, or all songs)
+                // B003/B007 FIX: Use onAudioFileSelected() instead of inline prepareMediaPlayer()
                 List<AudioFile> randomPlaylistContextList = getPlaybackContextList();
                 if (!randomPlaylistContextList.isEmpty()) {
                     anchorRandomHistoryToCurrentSong();
@@ -1797,16 +1832,7 @@ public class MainActivity extends AppCompatActivity {
                         randomIndex = new java.util.Random().nextInt(randomPlaylistContextList.size());
                     } while (randomPlaylistContextList.size() > 1 &&
                              randomPlaylistContextList.get(randomIndex).getUri().equals(selectedAudioUri));
-
-                    selectedAudioUri = randomPlaylistContextList.get(randomIndex).getUri();
-                    syncRandomHistory(selectedAudioUri);
-                shouldAutoPlay = true;
-                prepareMediaPlayer();
-
-                // Update adapter to highlight the current song
-                if (audioAdapter != null) {
-                    audioAdapter.setCurrentlyPlayingUri(selectedAudioUri);
-                    }
+                    onAudioFileSelected(randomPlaylistContextList.get(randomIndex));
                 }
             }
         } else {
@@ -1817,8 +1843,12 @@ public class MainActivity extends AppCompatActivity {
                     if (mediaPlayer != null) {
                         mediaPlayer.seekTo(0);
                         mediaPlayer.start();
+                        isPlaying = true;
+                        safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+                        updateMiniPlayer();
+                        updateSeekBar();
                     }
-                    break;
+                    return;
 
                 case PLAYBACK_MODE_NEXT_IN_LIST:
                     // Play the next song from current context (search results, playlist, or all songs)
@@ -2067,18 +2097,19 @@ public class MainActivity extends AppCompatActivity {
      * Save the current playback mode to SharedPreferences
      */
     private void savePlaybackMode() {
-        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        // B024 FIX: Use PREFS_NAME constant instead of hardcoded string.
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         SharedPreferences.Editor editor = prefs.edit();
         editor.putInt("playback_mode", currentPlaybackMode);
         editor.apply();
         Log.d(TAG, "Saved playback mode: " + currentPlaybackMode);
     }
-    
+
     /**
      * Load the saved playback mode from SharedPreferences
      */
     private void loadPlaybackMode() {
-        SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         currentPlaybackMode = prefs.getInt("playback_mode", PLAYBACK_MODE_NEXT_IN_LIST); // Default to "Play Next in List"
         Log.d(TAG, "Loaded playback mode: " + currentPlaybackMode);
     }
@@ -2185,7 +2216,11 @@ public class MainActivity extends AppCompatActivity {
         if (!show) {
             if (abGreenBand != null) {
                 abGreenBand = null;
-                // Restore default progress (drives the platform drawable)
+                // B016 FIX: Restore original seekbar background
+                if (abGreenBandOriginalBg != null) {
+                    seekBar.setBackground(abGreenBandOriginalBg);
+                    abGreenBandOriginalBg = null;
+                }
                 seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(
                         ContextCompat.getColor(this, R.color.accent_primary)));
                 seekBar.setSecondaryProgress(0);
@@ -2200,72 +2235,36 @@ public class MainActivity extends AppCompatActivity {
             return; // not laid out yet; the next poll tick retries
         }
 
+        // B016 FIX: Draw the green band from A to B as a background
+        // overlay behind the seekbar, rather than using secondaryProgress
+        // which always starts from 0.
         if (abGreenBand == null) {
-            // Take the platform's own progress drawable (default rounded
-            // shapes intact) and re-tint the secondaryProgress layer green.
-            // secondaryProgress renders BEHIND progress, so the normal
-            // accent progress draws on top of it — the classic buffered-bar
-            // look, reused here as the A→B marker.
-            Drawable current = seekBar.getProgressDrawable();
-            if (current instanceof LayerDrawable) {
-                abGreenBand = (LayerDrawable) current.mutate();
-                // The platform tint applies to the WHOLE LayerDrawable, so
-                // clear it first — we set per-layer colors below instead.
-                abGreenBand.setTintList(null);
-                android.graphics.drawable.ClipDrawable secondary =
-                        (android.graphics.drawable.ClipDrawable)
-                                abGreenBand.findDrawableByLayerId(android.R.id.secondaryProgress);
-                if (secondary != null) {
-                    Drawable inner = secondary.getDrawable();
-                    if (inner instanceof android.graphics.drawable.GradientDrawable) {
-                        // Direct color on the layer's own shape: rounded
-                        // corners stay, and the color is unmistakably green
-                        ((android.graphics.drawable.GradientDrawable) inner.mutate())
-                                .setColor(ContextCompat.getColor(this, R.color.success));
-                    } else if (inner != null) {
-                        inner.mutate().setTintList(null);
-                        inner.setTint(ContextCompat.getColor(this, R.color.success));
-                    }
-                }
-                // The progress layer keeps the normal accent color
-                android.graphics.drawable.ClipDrawable progress =
-                        (android.graphics.drawable.ClipDrawable)
-                                abGreenBand.findDrawableByLayerId(android.R.id.progress);
-                if (progress != null) {
-                    Drawable pInner = progress.getDrawable();
-                    if (pInner instanceof android.graphics.drawable.GradientDrawable) {
-                        ((android.graphics.drawable.GradientDrawable) pInner.mutate())
-                                .setColor(ContextCompat.getColor(this, R.color.accent_primary));
-                    } else if (pInner != null) {
-                        pInner.mutate().setTintList(null);
-                        pInner.setTint(ContextCompat.getColor(this, R.color.accent_primary));
-                    }
-                }
-                // Background layer: light gray so the unfinished part of the
-                // bar is clearly visible against the white background
-                Drawable background = abGreenBand
-                        .findDrawableByLayerId(android.R.id.background);
-                if (background != null) {
-                    if (background instanceof android.graphics.drawable.GradientDrawable) {
-                        ((android.graphics.drawable.GradientDrawable) background.mutate())
-                                .setColor(ContextCompat.getColor(this, R.color.track_unfinished));
-                    } else {
-                        background.mutate().setTintList(null);
-                        background.setTint(ContextCompat.getColor(this, R.color.track_unfinished));
-                    }
-                }
-            } else {
-                // Custom drawable without layers: fall back to just a solid
-                // green secondary tint (still no shape change).
-                seekBar.setSecondaryProgressTintList(
-                        android.content.res.ColorStateList.valueOf(
-                                ContextCompat.getColor(this, R.color.success)));
-            }
+            abGreenBandOriginalBg = seekBar.getBackground();
         }
 
-        // Secondary progress shows the A→B range: A clips it from the left,
-        // B is where it ends.
-        seekBar.setSecondaryProgress(pointB);
+        int paddingStart = seekBar.getPaddingStart();
+        if (paddingStart == 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            paddingStart = seekBar.getPaddingLeft();
+        }
+        int paddingEnd = seekBar.getPaddingEnd();
+        if (paddingEnd == 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
+            paddingEnd = seekBar.getPaddingRight();
+        }
+
+        int abLeft = paddingStart + (int) ((long) pointA * trackWidth / duration);
+        int abRight = paddingStart + (int) ((long) pointB * trackWidth / duration);
+        int top = seekBar.getPaddingTop();
+        int bottom = seekBar.getHeight() - seekBar.getPaddingBottom();
+
+        android.graphics.drawable.GradientDrawable greenDrawable =
+                new android.graphics.drawable.GradientDrawable();
+        greenDrawable.setColor(ContextCompat.getColor(this, R.color.success));
+        greenDrawable.setCornerRadius(4f);
+        greenDrawable.setBounds(abLeft, top, abRight, bottom);
+        seekBar.setBackground(greenDrawable);
+        // Store non-null so the show/hide logic can detect the band is active
+        abGreenBand = (LayerDrawable) seekBar.getProgressDrawable();
+
         seekBar.setProgress(position);
     }
 
@@ -2308,6 +2307,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // B026: @Deprecated — replaced by showBottomSheetMenu(). Kept for compatibility.
+    @Deprecated
     private void showPopupMenu(View v) {
         // Legacy method - redirect to new bottom sheet menu
         showBottomSheetMenu();
@@ -2317,6 +2318,13 @@ public class MainActivity extends AppCompatActivity {
         if (isBottomSheetMenuVisible()) {
             return;
         }
+        // B017 FIX: Timestamp-based debounce to prevent double-tap
+        // from opening two menu instances before the first becomes visible.
+        long now = System.currentTimeMillis();
+        if (now - lastBottomSheetMenuShowMs < 500) {
+            return;
+        }
+        lastBottomSheetMenuShowMs = now;
 
         MenuBottomSheet menuSheet = new MenuBottomSheet();
         menuSheet.setMenuListener(new MenuBottomSheet.MenuListener() {
@@ -3142,9 +3150,10 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onVolumeBoostChanged(float boost) {
-                // Same pipeline as the Boost bottom sheet (service LoudnessEnhancer),
-                // constrained here to the voice changer's 1x..3x range.
-                currentBoost = Math.max(1.0f, Math.min(3.0f, boost));
+                // Same pipeline as the Boost bottom sheet (service LoudnessEnhancer).
+                // B027 FIX: Use shared constants for the boost range so both
+                // the voice changer and the BoostBottomSheet stay in sync.
+                currentBoost = Math.max(BOOST_MIN, Math.min(BOOST_MAX, boost));
                 try {
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                             .edit().putFloat("volume_boost_factor", currentBoost).apply();
@@ -3476,18 +3485,17 @@ public class MainActivity extends AppCompatActivity {
                 return null;
             }
 
-            Bitmap shot = Bitmap.createBitmap(decor.getWidth(), decor.getHeight(),
-                    Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(shot);
-            decor.draw(canvas);
-
-            // Downsample heavily first: the blur runs on the small image (fast)
-            // and gets stretched back up to full size (which smooths it further)
+            // B019 FIX: Draw directly into a small bitmap via canvas scale,
+            // avoiding the full-resolution intermediate allocation (~10MB on
+            // high-res screens). The blur runs on the small image and gets
+            // stretched back up to full size (which smooths it further).
             float scale = 0.15f;
-            int dw = Math.max(1, (int) (shot.getWidth() * scale));
-            int dh = Math.max(1, (int) (shot.getHeight() * scale));
-            Bitmap small = Bitmap.createScaledBitmap(shot, dw, dh, true);
-            shot.recycle();
+            int dw = Math.max(1, (int) (decor.getWidth() * scale));
+            int dh = Math.max(1, (int) (decor.getHeight() * scale));
+            Bitmap small = Bitmap.createBitmap(dw, dh, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(small);
+            canvas.scale(scale, scale);
+            decor.draw(canvas);
 
             Bitmap blurred = boxBlurBitmap(small, 4);
             small.recycle();
@@ -5072,33 +5080,9 @@ public class MainActivity extends AppCompatActivity {
         }
 
         timerActive = true;
-
-        // Save a reference to the standard completion handler
-        MediaPlayer.OnCompletionListener originalCompletionListener = mp -> handleSongCompletion();
-
-        // Create a one-time completion listener
-        mediaPlayer.setOnCompletionListener(mp -> {
-            // Pause playback instead of continuing to next song
-            if (mediaPlayer != null) {
-                mediaPlayer.pause();
-                safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
-                isPlaying = false;
-            }
-
-            // If there's a second player, pause it too
-            if (secondMediaPlayer != null && secondAudioActive && secondMediaPlayer.isPlaying()) {
-                secondMediaPlayer.pause();
-            }
-
-            timerActive = false;
-            timerIndicator.setVisibility(View.GONE);
-            Toast.makeText(this, "Sleep timer: end of song reached", Toast.LENGTH_SHORT).show();
-
-            // Reset to original completion behavior
-            if (mediaPlayer != null) {
-                mediaPlayer.setOnCompletionListener(originalCompletionListener);
-            }
-        });
+        // B011 FIX: Set a flag instead of replacing the completion listener.
+        // handleSongCompletion() checks endOfSongTimerActive and pauses if set.
+        endOfSongTimerActive = true;
 
         // Display a message
         String timeText = "Until end of song";
@@ -5117,6 +5101,7 @@ public class MainActivity extends AppCompatActivity {
             audioService.cancelTimer();
         }
         timerActive = false;
+        endOfSongTimerActive = false; // B011 FIX
         timerIndicator.setVisibility(View.GONE);
         Toast.makeText(this, "Sleep timer cancelled", Toast.LENGTH_SHORT).show();
     }
@@ -5132,6 +5117,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Set the timer in the service to ensure it works in background
         if (serviceBound && audioService != null) {
+            // B009 FIX: Snapshot the current timerAction so the receiver
+            // can use it as fallback even if the user changes the action later.
+            activeTimerAction = timerAction;
             audioService.setTimer(endTimeMillis, timerAction);
 
             // Register a broadcast receiver for timer updates
@@ -5144,7 +5132,9 @@ public class MainActivity extends AppCompatActivity {
                             updateTimerDisplay(timeLeft);
                         } else if ("TIMER_FINISHED".equals(intent.getAction())) {
                             timerActive = false;
-                            int action = intent.getIntExtra("TIMER_ACTION", TIMER_ACTION_PAUSE);
+                            // B009 FIX: Use activeTimerAction (captured at timer-set
+                            // time) as fallback instead of hardcoded TIMER_ACTION_PAUSE.
+                            int action = intent.getIntExtra("TIMER_ACTION", activeTimerAction);
 
                             if (action == TIMER_ACTION_CLOSE_APP) {
                                 // Make sure service is fully stopped before finishing
@@ -5378,16 +5368,14 @@ public class MainActivity extends AppCompatActivity {
                 }
             } catch (IllegalStateException e) {
                 Log.e(TAG, "Error checking first player state after second player prep", e);
-                // First player may have been reset - try to restore it
-                prepareMediaPlayer();
+                // B012 FIX: First player may have been reset — use shouldAutoPlay
+                // and pendingRestoreSeekMs so the async onPrepared callback
+                // restores position and resumes playback.
                 if (wasPlaying) {
-                    try {
-                        mediaPlayer.seekTo(firstPosition);
-                        mediaPlayer.start();
-                    } catch (Exception ex) {
-                        Log.e(TAG, "Failed to restore first player", ex);
-                    }
+                    shouldAutoPlay = true;
+                    pendingRestoreSeekMs = firstPosition;
                 }
+                prepareMediaPlayer();
             }
         }
     }
@@ -5400,9 +5388,13 @@ public class MainActivity extends AppCompatActivity {
         try {
             float mainDuration = mediaPlayer.getDuration();
             float mainPosition = mediaPlayer.getCurrentPosition();
+            // B013 FIX: Guard against division by zero when duration is 0.
+            if (mainDuration <= 0) return;
             float positionPercentage = mainPosition / mainDuration;
 
             float secondDuration = secondMediaPlayer.getDuration();
+            // B014 FIX: Guard against second player duration being 0.
+            if (secondDuration <= 0) return;
             int secondPosition = (int) (positionPercentage * secondDuration);
 
             secondMediaPlayer.seekTo(secondPosition);
@@ -5472,6 +5464,24 @@ public class MainActivity extends AppCompatActivity {
         
         // Release audio focus
         abandonAudioFocus();
+
+        // B002 FIX: Clear service's player references BEFORE unbinding,
+        // so the service never holds a released MediaPlayer.
+        boolean playerKeepsPlaying = false;
+        if (serviceBound && audioService != null) {
+            try {
+                if (mediaPlayer != null && mediaPlayer.isPlaying()) {
+                    // Service will keep playing — tell it to own the player
+                    playerKeepsPlaying = true;
+                } else {
+                    // Player is not playing — clear service's references
+                    // before we release the local player
+                    audioService.setMediaPlayers(null, null, null);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error clearing service references on destroy", e);
+            }
+        }
 
         // Unbind from the service (guarded: an exception here must never
         // abort the rest of the teardown, or receivers leak and a closed
@@ -5559,10 +5569,15 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        if (mediaPlayer != null) {
-            closeAudioEffectSession(mediaPlayer.getAudioSessionId());
+        // B001 FIX: Only release audio effects when the MediaPlayer is also
+        // being released. If playback continues through the service, the new
+        // Activity instance reuses the same audio session's effects.
+        if (!playerKeepsPlaying) {
+            if (mediaPlayer != null) {
+                closeAudioEffectSession(mediaPlayer.getAudioSessionId());
+            }
+            releaseEqualizerEffects();
         }
-        releaseEqualizerEffects();
 
         super.onDestroy();
     }
@@ -5582,6 +5597,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Add this method to launch the AudioListActivity
+    // B026: @Deprecated — uses deprecated startActivityForResult. Kept for compatibility.
+    @Deprecated
     private void browseAudioFiles(boolean selectSecondFile) {
         if (isPermissionGranted) {
             // For second file selection, ensure first file is selected
@@ -5767,6 +5784,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onAudioFileSelected(AudioFile audioFile) {
+        // B005 FIX: Persist the OLD track's position before switching to the
+        // new track. Previously saveNowPlayingPrefs() was called AFTER
+        // selectedAudioUri was changed, which lost the old track's position.
+        saveNowPlayingPrefs();
+
         // Handle primary audio selection
         selectedAudioUri = audioFile.getUri();
         if (currentPlaybackMode == PLAYBACK_MODE_RANDOM) {
@@ -6102,16 +6124,23 @@ public class MainActivity extends AppCompatActivity {
         input.setText(audioFile.getTitle());
         builder.setView(input);
 
-        // Add action buttons
-        builder.setPositiveButton(R.string.ok, (dialog, which) -> {
-            String newName = input.getText().toString().trim();
-            if (!newName.isEmpty()) {
-                renameFile(audioFile, newName);
-            }
-        });
+        // B021 FIX: Override the positive button's click listener to prevent
+        // auto-dismiss on validation failure. setPositiveButton auto-dismisses,
+        // but we need to keep the dialog open when the name is empty.
+        builder.setPositiveButton(R.string.ok, null);
         builder.setNegativeButton(R.string.cancel, null);
 
-        builder.show();
+        AlertDialog dialog = builder.create();
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String newName = input.getText().toString().trim();
+            if (newName.isEmpty()) {
+                input.setError("Name cannot be empty");
+                return; // Don't dismiss
+            }
+            renameFile(audioFile, newName);
+            dialog.dismiss();
+        });
     }
 
     private void renameFile(AudioFile audioFile, String newName) {
@@ -7466,10 +7495,12 @@ public class MainActivity extends AppCompatActivity {
             currentTimeText.setText("0:00");
 
             // Reset MediaPlayer states
+            // B008 FIX: Do NOT call prepareMediaPlayer() after reset —
+            // that re-prepares the track and restarts playback. Just reset
+            // to idle state so the player is ready for the next play action.
             if (mediaPlayer != null) {
                 try {
                     mediaPlayer.reset();
-                    prepareMediaPlayer();
                 } catch (Exception e) {
                     Log.e(TAG, "Error resetting media player", e);
                 }
@@ -7492,7 +7523,9 @@ public class MainActivity extends AppCompatActivity {
 
     // Add this method to handle seeking in both primary and secondary tracks
     private void seekRelative(int offsetMs) {
-        if (mediaPlayer == null || !mediaPlayer.isPlaying()) {
+        // B020 FIX: Allow seeking while paused (mediaPlayer exists but
+        // isPlaying() returns false). Only guard against null player.
+        if (mediaPlayer == null) {
             return;
         }
 
@@ -8005,7 +8038,10 @@ public class MainActivity extends AppCompatActivity {
         if (group == null) return;
         for (int i = 0; i < group.getChildCount(); i++) {
             View child = group.getChildAt(i);
-            if (child instanceof RadioButton && value == (int) child.getTag()) {
+            // B023 FIX: Guard against null or non-Integer tag to avoid
+            // NPE or ClassCastException.
+            if (child instanceof RadioButton && child.getTag() instanceof Integer
+                    && value == (Integer) child.getTag()) {
                 group.check(child.getId());
                 return;
             }
@@ -8953,15 +8989,23 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void afterTextChanged(Editable s) {
-                    String query = s.toString().trim().toLowerCase();
-                    matchLength[0] = findHowToUseMatches(query, textViews, originalTexts, matches);
-                    currentMatch[0] = matches.isEmpty() ? -1 : 0;
-                    renderHowToUseMatches(textViews, originalTexts, matches, currentMatch[0],
-                            matchLength[0], matchColor, currentColor);
-                    updateHowToUseNavButtons(prevButton, nextButton, matches.isEmpty());
-                    if (!matches.isEmpty()) {
-                        scrollHowToUseToMatch(scrollView, textViews, matches, currentMatch[0]);
+                    // B022 FIX: Debounce search to avoid re-highlighting on
+                    // every keystroke. Wait 200ms after the last keystroke.
+                    final String query = s.toString().trim().toLowerCase();
+                    if (searchDebounceRunnable != null) {
+                        handler.removeCallbacks(searchDebounceRunnable);
                     }
+                    searchDebounceRunnable = () -> {
+                        matchLength[0] = findHowToUseMatches(query, textViews, originalTexts, matches);
+                        currentMatch[0] = matches.isEmpty() ? -1 : 0;
+                        renderHowToUseMatches(textViews, originalTexts, matches, currentMatch[0],
+                                matchLength[0], matchColor, currentColor);
+                        updateHowToUseNavButtons(prevButton, nextButton, matches.isEmpty());
+                        if (!matches.isEmpty()) {
+                            scrollHowToUseToMatch(scrollView, textViews, matches, currentMatch[0]);
+                        }
+                    };
+                    handler.postDelayed(searchDebounceRunnable, 200);
                 }
             });
         }
@@ -9794,7 +9838,10 @@ public class MainActivity extends AppCompatActivity {
         shouldAutoPlay = true;
         prepareMediaPlayer();
         prepareSecondMediaPlayer();
-        secondAudioActive = true;
+        // B006 FIX: Do NOT set secondAudioActive=true here. It is set
+        // inside prepareSecondMediaPlayer's onPrepared callback. Premature
+        // assignment causes startSecondTrackIfMixerReady() to call
+        // secondMediaPlayer.start() before it's prepared → IllegalStateException.
 
         applyAudioVolumes(preset.firstVolume, preset.secondVolume);
 
