@@ -265,6 +265,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_CUSTOM_MINI_PLAYER_COLOR = "custom_mini_player_color";
     // Saved custom themes stored as a JSON array (name + full theme state)
     private static final String PREF_SAVED_THEMES = "saved_custom_themes";
+    // One-time flag: stored list was reversed so newest-saved comes first
+    private static final String PREF_SAVED_THEMES_ORDER_MIGRATED = "saved_themes_order_migrated";
     private static final String PREF_RESET_SPEED = "reset_button_speed";
     private static final String PREF_RESET_PITCH = "reset_button_pitch";
     private static final String PREF_RESET_EQUALIZER = "reset_button_equalizer";
@@ -7682,8 +7684,18 @@ public class MainActivity extends AppCompatActivity {
 
     // Add a method to show settings dialog
     private void showOtherSettingsDialog() {
+        // B027 FIX: menuButton sits inside expandedPlayerControls, which is
+        // GONE while the mini player is collapsed. A PopupMenu anchored to a
+        // hidden view has no anchor position and renders in the bottom-left
+        // corner of the screen. Fall back to a visible anchor instead so the
+        // settings menu appears in the same place in both player states.
+        View anchor = menuButton;
+        if (anchor == null || anchor.getVisibility() != View.VISIBLE) {
+            anchor = (miniPlayerBar != null && miniPlayerBar.getVisibility() == View.VISIBLE)
+                    ? miniPlayerBar : findViewById(android.R.id.content);
+        }
         // Create submenu for settings
-        PopupMenu popup = new PopupMenu(this, menuButton);
+        PopupMenu popup = new PopupMenu(this, anchor);
         popup.getMenuInflater().inflate(R.menu.settings_menu, popup.getMenu());
 
         popup.setOnMenuItemClickListener(item -> {
@@ -7899,6 +7911,21 @@ public class MainActivity extends AppCompatActivity {
             themes = new JSONArray();
         }
 
+        // One-time migration: themes used to be appended, so the newest one
+        // sat at the end. Reverse the stored list once so the newest-saved
+        // theme comes first; new saves are inserted at the front afterwards.
+        if (!prefs.getBoolean(PREF_SAVED_THEMES_ORDER_MIGRATED, false)) {
+            JSONArray reversed = new JSONArray();
+            for (int i = themes.length() - 1; i >= 0; i--) {
+                reversed.put(themes.optJSONObject(i));
+            }
+            themes = reversed;
+            prefs.edit()
+                    .putString(PREF_SAVED_THEMES, themes.toString())
+                    .putBoolean(PREF_SAVED_THEMES_ORDER_MIGRATED, true)
+                    .apply();
+        }
+
         // Always keep the built-in default themes available (by name), even
         // after a reset or an import that didn't include them
         try {
@@ -7994,8 +8021,14 @@ public class MainActivity extends AppCompatActivity {
             theme.put("miniTheme", miniTheme);
             theme.put("appColor", appColor);
             theme.put("miniColor", miniColor);
-            themes.put(theme);
-            prefs.edit().putString(PREF_SAVED_THEMES, themes.toString()).apply();
+            // Newest first: insert at the head of the list so the most
+            // recently saved theme shows up as the first chip
+            JSONArray withNew = new JSONArray();
+            withNew.put(theme);
+            for (int i = 0; i < themes.length(); i++) {
+                withNew.put(themes.optJSONObject(i));
+            }
+            prefs.edit().putString(PREF_SAVED_THEMES, withNew.toString()).apply();
             Toast.makeText(this, "Theme saved as \"" + finalName + "\"", Toast.LENGTH_SHORT).show();
         } catch (JSONException e) {
             Toast.makeText(this, "Failed to save theme", Toast.LENGTH_SHORT).show();
@@ -8040,11 +8073,199 @@ public class MainActivity extends AppCompatActivity {
             chip.setElevation(dpToPx(2));
             chip.setOnClickListener(v -> applySavedCustomTheme(prefs, theme, appGroup, miniGroup,
                     currentThemeMode, currentMiniTheme));
+            chip.setOnLongClickListener(v -> {
+                showSavedThemeOptions(theme, prefs, row, appGroup, miniGroup,
+                        currentThemeMode, currentMiniTheme);
+                return true;
+            });
             LinearLayout.LayoutParams chipLp = new LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             chipLp.setMargins(0, chipMargin, chipMargin, chipMargin);
             row.addView(chip, chipLp);
         }
+    }
+
+    /**
+     * Long-press menu for a saved theme chip: Rename, Update (overwrite the
+     * theme with the configuration currently selected in the theme dialog)
+     * and Delete. Built-in default themes cannot be renamed, updated or
+     * deleted because the app always restores them.
+     */
+    private void showSavedThemeOptions(JSONObject theme, SharedPreferences prefs,
+                                       LinearLayout row, RadioGroup appGroup, RadioGroup miniGroup,
+                                       int currentThemeMode, int currentMiniTheme) {
+        final String themeName = theme.optString("name");
+        if (isBuiltInThemeName(themeName)) {
+            Toast.makeText(this, "Built-in themes can't be modified", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String[] options = {"Rename", "Update", "Delete"};
+        new AlertDialog.Builder(this)
+                .setTitle(capitalizeThemeName(themeName))
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        promptRenameSavedTheme(themeName, prefs, row, appGroup, miniGroup,
+                                currentThemeMode, currentMiniTheme);
+                    } else if (which == 1) {
+                        updateSavedTheme(themeName, prefs, row, appGroup, miniGroup,
+                                currentThemeMode, currentMiniTheme);
+                    } else {
+                        confirmDeleteSavedTheme(themeName, prefs, row, appGroup, miniGroup,
+                                currentThemeMode, currentMiniTheme);
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** True when the given name matches one of the built-in default themes. */
+    private boolean isBuiltInThemeName(String name) {
+        try {
+            JSONArray defaults = new JSONArray(DEFAULT_SAVED_THEMES);
+            for (int i = 0; i < defaults.length(); i++) {
+                JSONObject def = defaults.optJSONObject(i);
+                if (def != null && def.optString("name").equals(name)) {
+                    return true;
+                }
+            }
+        } catch (JSONException ignored) {
+        }
+        return false;
+    }
+
+    /**
+     * Rewrites the stored saved-themes list: keeps every theme except the one
+     * named {@code oldName}, and inserts {@code replacement} (if non-null) at
+     * that theme's original position.
+     */
+    private void replaceSavedTheme(SharedPreferences prefs, String oldName, JSONObject replacement) {
+        JSONArray themes = getSavedThemesArray(prefs);
+        JSONArray updated = new JSONArray();
+        for (int i = 0; i < themes.length(); i++) {
+            JSONObject existing = themes.optJSONObject(i);
+            if (existing != null && existing.optString("name").equals(oldName)) {
+                if (replacement != null) {
+                    updated.put(replacement);
+                }
+            } else {
+                updated.put(existing);
+            }
+        }
+        prefs.edit().putString(PREF_SAVED_THEMES, updated.toString()).apply();
+    }
+
+    /** Asks for a new name and renames the saved theme, keeping its config. */
+    private void promptRenameSavedTheme(String oldName, SharedPreferences prefs, LinearLayout row,
+                                        RadioGroup appGroup, RadioGroup miniGroup,
+                                        int currentThemeMode, int currentMiniTheme) {
+        final EditText nameInput = new EditText(this);
+        nameInput.setText(oldName);
+        nameInput.setSelection(nameInput.getText().length());
+        int pad = (int) dpToPx(16);
+        LinearLayout nameContainer = new LinearLayout(this);
+        nameContainer.setOrientation(LinearLayout.VERTICAL);
+        nameContainer.setPadding(pad, pad, pad, 0);
+        nameContainer.addView(nameInput);
+        new AlertDialog.Builder(this)
+                .setTitle("Rename Theme")
+                .setView(nameContainer)
+                .setPositiveButton(R.string.save, (d, w) -> {
+                    String newName = nameInput.getText().toString().trim();
+                    if (newName.isEmpty() || newName.equals(oldName)) {
+                        return;
+                    }
+                    // Avoid colliding with an existing different theme name
+                    if (savedThemeNameExists(prefs, newName)) {
+                        Toast.makeText(this, "Name \"" + newName + "\" is already taken",
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    try {
+                        JSONObject renamed = getSavedThemeByName(prefs, oldName);
+                        if (renamed != null) {
+                            renamed.put("name", newName);
+                            replaceSavedTheme(prefs, oldName, renamed);
+                            populateSavedThemesRow(row, prefs, appGroup, miniGroup,
+                                    currentThemeMode, currentMiniTheme);
+                            Toast.makeText(this, "Theme renamed to \"" + newName + "\"",
+                                    Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (JSONException e) {
+                        Toast.makeText(this, "Failed to rename theme", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** True when a saved theme with the given name already exists. */
+    private boolean savedThemeNameExists(SharedPreferences prefs, String name) {
+        return getSavedThemeByName(prefs, name) != null;
+    }
+
+    /** Returns the saved theme JSON object with the given name, or null. */
+    private JSONObject getSavedThemeByName(SharedPreferences prefs, String name) {
+        JSONArray themes = getSavedThemesArray(prefs);
+        for (int i = 0; i < themes.length(); i++) {
+            JSONObject existing = themes.optJSONObject(i);
+            if (existing != null && existing.optString("name").equals(name)) {
+                return existing;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Overwrites the named saved theme with the configuration currently
+     * selected in the theme dialog (radios + saved custom colors), keeping
+     * its name and position.
+     */
+    private void updateSavedTheme(String themeName, SharedPreferences prefs, LinearLayout row,
+                                  RadioGroup appGroup, RadioGroup miniGroup,
+                                  int currentThemeMode, int currentMiniTheme) {
+        int checkedApp = appGroup.getCheckedRadioButtonId();
+        int checkedMini = miniGroup.getCheckedRadioButtonId();
+        if (checkedApp == View.NO_ID || checkedMini == View.NO_ID) {
+            return;
+        }
+        RadioButton appButton = appGroup.findViewById(checkedApp);
+        RadioButton miniButton = miniGroup.findViewById(checkedMini);
+        if (appButton == null || miniButton == null) {
+            return;
+        }
+        try {
+            JSONObject updated = new JSONObject();
+            updated.put("name", themeName);
+            updated.put("themeMode", (int) appButton.getTag());
+            updated.put("miniTheme", (int) miniButton.getTag());
+            updated.put("appColor", getSavedCustomAppColor());
+            updated.put("miniColor", getSavedCustomMiniPlayerColor());
+            replaceSavedTheme(prefs, themeName, updated);
+            populateSavedThemesRow(row, prefs, appGroup, miniGroup,
+                    currentThemeMode, currentMiniTheme);
+            Toast.makeText(this, "Theme \"" + capitalizeThemeName(themeName) + "\" updated",
+                    Toast.LENGTH_SHORT).show();
+        } catch (JSONException e) {
+            Toast.makeText(this, "Failed to update theme", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Asks for confirmation, then removes the saved theme from the list. */
+    private void confirmDeleteSavedTheme(String themeName, SharedPreferences prefs, LinearLayout row,
+                                         RadioGroup appGroup, RadioGroup miniGroup,
+                                         int currentThemeMode, int currentMiniTheme) {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Theme")
+                .setMessage("Delete \"" + capitalizeThemeName(themeName) + "\"?")
+                .setPositiveButton(R.string.delete, (d, w) -> {
+                    replaceSavedTheme(prefs, themeName, null);
+                    populateSavedThemesRow(row, prefs, appGroup, miniGroup,
+                            currentThemeMode, currentMiniTheme);
+                    Toast.makeText(this, "Theme \"" + capitalizeThemeName(themeName) + "\" deleted",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
     }
 
     /**

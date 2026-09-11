@@ -22,6 +22,7 @@
     <string name="timer_set_custom">Timer set: %1$d minutes</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
+    <string name="delete">Delete</string>
     <string name="error_invalid_time">Please enter a valid time (0.1-180.0 minutes)</string>
     <string name="ab_repeat">A-B Repeat</string>
     <string name="set_point_a">Set Point A</string>

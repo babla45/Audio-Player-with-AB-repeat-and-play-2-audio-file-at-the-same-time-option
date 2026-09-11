@@ -323,7 +323,11 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         holder.albumArtIcon.setTag(tag);
         artExecutor.execute(() -> {
             Bitmap art = loadEmbeddedArtwork(holder.albumArtIcon.getContext(), artUri);
-            artCache.put(artUri, art);
+            // LruCache.put throws on a null value — only cache when the
+            // file actually has embedded artwork
+            if (art != null) {
+                artCache.put(artUri, art);
+            }
             holder.albumArtIcon.post(() -> {
                 // Only apply if this view is still showing the same song
                 if (!tag.equals(String.valueOf(holder.albumArtIcon.getTag()))) {
