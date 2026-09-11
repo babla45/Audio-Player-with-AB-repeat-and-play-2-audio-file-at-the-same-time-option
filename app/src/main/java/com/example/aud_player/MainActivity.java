@@ -8713,11 +8713,15 @@ public class MainActivity extends AppCompatActivity {
             navColor = ContextCompat.getColor(this, R.color.milky_bottom_nav_bg);
             searchColor = ContextCompat.getColor(this, R.color.milky_search_bg);
         } else if (isCustomAppThemeActive()) {
+            // V2: keep the picked color clearly visible — much lighter
+            // lightening than before (was 0.80/0.70/0.74/0.64, which washed
+            // the picked color out to near-white). Text stays readable
+            // because text colors are dark on these lighter shades.
             int base = getSavedCustomAppColor();
-            backgroundColor = lightenColor(base, 0.80f);
-            panelColor = lightenColor(base, 0.70f);
-            navColor = lightenColor(base, 0.74f);
-            searchColor = lightenColor(base, 0.64f);
+            backgroundColor = lightenColor(base, 0.82f);
+            panelColor = lightenColor(base, 0.30f);
+            navColor = lightenColor(base, 0.40f);
+            searchColor = lightenColor(base, 0.15f);
         } else {
             return;
         }
@@ -9433,7 +9437,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateAppMock(int color, View[] appBoxes) {
-        float[] ratios = {0.80f, 0.70f, 0.74f, 0.64f};
+        float[] ratios = {0.82f, 0.30f, 0.40f, 0.15f};
         for (int i = 0; i < appBoxes.length; i++) {
             GradientDrawable bg = (GradientDrawable) appBoxes[i].getBackground();
             bg.setColor(lightenColor(color, ratios[i % ratios.length]));
@@ -9477,7 +9481,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             // App theme mock: background / panel / nav / search shades —
             // same ratios as applyCustomAppColorPreview()
-            float[] ratios = {0.80f, 0.70f, 0.74f, 0.64f};
+            float[] ratios = {0.82f, 0.30f, 0.40f, 0.15f};
             for (int i = 0; i < previewBoxes.length; i++) {
                 GradientDrawable bg = (GradientDrawable) previewBoxes[i].getBackground();
                 bg.setColor(lightenColor(color, ratios[i]));
@@ -9565,10 +9569,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyCustomAppColorPreview(int selectedColor) {
-        int backgroundColor = lightenColor(selectedColor, 0.80f);
-        int panelColor = lightenColor(selectedColor, 0.70f);
-        int navColor = lightenColor(selectedColor, 0.74f);
-        int searchColor = lightenColor(selectedColor, 0.64f);
+        int backgroundColor = lightenColor(selectedColor, 0.82f);
+        int panelColor = lightenColor(selectedColor, 0.30f);
+        int navColor = lightenColor(selectedColor, 0.40f);
+        int searchColor = lightenColor(selectedColor, 0.15f);
 
         View contentRoot = findViewById(android.R.id.content);
         if (contentRoot instanceof ViewGroup) {
