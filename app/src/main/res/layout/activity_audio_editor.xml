@@ -17,17 +17,17 @@
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="12dp"
-            android:paddingTop="14dp"
-            android:paddingBottom="6dp">
+            android:paddingHorizontal="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="2dp">
 
             <ImageView
                 android:id="@+id/editorBackBtn"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="Back"
-                android:padding="8dp"
+                android:padding="6dp"
                 android:src="@drawable/ic_chevron_down"
                 app:tint="#FFFFFFFF" />
 
@@ -42,7 +42,7 @@
                     android:layout_height="wrap_content"
                     android:text="Audio Editor"
                     android:textColor="#FFFFFFFF"
-                    android:textSize="18sp"
+                    android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -52,7 +52,7 @@
                     android:ellipsize="end"
                     android:maxLines="1"
                     android:textColor="#AAFFFFFF"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     tools:text="song.mp3" />
             </LinearLayout>
         </LinearLayout>
@@ -64,7 +64,7 @@
             android:gravity="center"
             android:orientation="horizontal"
             android:paddingHorizontal="16dp"
-            android:paddingTop="6dp">
+            android:paddingTop="2dp">
 
             <TextView
                 android:id="@+id/editorTabCut"
@@ -75,10 +75,10 @@
                 android:background="@drawable/bg_editor_chip"
                 android:gravity="center"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="10dp"
+                android:paddingVertical="5dp"
                 android:text="Cut / Trim"
                 android:textColor="#FFFFFFFF"
-                android:textSize="14sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -90,10 +90,10 @@
                 android:background="@drawable/bg_editor_chip"
                 android:gravity="center"
                 android:paddingHorizontal="16dp"
-                android:paddingVertical="10dp"
+                android:paddingVertical="5dp"
                 android:text="Split"
                 android:textColor="#88FFFFFF"
-                android:textSize="14sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
@@ -101,11 +101,11 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginTop="12dp"
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="5dp"
             android:background="@drawable/bg_editor_panel"
             android:orientation="vertical"
-            android:padding="14dp">
+            android:padding="8dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -118,7 +118,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#FFFFFFFF"
-                    android:textSize="13sp"
+                    android:textSize="12sp"
                     android:textStyle="bold"
                     tools:text="Split 2 at 01:20  •  4 parts" />
 
@@ -127,7 +127,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="#88FFFFFF"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     tools:text="Total 04:10" />
             </LinearLayout>
 
@@ -135,8 +135,8 @@
             <HorizontalScrollView
                 android:id="@+id/editorTimelineScroll"
                 android:layout_width="match_parent"
-                android:layout_height="190dp"
-                android:layout_marginTop="10dp"
+                android:layout_height="118dp"
+                android:layout_marginTop="5dp"
                 android:overScrollMode="never"
                 android:scrollbars="none">
 
@@ -150,7 +150,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="1dp"
                 android:orientation="horizontal">
 
                 <TextView
@@ -159,7 +159,7 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:textColor="#FFFFFFFF"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     tools:text="▶ 00:42" />
 
                 <TextView
@@ -167,7 +167,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="#77FFFFFF"
-                    android:textSize="12sp"
+                    android:textSize="11sp"
                     tools:text="Zoom 1.0x" />
             </LinearLayout>
 
@@ -175,9 +175,9 @@
                 android:id="@+id/editorHintText"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="2dp"
                 android:textColor="#77FFFFFF"
-                android:textSize="11sp"
+                android:textSize="10sp"
                 tools:text="Drag A / B handles to select the part to keep." />
         </LinearLayout>
 
@@ -187,8 +187,8 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:paddingHorizontal="16dp"
-            android:paddingTop="12dp">
+            android:paddingHorizontal="12dp"
+            android:paddingTop="8dp">
 
             <TextView
                 android:id="@+id/editorPreviewBtn"
@@ -196,65 +196,87 @@
                 android:layout_height="wrap_content"
                 android:background="@drawable/bg_editor_btn_secondary"
                 android:gravity="center"
-                android:paddingVertical="10dp"
+                android:paddingVertical="8dp"
                 android:text="▶ Preview"
                 android:textColor="#FFFFFFFF"
                 android:textSize="13sp" />
         </LinearLayout>
 
-        <!-- Split mode pro control bar: Play/Pause | Add | Delete | Zoom- | Zoom+ -->
+        <!-- Split mode pro control bar: Play/Pause | Auto-scroll | Split | Delete | Add song | Zoom- | Zoom+ -->
         <LinearLayout
             android:id="@+id/editorControlBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
-            android:paddingHorizontal="16dp"
-            android:paddingTop="12dp"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="5dp"
             android:visibility="gone"
             tools:visibility="visible">
 
             <ImageButton
                 android:id="@+id/editorPlayBtn"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1.2"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1.1"
                 android:background="@drawable/bg_editor_btn_primary"
                 android:contentDescription="Play/Pause"
                 android:src="@drawable/ic_play"
                 app:tint="#FFFFFFFF" />
 
+            <ImageButton
+                android:id="@+id/editorAutoScrollBtn"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="0.65"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Auto-scroll"
+                android:src="@drawable/ic_auto_scroll"
+                app:tint="#88FFFFFF" />
+
             <TextView
                 android:id="@+id/editorAddSplitBtn"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1.4"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="0.65"
                 android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add split at playhead"
                 android:gravity="center"
-                android:text="✂ Split"
+                android:text="✂"
                 android:textColor="#FFFFFFFF"
-                android:textSize="13sp" />
+                android:textSize="15sp" />
 
-            <TextView
+            <ImageButton
                 android:id="@+id/editorDeleteSplitBtn"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="1.4"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="0.65"
                 android:background="@drawable/bg_editor_btn_secondary"
-                android:gravity="center"
-                android:text="🗑 Delete"
-                android:textColor="#FFFFFFFF"
-                android:textSize="13sp" />
+                android:contentDescription="Delete selected split"
+                android:src="@drawable/ic_delete"
+                app:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/editorAddSongBtn"
+                android:layout_width="0dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="0.5"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add a song to the end of the timeline"
+                android:src="@drawable/ic_queue_music"
+                app:tint="#FFFFFFFF" />
 
             <TextView
                 android:id="@+id/editorZoomOutBtn"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="6dp"
-                android:layout_weight="0.7"
+                android:layout_height="32dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="0.65"
                 android:background="@drawable/bg_editor_btn_secondary"
                 android:gravity="center"
                 android:text="－"
@@ -264,8 +286,8 @@
             <TextView
                 android:id="@+id/editorZoomInBtn"
                 android:layout_width="0dp"
-                android:layout_height="44dp"
-                android:layout_weight="0.7"
+                android:layout_height="32dp"
+                android:layout_weight="0.65"
                 android:background="@drawable/bg_editor_btn_secondary"
                 android:gravity="center"
                 android:text="＋"
@@ -273,11 +295,46 @@
                 android:textSize="16sp" />
         </LinearLayout>
 
+        <!-- Split mode undo/redo (multi-level history) -->
+        <LinearLayout
+            android:id="@+id/editorUndoRedoRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="4dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:id="@+id/editorUndoBtn"
+                android:layout_width="0dp"
+                android:layout_height="30dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="↩ Undo"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/editorRedoBtn"
+                android:layout_width="0dp"
+                android:layout_height="30dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="↪ Redo"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
         <!-- Segment list -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="4dp"
             android:layout_weight="1"
             android:fillViewport="true"
             android:overScrollMode="ifContentScrolls">
@@ -287,25 +344,48 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:paddingHorizontal="16dp"
-                android:paddingBottom="8dp" />
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="6dp" />
         </ScrollView>
 
-        <!-- Save -->
-        <TextView
-            android:id="@+id/editorSaveBtn"
+        <!-- Preview (split mode: plays parts in list order) + Save -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="16dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="18dp"
-            android:background="@drawable/bg_editor_btn_primary"
-            android:gravity="center"
-            android:paddingVertical="14dp"
-            android:text="Save"
-            android:textColor="#FFFFFFFF"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="3dp"
+            android:layout_marginBottom="8dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/editorSeqPreviewBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:paddingVertical="7dp"
+                android:text="▶ Preview"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/editorSaveBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.4"
+                android:background="@drawable/bg_editor_btn_primary"
+                android:gravity="center"
+                android:paddingVertical="7dp"
+                android:text="Save"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
     </LinearLayout>
 
     <!-- Progress overlay -->

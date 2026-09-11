@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Auto-scroll toggle: follow the playhead during playback -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M3,8 H16 V5 L22,9 L16,13 V10 H3 Z M21,14 H8 V11 L2,15 L8,19 V16 H21 Z" />
+</vector>

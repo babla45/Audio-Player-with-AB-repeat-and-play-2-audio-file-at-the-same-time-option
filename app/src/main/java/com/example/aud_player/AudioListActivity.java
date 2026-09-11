@@ -1,11 +1,17 @@
 package com.example.aud_player;
 
+import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -14,13 +20,23 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 public class AudioListActivity extends AppCompatActivity {
 
     private RecyclerView recyclerView;
     private View emptyView;
-    private List<AudioFile> audioFiles = new ArrayList<>();
+    private TextView emptyText;
+    private EditText searchEditText;
+    private View clearSearchButton, searchContainer;
+
+    /** The whole MediaStore library (never filtered). */
+    private final List<AudioFile> audioFiles = new ArrayList<>();
+    /** What the list currently shows: audioFiles, filtered by the search box. */
+    private final List<AudioFile> shownFiles = new ArrayList<>();
+    private AudioAdapter adapter;
+
     private boolean isSelectingSecondFile = false;
 
     @Override
@@ -30,6 +46,10 @@ public class AudioListActivity extends AppCompatActivity {
 
         recyclerView = findViewById(R.id.audioRecyclerView);
         emptyView = findViewById(R.id.emptyView);
+        emptyText = findViewById(R.id.emptyText);
+        searchEditText = findViewById(R.id.audioListSearchEditText);
+        clearSearchButton = findViewById(R.id.audioListClearSearch);
+        searchContainer = findViewById(R.id.audioListSearchContainer);
 
         // Get intent extras to determine if we're selecting primary or secondary audio
         if (getIntent() != null) {
@@ -38,9 +58,57 @@ public class AudioListActivity extends AppCompatActivity {
 
         // Setup RecyclerView
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        
+
+        // One adapter for the whole screen: the search box re-fills its list
+        // instead of rebuilding it (keeps scroll state and avoids re-inflating)
+        adapter = new AudioAdapter(audioFiles);
+        adapter.setOnItemClickListener(audioFile -> {
+            // Return the selected file to the caller (MainActivity, or the
+            // audio editor's "+" button)
+            Intent resultIntent = new Intent();
+            resultIntent.setData(audioFile.getUri());
+            setResult(RESULT_OK, resultIntent);
+            finish();
+        });
+        recyclerView.setAdapter(adapter);
+
+        setupSearch();
+
         // Load audio files
         loadAudioFiles();
+    }
+
+    /** Wire the search box: live filtering as the user types. */
+    private void setupSearch() {
+        searchEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int st, int c, int a) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int st, int b, int c) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                applyFilter();
+            }
+        });
+        clearSearchButton.setOnClickListener(v -> searchEditText.setText(""));
+        searchEditText.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                hideKeyboard();
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private void hideKeyboard() {
+        View focus = getCurrentFocus();
+        if (focus == null) return;
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(focus.getWindowToken(), 0);
     }
 
     private void loadAudioFiles() {
@@ -65,7 +133,7 @@ public class AudioListActivity extends AppCompatActivity {
 
         if (cursor != null) {
             audioFiles.clear();
-            
+
             int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID);
             int titleColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE);
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
@@ -78,7 +146,7 @@ public class AudioListActivity extends AppCompatActivity {
                 long duration = cursor.getLong(durationColumn);
                 long size = cursor.getLong(sizeColumn);
                 long dateAdded = cursor.getLong(dateAddedColumn);
-                
+
                 // Try to get display name with extension
                 String displayName = title;
                 int displayNameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
@@ -88,7 +156,7 @@ public class AudioListActivity extends AppCompatActivity {
                         displayName = fullName;
                     }
                 }
-                
+
                 String durationFormatted = formatDuration(duration);
 
                 Uri contentUri = Uri.withAppendedPath(
@@ -100,24 +168,47 @@ public class AudioListActivity extends AppCompatActivity {
             cursor.close();
         }
 
-        // Show empty view if no audio files
-        if (audioFiles.isEmpty()) {
+        // A search box is pointless with nothing to search
+        searchContainer.setVisibility(audioFiles.isEmpty() ? View.GONE : View.VISIBLE);
+        applyFilter();
+    }
+
+    /**
+     * Fill the list with the songs matching the search box (all of them when
+     * it is empty), and keep the empty view in sync.
+     */
+    private void applyFilter() {
+        String query = searchEditText.getText().toString().trim()
+                .toLowerCase(Locale.ROOT);
+
+        shownFiles.clear();
+        if (query.isEmpty()) {
+            shownFiles.addAll(audioFiles);
+        } else {
+            for (AudioFile f : audioFiles) {
+                // same matching as the main library list
+                if (f.matchesSearch(query)) shownFiles.add(f);
+            }
+        }
+
+        adapter.updateList(shownFiles);
+        // matched words are highlighted in the titles, like the main list
+        adapter.setSearchQuery(query);
+        clearSearchButton.setVisibility(query.isEmpty() ? View.GONE : View.VISIBLE);
+
+        if (shownFiles.isEmpty()) {
             recyclerView.setVisibility(View.GONE);
             emptyView.setVisibility(View.VISIBLE);
+            emptyText.setText(audioFiles.isEmpty()
+                    ? getString(R.string.no_audio_files)
+                    : "No song matches \"" + searchEditText.getText().toString().trim() + "\"");
         } else {
             recyclerView.setVisibility(View.VISIBLE);
             emptyView.setVisibility(View.GONE);
-            
-            // Setup adapter
-            AudioAdapter adapter = new AudioAdapter(audioFiles);
-            adapter.setOnItemClickListener(audioFile -> {
-                // Return the selected file to MainActivity
-                Intent resultIntent = new Intent();
-                resultIntent.setData(audioFile.getUri());
-                setResult(RESULT_OK, resultIntent);
-                finish();
-            });
-            recyclerView.setAdapter(adapter);
+            if (!query.isEmpty()) {
+                // results start at the top, not where the user had scrolled to
+                recyclerView.scrollToPosition(0);
+            }
         }
     }
 

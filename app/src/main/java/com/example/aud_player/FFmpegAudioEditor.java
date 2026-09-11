@@ -113,12 +113,20 @@ public final class FFmpegAudioEditor {
     // Source temp handling
     // ------------------------------------------------------------------
 
-    /** Copy the source URI to a private cache file; FFmpeg needs a real path. */
-    public File copyToTemp(Context context, Uri source) throws IOException {
+    /**
+     * Prepare the private temp dir for a job: create it and drop leftovers
+     * from a previous run. Called ONCE per job — copying each source must not
+     * wipe the sources already copied before it.
+     */
+    private static File prepareTempDir(Context context) {
         File tempDir = new File(context.getCacheDir(), "editor_temp");
         if (!tempDir.exists()) tempDir.mkdirs();
         cleanupDir(tempDir); // no stale temp files
+        return tempDir;
+    }
 
+    /** Copy one source URI into the already-prepared temp dir. */
+    private File copySourceToTemp(Context context, Uri source, File tempDir) throws IOException {
         String ext = guessExtension(context, source);
         File temp = File.createTempFile("src_", "." + ext, tempDir);
         try (InputStream in = context.getContentResolver().openInputStream(source);
@@ -135,6 +143,11 @@ public final class FFmpegAudioEditor {
             throw e;
         }
         return temp;
+    }
+
+    /** Copy the source URI to a private cache file; FFmpeg needs a real path. */
+    public File copyToTemp(Context context, Uri source) throws IOException {
+        return copySourceToTemp(context, source, prepareTempDir(context));
     }
 
     private static String guessExtension(Context context, Uri uri) {
@@ -173,6 +186,19 @@ public final class FFmpegAudioEditor {
             File parent = temp.getParentFile();
             if (parent != null) cleanupDir(parent);
         }
+    }
+
+    /** Delete every temp source file (and the folder) after processing. */
+    private static void cleanupTemps(List<File> temps) {
+        if (temps == null || temps.isEmpty()) return;
+        File parent = null;
+        for (File f : temps) {
+            if (f == null) continue;
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+            parent = f.getParentFile();
+        }
+        if (parent != null) cleanupDir(parent);
     }
 
     private static void cleanupDir(File dir) {
@@ -255,7 +281,9 @@ public final class FFmpegAudioEditor {
             return;
         }
         cancelled.set(false);
-        executor.execute(() -> doJob(context, input, mode, segments, baseName, listener));
+        List<File> inputs = new ArrayList<>(1);
+        inputs.add(input);
+        executor.execute(() -> doJob(context, inputs, null, mode, segments, baseName, listener));
     }
 
     /**
@@ -267,118 +295,294 @@ public final class FFmpegAudioEditor {
     public void runJobFromUri(final Context context, final Uri source, final int mode,
                               final List<Segment> segments, final String baseName,
                               final EditListener listener) {
-        if (source == null || segments == null || segments.isEmpty()) {
+        List<Uri> one = new ArrayList<>(1);
+        one.add(source);
+        runJobFromUri(context, one, null, mode, segments, baseName, listener);
+    }
+
+    /**
+     * Multi-source job. The edited timeline is the CONCATENATION of
+     * `sources`, and `boundariesMs` (length sources.size()+1, starting at 0)
+     * gives the global time each source starts at. Segment times are GLOBAL,
+     * so one segment may span a source seam — it is cut as one piece per
+     * source and the pieces are concatenated back together.
+     *
+     * Pass a null `boundariesMs` for the classic single-source behaviour:
+     * every segment belongs to input 0 and its times are already local.
+     */
+    public void runJobFromUri(final Context context, final List<Uri> sources,
+                              final long[] boundariesMs, final int mode,
+                              final List<Segment> segments, final String baseName,
+                              final EditListener listener) {
+        if (sources == null || sources.isEmpty() || segments == null || segments.isEmpty()) {
             postError(listener, "Nothing to process", false);
             return;
         }
         cancelled.set(false);
         executor.execute(() -> {
-            File temp = null;
+            List<File> temps = new ArrayList<>();
             try {
                 postProgress(listener, -1);
-                temp = copyToTemp(context, source);
-                doJob(context, temp, mode, segments, baseName, listener);
+                File tempDir = prepareTempDir(context);
+                for (Uri source : sources) {
+                    temps.add(copySourceToTemp(context, source, tempDir));
+                }
+                doJob(context, temps, boundariesMs, mode, segments, baseName, listener);
             } catch (Throwable e) {
                 // Throwable (not Exception): a NoClassDefFoundError or other
                 // linkage error must surface as onError, never crash the app
                 Log.e(TAG, "edit job failed", e);
                 postError(listener, "Error: " + e.getMessage(), false);
             } finally {
-                cleanupTemp(temp);
+                cleanupTemps(temps);
             }
         });
     }
 
-    private void doJob(Context context, File input, int mode,
+    /** One cuttable range inside one input file (local time). */
+    private static final class Piece {
+        final int inputIndex;
+        final long startMs;
+        final long endMs;
+
+        Piece(int inputIndex, long startMs, long endMs) {
+            this.inputIndex = inputIndex;
+            this.startMs = startMs;
+            this.endMs = endMs;
+        }
+
+        long durationMs() {
+            return endMs - startMs;
+        }
+    }
+
+    /**
+     * Express one GLOBAL timeline segment as per-input pieces (local time).
+     * When the boundaries are unknown (single source) the segment maps onto
+     * input 0 unchanged — the pre-multi-source behaviour.
+     */
+    private static void splitIntoSources(long startMs, long endMs, long[] boundaries,
+                                         int inputCount, List<Piece> out) {
+        if (boundaries == null || inputCount <= 1) {
+            if (endMs > startMs) out.add(new Piece(0, startMs, endMs));
+            return;
+        }
+        for (int i = 0; i < inputCount && i + 1 < boundaries.length; i++) {
+            long s = Math.max(startMs, boundaries[i]);
+            long e = Math.min(endMs, boundaries[i + 1]);
+            if (e > s) out.add(new Piece(i, s - boundaries[i], e - boundaries[i]));
+        }
+    }
+
+    /**
+     * Cut every piece, in order, into the work dir; the files actually
+     * written are appended to `out`. `baseSeq` keeps temp names unique across
+     * the whole job. Returns false after posting the failure/cancellation.
+     */
+    private boolean cutPieces(List<File> inputs, List<Piece> pieces, int baseSeq,
+                              String[] inputExt, File workDir, List<File> out,
+                              ProgressSink sink, int[] step, EditListener listener) {
+        for (int i = 0; i < pieces.size(); i++) {
+            if (cancelled.get()) {
+                postError(listener, "Cancelled", true);
+                return false;
+            }
+            Piece p = pieces.get(i);
+            File target = new File(workDir,
+                    "p" + (baseSeq + i) + "." + inputExt[p.inputIndex]);
+            File result = runFfmpegCut(inputs.get(p.inputIndex), target, p.startMs, p.endMs, sink);
+            step[0]++;
+            if (cancelled.get()) {
+                //noinspection ResultOfMethodCallIgnored
+                target.delete();
+                postError(listener, "Cancelled", true);
+                return false;
+            }
+            if (result == null) {
+                //noinspection ResultOfMethodCallIgnored
+                target.delete();
+                postError(listener, "FFmpeg failed on a part", false);
+                return false;
+            }
+            out.add(result);
+        }
+        return true;
+    }
+
+    /** Concat the part files (in order) into `output`; null after an error. */
+    private File concatParts(File workDir, List<File> parts, File output, long totalMs,
+                             ProgressSink sink, EditListener listener) {
+        if (cancelled.get()) {
+            postError(listener, "Cancelled", true);
+            return null;
+        }
+        StringBuilder list = new StringBuilder();
+        for (File f : parts) {
+            list.append("file '")
+                    .append(f.getAbsolutePath().replace("'", "'\\''"))
+                    .append("'\n");
+        }
+        File listFile = new File(workDir, "concat_" + System.nanoTime() + ".txt");
+        try {
+            writeText(listFile, list.toString());
+        } catch (IOException e) {
+            postError(listener, "Error: " + e.getMessage(), false);
+            return null;
+        }
+        File result = runFfmpegConcat(listFile, output, totalMs, sink);
+        //noinspection ResultOfMethodCallIgnored
+        listFile.delete();
+        if (cancelled.get()) {
+            //noinspection ResultOfMethodCallIgnored
+            output.delete();
+            postError(listener, "Cancelled", true);
+            return null;
+        }
+        if (result == null) {
+            //noinspection ResultOfMethodCallIgnored
+            output.delete();
+            postError(listener, "FFmpeg merge failed", false);
+            return null;
+        }
+        return result;
+    }
+
+    /** Post the failure/cancellation of a single cut; true when it produced. */
+    private boolean isOk(File result, File target, List<File> produced, EditListener listener) {
+        if (cancelled.get()) {
+            //noinspection ResultOfMethodCallIgnored
+            if (result != null) result.delete();
+            //noinspection ResultOfMethodCallIgnored
+            target.delete();
+            deleteAll(produced);
+            postError(listener, "Cancelled", true);
+            return false;
+        }
+        if (result == null) {
+            //noinspection ResultOfMethodCallIgnored
+            target.delete();
+            deleteAll(produced);
+            postError(listener, "FFmpeg failed", false);
+            return false;
+        }
+        return true;
+    }
+
+    private void doJob(Context context, List<File> inputs, long[] boundaries, int mode,
                        List<Segment> segments, String baseName,
                        EditListener listener) {
-        File workDir = new File(input.getParentFile(), "parts");
+        File workDir = new File(inputs.get(0).getParentFile(), "parts");
         //noinspection ResultOfMethodCallIgnored
         workDir.mkdirs();
         List<File> produced = new ArrayList<>();
         try {
-                String ext = extOf(input);
-                long totalMs = 0;
-                for (Segment s : segments) totalMs += Math.max(1, s.durationMs());
-                int stepCount = (mode == MODE_MERGE) ? segments.size() + 1 : segments.size();
+            // Each input keeps its OWN container extension: stream-copying an
+            // m4a source into a ".mp3" target would fail outright.
+            String[] inputExt = new String[inputs.size()];
+            for (int i = 0; i < inputs.size(); i++) inputExt[i] = extOf(inputs.get(i));
+            String ext = inputExt[0];
 
-                for (int i = 0; i < segments.size(); i++) {
-                    if (cancelled.get()) {
-                        deleteAll(produced);
-                        postError(listener, "Cancelled", true);
-                        return;
-                    }
-                    Segment s = segments.get(i);
+            // Every timeline segment, expressed as per-input pieces.
+            List<List<Piece>> perSegment = new ArrayList<>();
+            long totalMs = 0;
+            int pieceCount = 0;
+            for (Segment s : segments) {
+                List<Piece> pieces = new ArrayList<>();
+                splitIntoSources(s.startMs, s.endMs, boundaries, inputs.size(), pieces);
+                if (pieces.isEmpty()) continue; // zero-length segment
+                perSegment.add(pieces);
+                pieceCount += pieces.size();
+                for (Piece p : pieces) totalMs += Math.max(1, p.durationMs());
+            }
+            if (perSegment.isEmpty()) {
+                postError(listener, "Nothing to process", false);
+                return;
+            }
 
-                    File target;
-                    if (mode == MODE_SEPARATE) {
-                        target = uniqueOutput(context, baseName + "_part" + (i + 1), ext);
-                    } else if (mode == MODE_CUT) {
-                        target = uniqueOutput(context, baseName, ext);
-                    } else {
-                        target = new File(workDir, "p" + i + "." + ext);
-                    }
+            // One concat per multi-piece output: a single run for the
+            // single-output modes, one per part for MODE_SEPARATE.
+            int concatRuns = 0;
+            if (mode == MODE_SEPARATE) {
+                for (List<Piece> pieces : perSegment) if (pieces.size() > 1) concatRuns++;
+            } else if (pieceCount > 1) {
+                concatRuns = 1;
+            }
+            int stepCount = Math.max(1, pieceCount + concatRuns);
+            final int[] step = {0};
+            // one ffmpeg run's 0..100 folded into the job's overall progress
+            ProgressSink sink = percent -> postProgress(listener,
+                    (int) (100f * (step[0] + percent / 100f) / stepCount));
 
-                    final int idx = i;
-                    File result = runFfmpegCut(input, target, s.startMs, s.endMs,
-                            percent -> postProgress(listener,
-                                    (int) (100f * (idx + percent / 100f) / stepCount)));
-
-                    if (cancelled.get()) {
-                        //noinspection ResultOfMethodCallIgnored
-                        target.delete();
-                        deleteAll(produced);
-                        postError(listener, "Cancelled", true);
-                        return;
-                    }
-                    if (result == null) {
-                        //noinspection ResultOfMethodCallIgnored
-                        target.delete();
-                        deleteAll(produced);
-                        postError(listener, "FFmpeg failed on segment " + (idx + 1), false);
-                        return;
-                    }
+            int seq = 0;
+            if (mode != MODE_SEPARATE) {
+                // ---- Cut/Trim and Merge: exactly one output file ----
+                String name = (mode == MODE_CUT) ? baseName : baseName + "_merged";
+                if (pieceCount == 1) {
+                    // fast path: the single piece IS the result
+                    Piece p = perSegment.get(0).get(0);
+                    File target = uniqueOutput(context, name, inputExt[p.inputIndex]);
+                    File result = runFfmpegCut(inputs.get(p.inputIndex), target,
+                            p.startMs, p.endMs, sink);
+                    step[0]++;
+                    if (!isOk(result, target, produced, listener)) return;
                     produced.add(result);
-                }
-
-                if (mode == MODE_MERGE) {
-                    if (cancelled.get()) {
+                } else {
+                    List<File> parts = new ArrayList<>();
+                    for (List<Piece> pieces : perSegment) {
+                        if (!cutPieces(inputs, pieces, seq, inputExt, workDir, parts,
+                                sink, step, listener)) {
+                            deleteAll(parts);
+                            deleteAll(produced);
+                            return;
+                        }
+                        seq += pieces.size();
+                    }
+                    File merged = concatParts(workDir, parts, uniqueOutput(context, name, ext),
+                            totalMs, sink, listener);
+                    deleteAll(parts);
+                    if (merged == null) {
                         deleteAll(produced);
-                        postError(listener, "Cancelled", true);
                         return;
                     }
-                    File merged = uniqueOutput(context, baseName + "_merged", ext);
-                    StringBuilder list = new StringBuilder();
-                    for (File f : produced) {
-                        list.append("file '")
-                                .append(f.getAbsolutePath().replace("'", "'\\''"))
-                                .append("'\n");
-                    }
-                    File listFile = new File(workDir, "concat.txt");
-                    writeText(listFile, list.toString());
-                    File mergedResult = runFfmpegConcat(listFile, merged, totalMs,
-                            percent -> postProgress(listener, percent));
-                    //noinspection ResultOfMethodCallIgnored
-                    listFile.delete();
-                    if (cancelled.get()) {
-                        //noinspection ResultOfMethodCallIgnored
-                        merged.delete();
-                        deleteAll(produced);
-                        postError(listener, "Cancelled", true);
-                        return;
-                    }
-                    if (mergedResult == null) {
-                        //noinspection ResultOfMethodCallIgnored
-                        merged.delete();
-                        deleteAll(produced);
-                        postError(listener, "FFmpeg merge failed", false);
-                        return;
-                    }
-                    produced = new ArrayList<>();
                     produced.add(merged);
                 }
+            } else {
+                // ---- Separate: one output per timeline segment ----
+                for (int i = 0; i < perSegment.size(); i++) {
+                    List<Piece> pieces = perSegment.get(i);
+                    String name = baseName + "_part" + (i + 1);
+                    if (pieces.size() == 1) {
+                        Piece p = pieces.get(0);
+                        File target = uniqueOutput(context, name, inputExt[p.inputIndex]);
+                        File result = runFfmpegCut(inputs.get(p.inputIndex), target,
+                                p.startMs, p.endMs, sink);
+                        step[0]++;
+                        if (!isOk(result, target, produced, listener)) return;
+                        produced.add(result);
+                    } else {
+                        List<File> parts = new ArrayList<>();
+                        if (!cutPieces(inputs, pieces, seq, inputExt, workDir, parts,
+                                sink, step, listener)) {
+                            deleteAll(parts);
+                            deleteAll(produced);
+                            return;
+                        }
+                        seq += pieces.size();
+                        long partMs = 0;
+                        for (Piece p : pieces) partMs += Math.max(1, p.durationMs());
+                        File merged = concatParts(workDir, parts, uniqueOutput(context, name, ext),
+                                partMs, sink, listener);
+                        deleteAll(parts);
+                        if (merged == null) {
+                            deleteAll(produced);
+                            return;
+                        }
+                        produced.add(merged);
+                    }
+                }
+            }
 
-                postSuccess(listener, produced);
+            postSuccess(listener, produced);
         } catch (Throwable e) {
             // Throwable (not Exception): linkage errors etc. must surface as
             // onError, never crash the app

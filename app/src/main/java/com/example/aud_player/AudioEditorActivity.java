@@ -9,20 +9,28 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.PopupMenu;
 
 import java.io.File;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -48,50 +56,203 @@ public class AudioEditorActivity extends AppCompatActivity {
     private static final int TAB_CUT = 0;
     private static final int TAB_SPLIT = 1;
     private static final long PLAYHEAD_UPDATE_MS = 33; // ~30fps smooth playhead
+    /** Max undo/redo history levels (professional-editor style). */
+    private static final int MAX_HISTORY = 50;
+    /** Default zoom when entering split mode: only a slice of the song is
+     *  visible, so the first 15s waveform chunk paints almost instantly. */
+    private static final float DEFAULT_SPLIT_ZOOM = 10f;
 
-    private Uri sourceUri;
+    /** Snapshot of the split-mode timeline state for undo/redo. */
+    private static class EditorState {
+        final List<Long> splitPoints;
+        final List<long[]> deletedRanges;
+        final List<Integer> sequence;
+        final int selectedSplit;
+        final int selectedSegment;
+
+        EditorState(List<Long> splitPoints, List<long[]> deletedRanges,
+                    List<Integer> sequence, int selectedSplit, int selectedSegment) {
+            this.splitPoints = new ArrayList<>(splitPoints);
+            this.deletedRanges = new ArrayList<>();
+            if (deletedRanges != null) {
+                for (long[] r : deletedRanges) {
+                    this.deletedRanges.add(new long[]{r[0], r[1]});
+                }
+            }
+            this.sequence = new ArrayList<>(sequence == null ? new ArrayList<>() : sequence);
+            this.selectedSplit = selectedSplit;
+            this.selectedSegment = selectedSegment;
+        }
+    }
+
+    private final Deque<EditorState> undoStack = new ArrayDeque<>();
+    private final Deque<EditorState> redoStack = new ArrayDeque<>();
+
+    /**
+     * One audio file on the edited timeline. Sources are played and exported
+     * as a concatenation, so each one owns the global time range
+     * [offsetMs, offsetMs + durationMs). With a single source the offset is 0
+     * and every mapping is the identity — i.e. the behaviour before songs
+     * could be appended.
+     */
+    private static class Source {
+        final Uri uri;
+        final String title;
+        final long durationMs;
+        long offsetMs;
+        /** 600-bucket RMS waveform, or null until it has been decoded. */
+        float[] waveform;
+        /** true once a decode has been asked for (never decode twice). */
+        boolean waveformRequested;
+
+        Source(Uri uri, String title, long durationMs) {
+            this.uri = uri;
+            this.title = title;
+            this.durationMs = Math.max(1, durationMs);
+        }
+    }
+
+    private final List<Source> sources = new ArrayList<>();
     private String songTitle;
+    /** TOTAL length of the edited timeline (all sources concatenated). */
     private long durationMs;
 
     private EditorTimelineView timeline;
     private HorizontalScrollView timelineScroll;
     private TextView rangeText, durationText, hintText, currentTimeText, zoomText;
-    private TextView tabCut, tabSplit, addSplitBtn, deleteSplitBtn, previewBtn, saveBtn;
-    private TextView zoomOutBtn, zoomInBtn;
-    private ImageButton playBtn;
-    private View cutActionRow, controlBar;
+    private TextView tabCut, tabSplit, addSplitBtn, previewBtn, saveBtn;
+    private TextView zoomOutBtn, zoomInBtn, undoBtn, redoBtn, seqPreviewBtn, songNameText;
+    /** Icon-only buttons (the ✂/🗑 labels were dropped for icons). */
+    private ImageButton playBtn, addSongBtn, deleteSplitBtn;
+    /** Auto-scroll toggle: when on, the timeline follows the playhead. */
+    private ImageButton autoScrollBtn;
+    private boolean autoScrollEnabled = false;
+    private View cutActionRow, controlBar, undoRedoRow;
     private LinearLayout segmentList;
     private View progressOverlay;
     private ProgressBar progressBar;
     private TextView progressText, progressTitle;
     private View cancelBtn;
 
+    /** Remembers the last-used tab so the editor reopens there. */
+    private static final String PREFS = "audio_editor_prefs";
+    private static final String KEY_LAST_TAB = "last_tab";
+
     private int currentTab = TAB_CUT;
+    private boolean splitZoomInitialized = false;
     private boolean jobRunning = false;
+
+    // ---- segment-list drag reorder state ----
+    /** Row currently being dragged (null when idle). */
+    private View dragRow;
+    private int dragFromPos = -1;
+    private int dragTargetPos = -1;
+    private float dragLastRawY;
+    private float dragDownRawY;
+    /** true once the drag actually moved (vs. a plain handle tap). */
+    private boolean rowDragMoved;
+    /** swallows the click that follows a finished drag. */
+    private boolean suppressNextRowClick;
+
+    // ---- sequence preview (parts in the current list order) ----
+    private List<long[]> previewQueue;
+    private int previewQueueIndex = -1;
+    /** boundary already advanced through (async-seek double-fire guard). */
+    private long lastQueueAdvanceEnd = Long.MIN_VALUE;
 
     private final FFmpegAudioEditor editor = new FFmpegAudioEditor();
     private final WaveformExtractor waveformExtractor = new WaveformExtractor();
 
     private MediaPlayer previewPlayer;
     private long previewStartMs, previewEndMs;
+    /** Which source `previewPlayer` is currently playing. */
+    private int previewSourceIndex;
+
+    /** "+": pick another song from the library and append it to the timeline. */
+    private final ActivityResultLauncher<Intent> songPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getData();
+                    if (uri != null) appendSong(uri);
+                }
+            });
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable playheadUpdater = new Runnable() {
         @Override
         public void run() {
             if (previewPlayer != null && timeline != null) {
                 try {
-                    int pos = previewPlayer.getCurrentPosition();
-                    if (previewEndMs > 0 && pos >= previewEndMs - 40) {
+                    // The player only knows the file of the source it was
+                    // created for; the timeline works in GLOBAL time.
+                    long pos = toGlobal(previewSourceIndex,
+                            previewPlayer.getCurrentPosition());
+                    // skip over deleted segments (KineMaster-style: the
+                    // playhead jumps the gap instead of playing removed audio)
+                    long mapped = timeline.skipDeletedForward(pos);
+                    if (mapped < 0) {
                         stopPreview();
                         return;
                     }
+                    if (mapped != pos) {
+                        seekPreviewTo(mapped);
+                        pos = mapped;
+                    }
+                    if (previewEndMs > 0 && pos >= previewEndMs - 40) {
+                        if (previewQueue == null) {
+                            stopPreview();
+                            return;
+                        }
+                        if (previewEndMs != lastQueueAdvanceEnd) {
+                            lastQueueAdvanceEnd = previewEndMs;
+                            advanceSequencePreview();
+                            if (previewPlayer == null) return; // finished
+                            pos = toGlobal(previewSourceIndex,
+                                    previewPlayer.getCurrentPosition());
+                        } else {
+                            // async seek not reflected yet — hold the
+                            // playhead at the new part's start
+                            pos = previewStartMs;
+                        }
+                    }
                     timeline.setPlayheadMs(pos);
                     updateCurrentTimeText(pos);
-                    followPlayhead();
+                    // auto-scroll only when the user turned the toggle on;
+                    // otherwise the timeline stays where they left it and
+                    // manual scrolling is always free
+                    if (autoScrollEnabled) followPlayhead();
                 } catch (Exception ignored) {
                 }
                 mainHandler.postDelayed(this, PLAYHEAD_UPDATE_MS);
             }
+        }
+    };
+
+    /** Auto-scrolls the part list while dragging a row near its edges. */
+    private final Runnable dragAutoScroll = new Runnable() {
+        @Override
+        public void run() {
+            if (dragRow == null) return;
+            ScrollView sv = (ScrollView) segmentList.getParent();
+            int[] loc = new int[2];
+            sv.getLocationOnScreen(loc);
+            float inSv = dragLastRawY - loc[1];
+            int edge = dp(56);
+            int speed = dp(10);
+            boolean scrolled = false;
+            if (inSv < edge && sv.getScrollY() > 0) {
+                sv.smoothScrollBy(0, -speed);
+                scrolled = true;
+            } else if (inSv > sv.getHeight() - edge
+                    && sv.getScrollY() + sv.getHeight() < sv.getChildAt(0).getHeight()) {
+                sv.smoothScrollBy(0, speed);
+                scrolled = true;
+            }
+            if (scrolled) {
+                positionDragRow(dragLastRawY);
+                updateRowDragTargets();
+            }
+            mainHandler.postDelayed(this, 64);
         }
     };
 
@@ -106,21 +267,23 @@ public class AudioEditorActivity extends AppCompatActivity {
             finish();
             return;
         }
-        sourceUri = Uri.parse(uriStr);
+        Uri firstUri = Uri.parse(uriStr);
         songTitle = intent.getStringExtra(EXTRA_TITLE);
         if (songTitle == null) songTitle = "audio";
-        durationMs = Math.max(1000, intent.getLongExtra(EXTRA_DURATION_MS, 0));
-        if (durationMs <= 1000) {
-            durationMs = probeDuration(sourceUri);
+        long firstDurationMs = Math.max(1000, intent.getLongExtra(EXTRA_DURATION_MS, 0));
+        if (firstDurationMs <= 1000) {
+            firstDurationMs = probeDuration(firstUri);
         }
+        // the timeline starts as this one file; "+" appends more after it
+        sources.add(new Source(firstUri, songTitle, firstDurationMs));
+        rebuildTimeMap();
 
         bindViews();
         setupTabs();
         setupTimeline();
         setupActions();
 
-        TextView songName = findViewById(R.id.editorSongName);
-        songName.setText(songTitle);
+        updateSongNameLabel();
 
         // Timeline setup: fit-all scale after first layout
         timeline.setDuration(durationMs);
@@ -130,12 +293,16 @@ public class AudioEditorActivity extends AppCompatActivity {
         timeline.post(() -> {
             if (isFinishing() || timeline == null) return;
             applyFitZoom();
+            // split tab restored from last session? jump it to the 5x default
+            if (currentTab == TAB_SPLIT) applyDefaultSplitZoom();
         });
 
         // Waveform (null result falls back to placeholder bars)
-        waveformExtractor.extract(this, sourceUri, data -> {
-            if (!isFinishing()) timeline.setWaveform(data);
-        });
+        extractWaveforms();
+
+        // reopen on the tab the user last worked on
+        currentTab = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getInt(KEY_LAST_TAB, TAB_CUT);
 
         updateUiForTab();
     }
@@ -157,8 +324,15 @@ public class AudioEditorActivity extends AppCompatActivity {
         zoomOutBtn = findViewById(R.id.editorZoomOutBtn);
         zoomInBtn = findViewById(R.id.editorZoomInBtn);
         playBtn = findViewById(R.id.editorPlayBtn);
+        autoScrollBtn = findViewById(R.id.editorAutoScrollBtn);
+        addSongBtn = findViewById(R.id.editorAddSongBtn);
+        songNameText = findViewById(R.id.editorSongName);
         cutActionRow = findViewById(R.id.editorCutActionRow);
         controlBar = findViewById(R.id.editorControlBar);
+        undoRedoRow = findViewById(R.id.editorUndoRedoRow);
+        undoBtn = findViewById(R.id.editorUndoBtn);
+        redoBtn = findViewById(R.id.editorRedoBtn);
+        seqPreviewBtn = findViewById(R.id.editorSeqPreviewBtn);
         segmentList = findViewById(R.id.editorSegmentList);
         progressOverlay = findViewById(R.id.editorProgressOverlay);
         progressBar = findViewById(R.id.editorProgressBar);
@@ -173,12 +347,20 @@ public class AudioEditorActivity extends AppCompatActivity {
     private void setupTabs() {
         tabCut.setOnClickListener(v -> {
             currentTab = TAB_CUT;
+            saveLastTab();
             updateUiForTab();
         });
         tabSplit.setOnClickListener(v -> {
             currentTab = TAB_SPLIT;
+            saveLastTab();
             updateUiForTab();
         });
+    }
+
+    /** Persist the active tab so the editor reopens on it. */
+    private void saveLastTab() {
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit().putInt(KEY_LAST_TAB, currentTab).apply();
     }
 
     private void setupTimeline() {
@@ -197,13 +379,13 @@ public class AudioEditorActivity extends AppCompatActivity {
             @Override
             public void onPlayheadMoved(long playheadMs) {
                 updateCurrentTimeText(playheadMs);
-                // live seek while playing (pro editor behaviour)
-                if (previewPlayer != null && previewPlayer.isPlaying()) {
-                    try {
-                        previewPlayer.seekTo((int) playheadMs);
-                        previewEndMs = Math.max(previewEndMs, playheadMs + 200);
-                    } catch (Exception ignored) {
-                    }
+                // live seek while playing (pro editor behaviour) — but never
+                // during a sequence preview: tapping elsewhere on the timeline
+                // must not yank the ordered playback out of its current part
+                if (previewPlayer != null && previewQueue == null
+                        && previewPlayer.isPlaying()) {
+                    previewEndMs = Math.max(previewEndMs, playheadMs + 200);
+                    seekPreviewTo(playheadMs);
                 }
             }
 
@@ -219,6 +401,17 @@ public class AudioEditorActivity extends AppCompatActivity {
                 renderSegmentList();
                 updateRangeText();
             }
+
+            @Override
+            public void onSegmentLongPressed(int index) {
+                showSegmentContextMenu(index);
+            }
+
+            @Override
+            public void onSplitMoveStarted() {
+                // pre-drag snapshot, pushed before the boundary actually moves
+                pushUndoState(currentState());
+            }
         });
     }
 
@@ -230,12 +423,25 @@ public class AudioEditorActivity extends AppCompatActivity {
                         Toast.LENGTH_SHORT).show();
                 return;
             }
+            EditorState before = currentState();
             timeline.deleteSelectedMarker();
+            pushUndoState(before);
         });
+        undoBtn.setOnClickListener(v -> undo());
+        redoBtn.setOnClickListener(v -> redo());
         previewBtn.setOnClickListener(v -> toggleCutPreview());
+        seqPreviewBtn.setOnClickListener(v -> toggleSequencePreview());
         playBtn.setOnClickListener(v -> togglePlayPause());
+        autoScrollBtn.setOnClickListener(v -> {
+            autoScrollEnabled = !autoScrollEnabled;
+            // dim = off, bright = on
+            autoScrollBtn.setColorFilter(autoScrollEnabled
+                    ? 0xFFFFFFFF : 0x88FFFFFF);
+            if (autoScrollEnabled) followPlayhead();
+        });
         zoomOutBtn.setOnClickListener(v -> zoomBy(1f / 1.6f));
         zoomInBtn.setOnClickListener(v -> zoomBy(1.6f));
+        addSongBtn.setOnClickListener(v -> pickSongToAppend());
         saveBtn.setOnClickListener(v -> confirmSave());
         cancelBtn.setOnClickListener(v -> {
             if (jobRunning) {
@@ -258,21 +464,31 @@ public class AudioEditorActivity extends AppCompatActivity {
 
         cutActionRow.setVisibility(cut ? View.VISIBLE : View.GONE);
         controlBar.setVisibility(cut ? View.GONE : View.VISIBLE);
+        undoRedoRow.setVisibility(cut ? View.GONE : View.VISIBLE);
+        // bottom Preview (ordered parts) only exists in split mode — the
+        // cut tab has its own Preview button in its action row
+        seqPreviewBtn.setVisibility(cut ? View.GONE : View.VISIBLE);
 
         timeline.setMode(cut ? EditorTimelineView.MODE_CUT
                 : EditorTimelineView.MODE_SPLIT);
         if (cut) {
             // cut mode: non-scrolling, content == viewport
             applyFitZoom();
+        } else {
+            // first entry into split mode: 5x default (fast first paint)
+            applyDefaultSplitZoom();
         }
 
         hintText.setText(cut
                 ? "Drag A / B handles to select the part to keep, then press Preview."
-                : "Tap the timeline to position the playhead, then ✂ Split. Drag split lines to adjust; tap one to select it.");
+                : "Tap the timeline to position the playhead, then ✂ Split. "
+                + "Long-press a part to delete it; drag a row's ⠿ handle "
+                + "to reorder. Preview plays the parts in list order.");
         renderSegmentList();
         updateRangeText();
         updateCurrentTimeText(timeline.getPlayheadMs());
         updateZoomText();
+        updateUndoRedoButtons();
     }
 
     private void updateRangeText() {
@@ -283,18 +499,30 @@ public class AudioEditorActivity extends AppCompatActivity {
                     + "  (" + formatTime(Math.max(0, e - s)) + ")");
         } else {
             List<long[]> segs = timeline.getSegments();
+            int deleted = timeline.getDeletedRanges().size();
             int sel = timeline.getSelectedSplit();
             String splitInfo = sel >= 0
                     ? "Split " + (sel + 1) + " at "
                     + formatTime(timeline.getSplitPoints().get(sel))
                     : "No split selected";
+            boolean reordered = false;
+            List<Integer> seq = timeline.getSequence();
+            for (int i = 1; i < seq.size(); i++) {
+                if (seq.get(i) < seq.get(i - 1)) {
+                    reordered = true;
+                    break;
+                }
+            }
             rangeText.setText(splitInfo + "  •  " + segs.size() + " part"
-                    + (segs.size() == 1 ? "" : "s"));
+                    + (segs.size() == 1 ? "" : "s")
+                    + (deleted > 0 ? "  •  " + deleted + " deleted" : "")
+                    + (reordered ? "  •  reordered" : ""));
         }
     }
 
     private void updateCurrentTimeText(long ms) {
-        currentTimeText.setText("▶ " + formatTime(ms));
+        // display (edited-result) time so it matches the compressed ruler
+        currentTimeText.setText("▶ " + formatTime(timeline.toDisplayMs(ms)));
     }
 
     private void updateZoomText() {
@@ -306,13 +534,28 @@ public class AudioEditorActivity extends AppCompatActivity {
     // Zoom
     // ------------------------------------------------------------------
 
-    /** Fit-all zoom: content width == viewport width. */
+    /** Fit-all zoom: content width == viewport width (edited result). */
     private void applyFitZoom() {
         int viewport = timelineScroll.getWidth();
         if (viewport <= 0) return;
-        float fit = viewport / (float) durationMs;
+        float fit = viewport / (float) Math.max(1, timeline.getEditedDurationMs());
         timeline.setFitPxPerMs(fit);
         timeline.setPxPerMs(fit);
+        updateZoomText();
+    }
+
+    /**
+     * Default zoom on first entry into split mode: 5x — only a slice of
+     * the song is visible, so the first waveform chunk (30s) paints almost
+     * instantly. Later zoom/tab changes are never overridden.
+     */
+    private void applyDefaultSplitZoom() {
+        if (splitZoomInitialized || timelineScroll.getWidth() <= 0) return;
+        splitZoomInitialized = true;
+        timeline.setFitPxPerMs(Math.max(timeline.getFitPxPerMs(),
+                timelineScroll.getWidth() / (float) durationMs));
+        timeline.setPxPerMs(timeline.getFitPxPerMs() * DEFAULT_SPLIT_ZOOM);
+        timelineScroll.scrollTo(0, 0);
         updateZoomText();
     }
 
@@ -333,23 +576,122 @@ public class AudioEditorActivity extends AppCompatActivity {
         });
     }
 
-    /** Keep the playhead visible during playback (page-flip follow). */
-    private void followPlayhead() {
-        if (previewPlayer == null) return;
-        int viewport = timelineScroll.getWidth();
-        float px = timeline.getPlayheadX() - timelineScroll.getScrollX();
-        if (px > viewport - dp(48) || px < 0) {
-            int target = (int) Math.max(0, timeline.getPlayheadX() - viewport / 2f);
-            timelineScroll.smoothScrollTo(target, 0);
-        }
-    }
-
     // ------------------------------------------------------------------
     // Split management
     // ------------------------------------------------------------------
 
+    // ---- Undo / Redo (multi-level, professional-editor semantics) ----
+
+    private EditorState currentState() {
+        return new EditorState(timeline.getSplitPoints(), timeline.getDeletedRanges(),
+                timeline.getSequence(), timeline.getSelectedSplit(),
+                timeline.getSelectedSegment());
+    }
+
+    /**
+     * Record a state snapshot as the "before" of a new editing action.
+     * A new action invalidates the redo history (cleared), and the stack
+     * is capped at MAX_HISTORY levels.
+     */
+    private void pushUndoState(EditorState before) {
+        undoStack.push(before);
+        while (undoStack.size() > MAX_HISTORY) undoStack.removeLast();
+        redoStack.clear();
+        updateUndoRedoButtons();
+    }
+
+    private void undo() {
+        if (undoStack.isEmpty()) return;
+        redoStack.push(currentState());
+        applyState(undoStack.pop());
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+        undoStack.push(currentState());
+        applyState(redoStack.pop());
+    }
+
+    /** Restore a snapshot: splits, deletions, order, selection, list, readouts. */
+    private void applyState(EditorState s) {
+        stopPreview(); // restored state may differ from what was playing
+        timeline.setSplitPoints(s.splitPoints);
+        timeline.setDeletedRanges(s.deletedRanges);
+        timeline.setSequence(s.sequence);
+        timeline.restoreSelection(s.selectedSplit, s.selectedSegment);
+        renderSegmentList();
+        updateRangeText();
+        updateUndoRedoButtons();
+    }
+
+    private void updateUndoRedoButtons() {
+        undoBtn.setEnabled(!undoStack.isEmpty());
+        undoBtn.setAlpha(undoStack.isEmpty() ? 0.45f : 1f);
+        redoBtn.setEnabled(!redoStack.isEmpty());
+        redoBtn.setAlpha(redoStack.isEmpty() ? 0.45f : 1f);
+    }
+
+    // ---- Long-press context menu ----
+
+    private void showSegmentContextMenu(int segmentIndex) {
+        showSegmentContextMenu(segmentIndex, timelineScroll);
+    }
+
+    /**
+     * Long-press on a segment (timeline or part-list row): offer to delete
+     * that ENTIRE part. The remaining parts butt together on the timeline
+     * (KineMaster-style) and the deleted range is excluded when saving.
+     * The original audio file is never modified during editing.
+     */
+    private void showSegmentContextMenu(int segmentIndex, View anchor) {
+        if (timeline.getKeptSegments().size() <= 1) {
+            Toast.makeText(this, "Can't delete the only remaining part",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditorTimelineView.SegmentInfo info = null;
+        for (EditorTimelineView.SegmentInfo s : timeline.getKeptSegments()) {
+            if (s.index == segmentIndex) {
+                info = s;
+                break;
+            }
+        }
+        if (info == null) return; // pressed a deleted part — impossible via taps
+
+        final int number = info.number;
+        final int boundsIndex = info.index;
+        final String range = formatTime(info.startMs) + " → " + formatTime(info.endMs);
+
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add(0, 0, 0, "🗑 Delete Part " + number + " (" + range + ")");
+        menu.setOnMenuItemClickListener(item -> {
+            confirmDeleteSegment(number, boundsIndex, range);
+            return true;
+        });
+        menu.show();
+    }
+
+    private void confirmDeleteSegment(int number, int boundsIndex, String range) {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Part " + number + "?")
+                .setMessage(range + " will be removed from the edited result.\n\n"
+                        + "The original file is not modified — you can Undo this.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    EditorState before = currentState();
+                    if (!timeline.deleteSegment(boundsIndex)) {
+                        Toast.makeText(this, "Can't delete the only remaining part",
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    stopPreview(); // stale queue must not keep old order playing
+                    pushUndoState(before);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
     /** Pro workflow: add a split at the current playhead position. */
     private void addSplitAtPlayhead() {
+        EditorState before = currentState();
         long t = timeline.getPlayheadMs();
         int idx = timeline.addSplitPoint(t);
         if (idx < 0) {
@@ -357,11 +699,13 @@ public class AudioEditorActivity extends AppCompatActivity {
                     + "end or another split", Toast.LENGTH_SHORT).show();
             return;
         }
+        pushUndoState(before);
         renderSegmentList();
         updateRangeText();
-        // make the new boundary visible
+        // make the new boundary visible (playhead x uses the compressed
+        // display mapping when segments have been deleted)
         int viewport = timelineScroll.getWidth();
-        float x = t * timeline.getPxPerMs();
+        float x = timeline.getPlayheadX();
         if (x < timelineScroll.getScrollX() || x > timelineScroll.getScrollX() + viewport) {
             timelineScroll.smoothScrollTo((int) Math.max(0, x - viewport / 2f), 0);
         }
@@ -369,35 +713,43 @@ public class AudioEditorActivity extends AppCompatActivity {
 
     private void renderSegmentList() {
         segmentList.removeAllViews();
-        List<long[]> segs = timeline.getSegments();
         if (currentTab == TAB_CUT) {
+            List<long[]> segs = timeline.getSegments();
             long[] seg = segs.get(0);
-            segmentList.addView(buildSegmentRow(1, seg[0], seg[1], false, -1));
+            segmentList.addView(buildSegmentRow(1, 0, 0, seg[0], seg[1], -1));
             return;
         }
+        List<EditorTimelineView.SegmentInfo> segs = timeline.getKeptSegments();
         int selectedSeg = timeline.getSelectedSegment();
         for (int i = 0; i < segs.size(); i++) {
-            long[] seg = segs.get(i);
-            boolean isEnd = i == segs.size() - 1;
-            segmentList.addView(buildSegmentRow(i + 1, seg[0], seg[1], isEnd,
-                    selectedSeg));
+            EditorTimelineView.SegmentInfo seg = segs.get(i);
+            segmentList.addView(buildSegmentRow(seg.number, seg.index, i,
+                    seg.startMs, seg.endMs, selectedSeg));
         }
     }
 
-    private View buildSegmentRow(final int index, long startMs, long endMs,
-                                 boolean isLast, int selectedSeg) {
-        final boolean selected = (index - 1) == selectedSeg && currentTab == TAB_SPLIT;
+    private String rangeLabel(long startMs, long endMs) {
+        return formatTime(startMs) + " → " + formatTime(endMs);
+    }
+
+    private View buildSegmentRow(final int number, final int boundsIndex,
+                                 final int seqPos, long startMs, long endMs,
+                                 int selectedSeg) {
+        final boolean selected = boundsIndex == selectedSeg && currentTab == TAB_SPLIT;
+        // describes content, not position: stays on the part that reaches
+        // the end of the song even after a reorder
+        boolean reachesEnd = endMs >= durationMs - 1;
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setBackgroundResource(selected
                 ? R.drawable.bg_editor_segment_selected : R.drawable.bg_editor_segment_item);
-        int pad = dp(12);
-        row.setPadding(pad, dp(10), pad, dp(10));
+        int pad = dp(8);
+        row.setPadding(pad, dp(4), pad, dp(4));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(6);
+        lp.topMargin = dp(3);
         row.setLayoutParams(lp);
 
         LinearLayout textCol = new LinearLayout(this);
@@ -407,9 +759,9 @@ public class AudioEditorActivity extends AppCompatActivity {
         textCol.setLayoutParams(tcLp);
 
         TextView title = new TextView(this);
-        title.setText("Part " + index + (isLast ? "  (till end)" : ""));
+        title.setText("Part " + number + (reachesEnd ? "  (till end)" : ""));
         title.setTextColor(0xFFFFFFFF);
-        title.setTextSize(13f);
+        title.setTextSize(12f);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         textCol.addView(title);
 
@@ -417,30 +769,230 @@ public class AudioEditorActivity extends AppCompatActivity {
         times.setText(formatTime(startMs) + " → " + formatTime(endMs)
                 + "   (" + formatTime(Math.max(0, endMs - startMs)) + ")");
         times.setTextColor(0xAAFFFFFF);
-        times.setTextSize(12f);
+        times.setTextSize(11f);
         textCol.addView(times);
 
         row.addView(textCol);
 
-        ImageButton play = new ImageButton(this);
-        play.setImageResource(R.drawable.ic_play);
+        // borderless ripple background shared by the icon buttons
         android.util.TypedValue tv = new android.util.TypedValue();
         getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true);
+
+        // ⠿ drag handle: touch = instant drag-and-drop reorder (no delay)
+        if (currentTab == TAB_SPLIT) {
+            ImageView handle = new ImageView(this);
+            handle.setImageResource(R.drawable.ic_drag_handle);
+            handle.setColorFilter(0xFFFFFFFF);
+            handle.setBackgroundResource(tv.resourceId != 0 ? tv.resourceId : 0);
+            LinearLayout.LayoutParams hLp = new LinearLayout.LayoutParams(dp(26), dp(30));
+            hLp.rightMargin = dp(4);
+            handle.setLayoutParams(hLp);
+            handle.setContentDescription("Drag to reorder");
+            handle.setOnTouchListener((v, ev) ->
+                    handleHandleTouch(row, ev, seqPos, boundsIndex));
+            row.addView(handle);
+        }
+
+        // play first, then delete (swapped per request): [⠿][text][▶][🗑]
+        ImageButton play = new ImageButton(this);
+        play.setImageResource(R.drawable.ic_play);
+        play.setColorFilter(0xFFFFFFFF); // icons are black — force white
         play.setBackgroundResource(tv.resourceId != 0 ? tv.resourceId : 0);
-        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        pbLp.leftMargin = dp(8);
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(dp(28), dp(28));
+        pbLp.leftMargin = dp(6);
         play.setLayoutParams(pbLp);
         play.setOnClickListener(v -> previewRange(startMs, endMs));
         row.addView(play);
 
+        // delete icon: removes this segment from the edited result
+        ImageButton delete = new ImageButton(this);
+        delete.setImageResource(R.drawable.ic_delete);
+        delete.setColorFilter(0xFFFFFFFF); // icons are black — force white
+        delete.setBackgroundResource(tv.resourceId != 0 ? tv.resourceId : 0);
+        LinearLayout.LayoutParams dbLp = new LinearLayout.LayoutParams(dp(28), dp(28));
+        dbLp.leftMargin = dp(6);
+        delete.setLayoutParams(dbLp);
+        delete.setOnClickListener(v -> {
+            if (currentTab == TAB_SPLIT) {
+                confirmDeleteSegment(number, boundsIndex, rangeLabel(startMs, endMs));
+            }
+        });
+        row.addView(delete);
+
         // tapping a row selects that segment on the timeline
         row.setOnClickListener(v -> {
+            if (suppressNextRowClick) {
+                suppressNextRowClick = false;
+                return;
+            }
             if (currentTab == TAB_SPLIT) {
-                timeline.selectSegment(index - 1);
+                timeline.selectSegment(boundsIndex);
             }
         });
 
+        // reordering is done via the ⠿ handle; deletion via the 🗑 icon —
+        // no long-press action on list rows (the timeline still has one)
+
         return row;
+    }
+
+    // ------------------------------------------------------------------
+    // Segment list: drag-handle reorder + long-press delete
+    // ------------------------------------------------------------------
+
+    private static final float ROW_DRAG_SLOP_DP = 10f;
+
+    /**
+     * Touch handler for a row's ⠿ drag handle: the drag starts IMMEDIATELY
+     * on touch (no long-press wait), consuming events so the ScrollView
+     * never interferes. Tapping the handle without moving is a no-op.
+     */
+    private boolean handleHandleTouch(final View row, MotionEvent ev,
+                                      final int seqPos, final int boundsIndex) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                if (currentTab != TAB_SPLIT
+                        || row.getParent() != segmentList
+                        || segmentList.getChildCount() <= 1) {
+                    return false; // nothing to reorder — ignore
+                }
+                dragDownRawY = ev.getRawY();
+                dragLastRawY = ev.getRawY();
+                rowDragMoved = false;
+                row.performHapticFeedback(
+                        android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                startRowDrag(row, seqPos, boundsIndex);
+                return true;
+
+            case MotionEvent.ACTION_MOVE:
+                if (dragRow == row) {
+                    updateRowDrag(ev.getRawY());
+                    return true;
+                }
+                break;
+
+            case MotionEvent.ACTION_UP:
+                if (dragRow == row) {
+                    finishRowDrag(boundsIndex);
+                    return true;
+                }
+                break;
+
+            case MotionEvent.ACTION_CANCEL:
+                if (dragRow == row) {
+                    abortRowDrag();
+                    return true;
+                }
+                break;
+        }
+        return false;
+    }
+
+    private void startRowDrag(View row, int seqPos, int boundsIndex) {
+        dragRow = row;
+        dragFromPos = seqPos;
+        dragTargetPos = seqPos;
+        row.setElevation(dp(8));
+        row.setAlpha(0.95f);
+        // stop the ScrollView from stealing the gesture mid-drag
+        segmentList.getParent().requestDisallowInterceptTouchEvent(true);
+        mainHandler.removeCallbacks(dragAutoScroll);
+        mainHandler.postDelayed(dragAutoScroll, 64);
+        updateRowDragTargets();
+    }
+
+    private void updateRowDrag(float rawY) {
+        if (dragRow == null) return;
+        dragLastRawY = rawY;
+        if (Math.abs(rawY - dragDownRawY) > dp(ROW_DRAG_SLOP_DP)) rowDragMoved = true;
+        positionDragRow(rawY);
+        updateRowDragTargets();
+    }
+
+    /** Keep the dragged row centred on the finger (clamped to the list). */
+    private void positionDragRow(float rawY) {
+        int[] loc = new int[2];
+        segmentList.getLocationOnScreen(loc);
+        float listY = rawY - loc[1];
+        float t = listY - dragRow.getHeight() / 2f - dragRow.getTop();
+        float minT = -dragRow.getTop();
+        float maxT = Math.max(minT, segmentList.getHeight() - dragRow.getBottom());
+        dragRow.setTranslationY(Math.max(minT, Math.min(maxT, t)));
+    }
+
+    /**
+     * Recompute the insertion target from the finger position and shift
+     * the other rows to open a gap there (the clear insertion cue).
+     */
+    private void updateRowDragTargets() {
+        if (dragRow == null || dragFromPos < 0) return;
+        int n = segmentList.getChildCount();
+        float rowStep = dragRow.getHeight() + dp(3); // height + row top margin
+        int[] loc = new int[2];
+        segmentList.getLocationOnScreen(loc);
+        float listY = dragLastRawY - loc[1];
+        // target = how many (unshifted) row centres lie above the finger
+        int target = 0;
+        for (int i = 0; i < n; i++) {
+            if (i == dragFromPos) continue;
+            View c = segmentList.getChildAt(i);
+            float center = c.getTop() + c.getHeight() / 2f;
+            if (listY > center) target++;
+        }
+        dragTargetPos = target;
+        for (int i = 0; i < n; i++) {
+            if (i == dragFromPos) continue;
+            View c = segmentList.getChildAt(i);
+            int slots;
+            if (i < dragFromPos) slots = (dragTargetPos <= i) ? 1 : 0;
+            else slots = (dragTargetPos <= i - 1) ? 0 : -1;
+            c.setTranslationY(slots * rowStep);
+        }
+    }
+
+    /** Finger released after a drag: commit the reorder. */
+    private void finishRowDrag(int boundsIndex) {
+        View row = dragRow;
+        int from = dragFromPos;
+        int to = dragTargetPos;
+        boolean moved = rowDragMoved;
+        resetRowDrag();
+        if (row == null || from < 0) return;
+        suppressNextRowClick = true;
+        // dragTargetPos counts the OTHER rows above the finger — an
+        // insertion index in the list WITHOUT the dragged item. Convert to
+        // the WITH-item index reorderSegment expects, otherwise every
+        // downward drop lands one slot off (or snaps back home).
+        int ins = to > from ? to + 1 : to;
+        if (moved && ins != from && ins != from + 1) {
+            EditorState before = currentState();
+            if (timeline.reorderSegment(from, ins)) {
+                stopPreview(); // preview must follow the new order
+                pushUndoState(before);
+                return; // reorderSegment already re-rendered the list
+            }
+        }
+        renderSegmentList(); // dropped back in place — snap clean
+    }
+
+    /** Gesture cancelled (system/interception): restore visuals, no commit. */
+    private void abortRowDrag() {
+        resetRowDrag();
+        suppressNextRowClick = true;
+    }
+
+    private void resetRowDrag() {
+        mainHandler.removeCallbacks(dragAutoScroll);
+        if (dragRow != null) {
+            dragRow.setElevation(0);
+            dragRow.setAlpha(1f);
+        }
+        for (int i = 0; i < segmentList.getChildCount(); i++) {
+            segmentList.getChildAt(i).setTranslationY(0);
+        }
+        dragRow = null;
+        dragFromPos = -1;
+        dragTargetPos = -1;
     }
 
     // ------------------------------------------------------------------
@@ -456,6 +1008,72 @@ public class AudioEditorActivity extends AppCompatActivity {
         previewRange(timeline.getCutStartMs(), timeline.getCutEndMs());
     }
 
+    /**
+     * Bottom Preview button (split tab): play the parts CONTINUOUSLY in
+     * their current list order — the sequence is the single source of
+     * truth, matching the final Merge/Save. One player, seeked part to
+     * part: no duplicate or overlapping playback. Click again to stop.
+     */
+    private void toggleSequencePreview() {
+        if (previewQueue != null) {
+            stopPreview();
+            return;
+        }
+        List<long[]> segs = timeline.getSegments();
+        if (segs.isEmpty()) return;
+        stopPreview();
+        previewQueue = segs;
+        previewQueueIndex = 0;
+        lastQueueAdvanceEnd = Long.MIN_VALUE;
+        createPreviewPlayer(segs.get(0)[0], segs.get(0)[1]);
+    }
+
+    /**
+     * Keep the playhead visible during playback (page-flip follow). Only
+     * called when the auto-scroll toggle is on; manual scrolling stays free
+     * and is never fought while the user drags the timeline.
+     */
+    private void followPlayhead() {
+        if (previewPlayer == null || timeline == null) return;
+        int viewport = timelineScroll.getWidth();
+        if (viewport <= 0) return;
+        float px = timeline.getPlayheadX() - timelineScroll.getScrollX();
+        if (px > viewport - dp(48) || px < 0) {
+            int target = (int) Math.max(0, timeline.getPlayheadX() - viewport / 2f);
+            timelineScroll.smoothScrollTo(target, 0);
+        }
+    }
+
+    /** Continue the sequence preview with the next part (same player). */
+    private void advanceSequencePreview() {
+        if (previewQueue == null || previewPlayer == null) return;
+        if (previewQueueIndex >= previewQueue.size() - 1) {
+            stopPreview(); // last part finished
+            return;
+        }
+        previewQueueIndex++;
+        long[] next = previewQueue.get(previewQueueIndex);
+        try {
+            previewStartMs = next[0];
+            previewEndMs = next[1];
+            int idx = sourceIndexAt(next[0]);
+            if (idx != previewSourceIndex) {
+                // the next part lives in another song: one MediaPlayer cannot
+                // read two files, so swap the player (the queue is kept)
+                releasePlayer();
+                createPreviewPlayer(next[0], next[1], idx);
+                return;
+            }
+            previewPlayer.seekTo((int) toLocal(idx, next[0]));
+            previewPlayer.start();
+            timeline.setPlayheadMs(next[0]);
+            updateCurrentTimeText(next[0]);
+            if (autoScrollEnabled) followPlayhead();
+        } catch (Exception e) {
+            stopPreview();
+        }
+    }
+
     /** Split tab control bar: play from playhead / pause / resume. */
     private void togglePlayPause() {
         if (previewPlayer == null) {
@@ -468,6 +1086,9 @@ public class AudioEditorActivity extends AppCompatActivity {
                 previewPlayer.pause();
             } else {
                 previewPlayer.start();
+                // one chain only: the updater keeps running while paused, so a
+                // plain post() here would double the update rate every resume
+                mainHandler.removeCallbacks(playheadUpdater);
                 mainHandler.post(playheadUpdater);
             }
         } catch (Exception ignored) {
@@ -477,22 +1098,54 @@ public class AudioEditorActivity extends AppCompatActivity {
 
     private void previewRange(long startMs, long endMs) {
         stopPreview();
+        createPreviewPlayer(startMs, endMs);
+    }
+
+    /** Create the preview player for a single range (call after stopPreview). */
+    private void createPreviewPlayer(long startMs, long endMs) {
+        createPreviewPlayer(startMs, endMs, sourceIndexAt(startMs));
+    }
+
+    /**
+     * Create the player for one range. `startMs`/`endMs` are GLOBAL timeline
+     * times; the player is anchored to the source that owns the start, seeked
+     * to the matching local time. A range that runs past the end of that song
+     * keeps playing in the next one — see continueIntoNextSource().
+     * The sequence queue is owned by the caller and never touched here.
+     */
+    private void createPreviewPlayer(long startMs, long endMs, int srcIndex) {
+        if (sources.isEmpty()) return;
+        if (srcIndex < 0 || srcIndex >= sources.size()) srcIndex = 0;
         try {
+            final int index = srcIndex;
+            previewSourceIndex = index;
             previewPlayer = new MediaPlayer();
-            previewPlayer.setDataSource(this, sourceUri);
+            previewPlayer.setDataSource(this, sources.get(index).uri);
             previewPlayer.setOnPreparedListener(mp -> {
                 try {
                     previewStartMs = startMs;
                     previewEndMs = endMs;
-                    mp.seekTo((int) startMs);
+                    mp.seekTo((int) toLocal(index, startMs));
                     mp.start();
                     updatePlayButtons();
+                    // exactly one playhead chain: a source switch can recreate
+                    // the player while the previous tick already re-posted it
+                    mainHandler.removeCallbacks(playheadUpdater);
                     mainHandler.post(playheadUpdater);
                 } catch (Exception e) {
                     stopPreview();
                 }
             });
-            previewPlayer.setOnCompletionListener(mp -> stopPreview());
+            previewPlayer.setOnCompletionListener(mp -> {
+                if (mp != previewPlayer) return; // stale callback
+                // the range continues in the next song: keep playing there
+                if (continueIntoNextSource()) return;
+                if (previewQueue != null && previewQueueIndex < previewQueue.size() - 1) {
+                    advanceSequencePreview();
+                } else {
+                    stopPreview();
+                }
+            });
             previewPlayer.prepareAsync();
         } catch (Exception e) {
             Toast.makeText(this, "Preview failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -500,7 +1153,43 @@ public class AudioEditorActivity extends AppCompatActivity {
         }
     }
 
-    private void stopPreview() {
+    /**
+     * Seek the preview to a GLOBAL time. Inside the current song this is a
+     * plain seek; a target in another song needs a new player (a MediaPlayer
+     * reads a single file), which is created for the remaining range.
+     */
+    private void seekPreviewTo(long globalMs) {
+        if (previewPlayer == null) return;
+        int idx = sourceIndexAt(globalMs);
+        if (idx != previewSourceIndex) {
+            releasePlayer(); // keep the queue: this is still the same preview
+            createPreviewPlayer(globalMs, previewEndMs, idx);
+            return;
+        }
+        try {
+            previewPlayer.seekTo((int) toLocal(idx, globalMs));
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * The current song has played to its end but the preview range still has
+     * time left: continue from the start of the next song, so a part that was
+     * split across the seam (or a play-through to the end of the timeline)
+     * sounds continuous. Returns true when playback was carried on.
+     */
+    private boolean continueIntoNextSource() {
+        if (previewPlayer == null) return false;
+        int next = previewSourceIndex + 1;
+        if (next >= sources.size()) return false;
+        long seam = sources.get(next).offsetMs;
+        if (previewEndMs <= seam) return false; // the range ends in this song
+        createPreviewPlayer(seam, previewEndMs, next);
+        return true;
+    }
+
+    /** Release the player, keeping the queue (used to switch source mid-play). */
+    private void releasePlayer() {
         mainHandler.removeCallbacks(playheadUpdater);
         if (previewPlayer != null) {
             try {
@@ -513,11 +1202,18 @@ public class AudioEditorActivity extends AppCompatActivity {
             }
             previewPlayer = null;
         }
+    }
+
+    private void stopPreview() {
+        releasePlayer();
+        previewQueue = null;
+        previewQueueIndex = -1;
+        lastQueueAdvanceEnd = Long.MIN_VALUE;
         updatePlayButtons();
         if (timeline != null) updateCurrentTimeText(timeline.getPlayheadMs());
     }
 
-    /** Reflect playback state in the play button + cut preview button. */
+    /** Reflect playback state in the play/preview buttons. */
     private void updatePlayButtons() {
         boolean playing = false;
         if (previewPlayer != null) {
@@ -528,6 +1224,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         }
         playBtn.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
         previewBtn.setText(playing ? "■ Stop" : "▶ Preview");
+        seqPreviewBtn.setText(previewQueue != null ? "■ Stop" : "▶ Preview");
     }
 
     // ------------------------------------------------------------------
@@ -559,11 +1256,14 @@ public class AudioEditorActivity extends AppCompatActivity {
         dialog.show();
     }
 
-    /** Order editor for merge: sequential by default, up/down to reorder. */
+    /**
+     * Order editor for merge: starts from the CURRENT list order (the
+     * sequence), up/down to fine-tune. Parts keep their original numbers.
+     */
     private void showMergeOrderDialog() {
-        final List<long[]> segs = timeline.getSegments();
+        final List<EditorTimelineView.SegmentInfo> segs = timeline.getKeptSegments();
         final List<Integer> order = new ArrayList<>();
-        for (int i = 0; i < segs.size(); i++) order.add(i);
+        for (int i = 0; i < segs.size(); i++) order.add(i); // current order
 
         View sheet = LayoutInflater.from(this).inflate(R.layout.dialog_editor_merge_order, null);
         LinearLayout list = sheet.findViewById(R.id.mergeOrderList);
@@ -573,7 +1273,7 @@ public class AudioEditorActivity extends AppCompatActivity {
             list.removeAllViews();
             for (int pos = 0; pos < order.size(); pos++) {
                 final int p = pos;
-                long[] seg = segs.get(order.get(pos));
+                EditorTimelineView.SegmentInfo seg = segs.get(order.get(pos));
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
@@ -585,8 +1285,8 @@ public class AudioEditorActivity extends AppCompatActivity {
                 row.setLayoutParams(lp);
 
                 TextView label = new TextView(this);
-                label.setText((pos + 1) + ".  Part " + (order.get(pos) + 1)
-                        + "   (" + formatTime(seg[0]) + " → " + formatTime(seg[1]) + ")");
+                label.setText((pos + 1) + ".  Part " + seg.number
+                        + "   (" + formatTime(seg.startMs) + " → " + formatTime(seg.endMs) + ")");
                 label.setTextColor(0xFFFFFFFF);
                 label.setTextSize(13f);
                 LinearLayout.LayoutParams ll = new LinearLayout.LayoutParams(
@@ -675,7 +1375,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         progressText.setText("Preparing…");
         progressOverlay.setVisibility(View.VISIBLE);
 
-        editor.runJobFromUri(this, sourceUri, mode, segments, name,
+        editor.runJobFromUri(this, sourceUris(), sourceBoundaries(), mode, segments, name,
                 new FFmpegAudioEditor.EditListener() {
                     @Override
                     public void onProgress(int percent) {
@@ -738,6 +1438,209 @@ public class AudioEditorActivity extends AppCompatActivity {
                 .setMessage(sb + (dir != null ? "\n\nFolder: " + dir.getAbsolutePath() : ""))
                 .setPositiveButton("Done", null)
                 .show();
+    }
+
+    // ------------------------------------------------------------------
+    // Multi-source timeline ("+" appends another song)
+    // ------------------------------------------------------------------
+
+    /**
+     * Recompute the global start offset of every source and the total
+     * timeline length. Sources are laid out back to back, so source i owns
+     * the global range [offsetMs, offsetMs + durationMs).
+     */
+    private void rebuildTimeMap() {
+        long off = 0;
+        for (Source s : sources) {
+            s.offsetMs = off;
+            off += s.durationMs;
+        }
+        durationMs = Math.max(1, off);
+    }
+
+    /** Index of the source that owns a GLOBAL time (always 0 when alone). */
+    private int sourceIndexAt(long globalMs) {
+        for (int i = sources.size() - 1; i >= 0; i--) {
+            if (globalMs >= sources.get(i).offsetMs) return i;
+        }
+        return 0;
+    }
+
+    /** GLOBAL time -> time inside that source's own file. */
+    private long toLocal(int index, long globalMs) {
+        if (index < 0 || index >= sources.size()) return Math.max(0, globalMs);
+        return Math.max(0, globalMs - sources.get(index).offsetMs);
+    }
+
+    /** Time inside a source's own file -> GLOBAL time. */
+    private long toGlobal(int index, long localMs) {
+        if (index < 0 || index >= sources.size()) return localMs;
+        return localMs + sources.get(index).offsetMs;
+    }
+
+    private List<Uri> sourceUris() {
+        List<Uri> list = new ArrayList<>(sources.size());
+        for (Source s : sources) list.add(s.uri);
+        return list;
+    }
+
+    /** Global start of every source, plus the total end (length n + 1). */
+    private long[] sourceBoundaries() {
+        long[] b = new long[sources.size() + 1];
+        for (int i = 0; i < sources.size(); i++) b[i] = sources.get(i).offsetMs;
+        b[sources.size()] = durationMs;
+        return b;
+    }
+
+    /** "+": open the app's song list and append whatever the user picks. */
+    private void pickSongToAppend() {
+        try {
+            // the list returns RESULT_OK with the picked track's URI
+            songPickerLauncher.launch(new Intent(this, AudioListActivity.class));
+        } catch (Exception e) {
+            Toast.makeText(this, "Couldn't open the song list", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * Append a song to the END of the edited timeline. It becomes the last
+     * source, so every existing operation — split, delete a part, reorder,
+     * preview, save — applies to it exactly as it does to the first song.
+     */
+    private void appendSong(Uri uri) {
+        if (uri == null || isFinishing()) return;
+        stopPreview();
+        long dur = Math.max(1000, probeDuration(uri));
+        String title = displayNameOf(uri);
+        long oldTotal = durationMs;
+
+        sources.add(new Source(uri, title, dur));
+        rebuildTimeMap();
+        timeline.setDuration(durationMs);
+
+        // EditorState snapshots do not cover the source list, so undoing past
+        // an append would restore splits onto a shorter timeline. Clearing the
+        // history is the predictable choice; every other edit still undoes.
+        boolean hadHistory = !undoStack.isEmpty() || !redoStack.isEmpty();
+        undoStack.clear();
+        redoStack.clear();
+        updateUndoRedoButtons();
+
+        // the cut selection means "keep everything" when B sits at the old
+        // end — it must keep covering everything after the append
+        if (currentTab == TAB_CUT && timeline.getCutEndMs() >= oldTotal - 1) {
+            timeline.setCutSelection(timeline.getCutStartMs(), durationMs);
+        }
+
+        updateSongNameLabel();
+        durationText.setText("Total " + formatTime(durationMs));
+        extractWaveforms();
+
+        // zoom: cut mode stays fitted to the viewport; split mode keeps the
+        // user's zoom but lets them zoom out to the new full length
+        if (timelineScroll.getWidth() > 0) {
+            if (currentTab == TAB_CUT) {
+                applyFitZoom();
+            } else {
+                float keepPx = timeline.getPxPerMs();
+                timeline.setFitPxPerMs(Math.min(timeline.getFitPxPerMs(),
+                        timelineScroll.getWidth() / (float) durationMs));
+                timeline.setPxPerMs(keepPx); // re-clamped to the new fit
+                updateZoomText();
+            }
+        }
+
+        renderSegmentList();
+        updateRangeText();
+        updateCurrentTimeText(timeline.getPlayheadMs());
+
+        String msg = "Added \"" + title + "\"  •  total " + formatTime(durationMs);
+        if (hadHistory) msg += "\nUndo history cleared";
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+    }
+
+    /** Human-readable name of a picked track (falls back to the URI tail). */
+    private String displayNameOf(Uri uri) {
+        try (android.database.Cursor c = getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.DISPLAY_NAME},
+                null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String n = c.getString(0);
+                if (!TextUtils.isEmpty(n)) return n;
+            }
+        } catch (Exception ignored) {
+        }
+        String last = uri.getLastPathSegment();
+        return TextUtils.isEmpty(last) ? "audio" : last;
+    }
+
+    /**
+     * Header label: the first song's name, plus how many more were appended
+     * (with the total length) so the timeline length is never a surprise.
+     */
+    private void updateSongNameLabel() {
+        if (songNameText == null || sources.isEmpty()) return;
+        if (sources.size() == 1) {
+            songNameText.setText(sources.get(0).title);
+        } else {
+            songNameText.setText(sources.get(0).title
+                    + "  +" + (sources.size() - 1)
+                    + " song" + (sources.size() > 2 ? "s" : "")
+                    + "  •  " + formatTime(durationMs));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Waveform (one decode per source, merged onto the global axis)
+    // ------------------------------------------------------------------
+
+    /** Decode every source that has no waveform yet. */
+    private void extractWaveforms() {
+        for (final Source s : sources) {
+            if (s.waveformRequested) continue;
+            s.waveformRequested = true;
+            waveformExtractor.extract(this, s.uri, data -> {
+                s.waveform = data; // null = decode failed -> placeholder bars
+                if (timeline != null) timeline.setWaveform(combineWaveforms());
+            });
+        }
+    }
+
+    /**
+     * Lay every source's 600-bucket waveform onto the single global axis the
+     * timeline draws over `durationMs`. Bucket density is unchanged from the
+     * single-song case (600 buckets per first-song length), so with one
+     * source the array is exactly the one that used to be passed straight
+     * through. A source that has not decoded yet leaves zeroes — the same
+     * placeholder bars the timeline already draws while a chunk is pending.
+     */
+    private float[] combineWaveforms() {
+        int n = sources.size();
+        if (n == 0) return null;
+        if (n == 1) return sources.get(0).waveform; // single song: unchanged
+        long total = Math.max(1, durationMs);
+        int len = (int) Math.min(200000L, Math.max(WaveformExtractor.BUCKETS,
+                Math.round((double) WaveformExtractor.BUCKETS * total
+                        / Math.max(1, sources.get(0).durationMs))));
+        float[] out = new float[len];
+        float k = len / (float) total; // buckets per ms
+        for (Source s : sources) {
+            if (s.waveform == null) continue;
+            int from = (int) Math.max(0, Math.min(len - 1,
+                    Math.round(s.offsetMs * k)));
+            int to = (int) Math.max(from + 1, Math.min(len,
+                    Math.round((s.offsetMs + s.durationMs) * k)));
+            int span = Math.max(1, to - from);
+            for (int i = from; i < to; i++) {
+                // RMS buckets: the peak of the covered bucket is the honest
+                // choice, averaging would flatten transients away
+                int si = (int) ((i - from) * (long) s.waveform.length / span);
+                if (si >= s.waveform.length) si = s.waveform.length - 1;
+                if (si < 0) si = 0;
+                out[i] = s.waveform[si];
+            }
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------
