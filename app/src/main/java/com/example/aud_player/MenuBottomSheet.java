@@ -18,6 +18,7 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.text.TextUtils;
 import android.content.res.ColorStateList;
 
@@ -48,6 +49,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         void onBrowseClicked();
         void onMixerToggleClicked();
         void onResetClicked();
+        void onAudioEditClicked();
         boolean hasSongSelected();
         boolean isMixerEnabled();
         float getCurrentSpeed();
@@ -148,6 +150,16 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         view.findViewById(R.id.menu_reset_btn).setOnClickListener(v -> {
             if (listener != null) listener.onResetClicked();
             dismiss();
+        });
+
+        view.findViewById(R.id.menu_audio_edit_btn).setOnClickListener(v -> {
+            if (listener != null && listener.hasSongSelected()) {
+                listener.onAudioEditClicked();
+                dismiss();
+            } else {
+                Toast.makeText(requireContext(),
+                        "Select a song first", Toast.LENGTH_SHORT).show();
+            }
         });
 
         View addToPlaylistButton = view.findViewById(R.id.menu_add_to_playlist_btn);
@@ -265,7 +277,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                 R.id.menu_exit_btn,
                 R.id.menu_browse_btn,
                 R.id.menu_mixer_toggle_btn,
-                R.id.menu_reset_btn
+                R.id.menu_reset_btn,
+                R.id.menu_audio_edit_btn
         };
 
         for (int tileId : tileIds) {
@@ -464,7 +477,8 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
                     R.id.menu_exit_btn,
                     R.id.menu_browse_btn,
                     R.id.menu_mixer_toggle_btn,
-                    R.id.menu_reset_btn
+                    R.id.menu_reset_btn,
+                    R.id.menu_audio_edit_btn
             };
             for (int tid : allTileIds) {
                 View v = root.findViewById(tid);

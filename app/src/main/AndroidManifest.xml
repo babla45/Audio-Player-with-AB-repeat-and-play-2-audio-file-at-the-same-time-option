@@ -62,6 +62,12 @@
             android:label="Playlist Details"
             android:parentActivityName=".PlaylistActivity" />
 
+        <activity
+            android:name=".AudioEditorActivity"
+            android:exported="false"
+            android:label="Audio Editor"
+            android:parentActivityName=".MainActivity" />
+
         <service
             android:name=".AudioPlaybackService"
             android:enabled="true"

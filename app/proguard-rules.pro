@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ffmpeg-kit (retired com.arthenica releases) calls into this shim only
+# from its own dexed code; keep it from being stripped in release builds.
+-keep class com.arthenica.smartexception.** { *; }

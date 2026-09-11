@@ -2519,6 +2519,11 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onAudioEditClicked() {
+                showAudioEditor();
+            }
+
+            @Override
             public boolean hasSongSelected() {
                 return selectedAudioUri != null;
             }
@@ -2539,6 +2544,34 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         menuSheet.show(getSupportFragmentManager(), "MenuBottomSheet");
+    }
+
+    /**
+     * Open the Audio Editor (cut / split / merge via FFmpeg) for the
+     * currently selected track. Independent of the main playback engine —
+     * playback continues untouched.
+     */
+    private void showAudioEditor() {
+        if (selectedAudioUri == null) {
+            Toast.makeText(this, "Select a song first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        long duration = 0;
+        try {
+            if (mediaPlayer != null && mediaPlayer.isPlaying()
+                    || (mediaPlayer != null && mediaPlayer.getDuration() > 0)) {
+                duration = mediaPlayer.getDuration();
+            }
+        } catch (Exception ignored) {
+        }
+        String title = fileNameText != null && fileNameText.getText() != null
+                ? fileNameText.getText().toString() : "audio";
+
+        Intent intent = new Intent(this, AudioEditorActivity.class);
+        intent.putExtra(AudioEditorActivity.EXTRA_URI, selectedAudioUri.toString());
+        intent.putExtra(AudioEditorActivity.EXTRA_TITLE, title);
+        intent.putExtra(AudioEditorActivity.EXTRA_DURATION_MS, duration);
+        startActivity(intent);
     }
 
     private void showPlaybackModePopup(View anchorView) {

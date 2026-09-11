@@ -45,4 +45,8 @@ dependencies {
     implementation 'com.google.android.material:material:1.9.0'
     implementation 'androidx.media:media:1.6.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
+    // FFmpeg for the Audio Editor (cut / split / merge).
+    // Maintained drop-in replacement for the retired com.arthenica
+    // ffmpeg-kit (same package/API, SDK 35 + 16KB pages).
+    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7'
 }
