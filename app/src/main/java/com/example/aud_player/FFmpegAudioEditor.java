@@ -71,7 +71,6 @@ public final class FFmpegAudioEditor {
         }
     }
 
-    public static final int MODE_CUT = 0;        // one segment -> one output
     public static final int MODE_SEPARATE = 1;   // N segments -> N outputs
     public static final int MODE_MERGE = 2;      // N segments -> 1 merged output
 
@@ -267,8 +266,6 @@ public final class FFmpegAudioEditor {
     /**
      * Run one editing job.
      *
-     * MODE_CUT      : segments must contain exactly 1 entry; output is a
-     *                 single file "<base>.<ext>".
      * MODE_SEPARATE : one output per segment, "<base>_partN.<ext>".
      * MODE_MERGE    : all segments (in list order — caller controls custom
      *                 order) merged into one "<base>_merged.<ext>".
@@ -515,8 +512,8 @@ public final class FFmpegAudioEditor {
 
             int seq = 0;
             if (mode != MODE_SEPARATE) {
-                // ---- Cut/Trim and Merge: exactly one output file ----
-                String name = (mode == MODE_CUT) ? baseName : baseName + "_merged";
+                // ---- Merge: exactly one output file ----
+                String name = baseName + "_merged";
                 if (pieceCount == 1) {
                     // fast path: the single piece IS the result
                     Piece p = perSegment.get(0).get(0);

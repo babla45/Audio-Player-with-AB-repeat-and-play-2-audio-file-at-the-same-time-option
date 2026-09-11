@@ -18,7 +18,6 @@ import java.util.List;
 /**
  * Professional timeline editor view (video-editor style, adapted for audio).
  *
- * SPLIT mode (the redesign):
  *  - Wide scrollable/zoomable timeline: content width = duration * pxPerMs,
  *    hosted inside a HorizontalScrollView by the activity.
  *  - Time ruler with adaptive tick marks (00:00, 00:05, ...) and labels.
@@ -29,18 +28,11 @@ import java.util.List;
  *  - Split boundaries are draggable for precise adjustment; overlapping
  *    / too-close positions are clamped so invalid splits are impossible.
  *  - Zoom (pxPerMs) is controlled by the activity's zoom buttons.
- *
- * CUT mode keeps the original compact non-scrolling A/B-handle behaviour.
  */
 public class EditorTimelineView extends View {
 
-    public static final int MODE_CUT = 0;
-    public static final int MODE_SPLIT = 1;
-
     public interface TimelineListener {
         void onSplitPointsChanged(List<Long> pointsMs);
-
-        void onCutSelectionChanged(long startMs, long endMs);
 
         /** Playhead moved (tap or playback). */
         void onPlayheadMoved(long playheadMs);
@@ -71,13 +63,10 @@ public class EditorTimelineView extends View {
     /** Zoom limits as multiples of the fit-all scale. */
     public static final float MAX_ZOOM_MULTIPLE = 24f;
 
-    private int mode = MODE_CUT;
     private long durationMs = 0;
     private float[] waveform; // nullable
     private long playheadMs = 0;
 
-    private long cutStartMs = 0;
-    private long cutEndMs = 0;
     private final List<Long> splitPoints = new ArrayList<>();
     /**
      * Deleted segment ranges in ORIGINAL time [startMs, endMs], sorted,
@@ -144,8 +133,6 @@ public class EditorTimelineView extends View {
     private final Paint blockBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint wavePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint waveSelectedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint waveDimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint selectionPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint markerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint markerHandlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint playheadPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -164,8 +151,6 @@ public class EditorTimelineView extends View {
     private static final int COLOR_BLOCK_SELECTED_BORDER = 0xFF6C63FF;
     private static final int COLOR_WAVE = 0xFF8F89E8;
     private static final int COLOR_WAVE_SELECTED = 0xFFB9B3FF;
-    private static final int COLOR_WAVE_DIM = 0x55808080;
-    private static final int COLOR_SELECTION = 0x2E6C63FF;
     private static final int COLOR_MARKER = 0xFFFF7043;
     private static final int COLOR_MARKER_SELECTED = 0xFFF4511E;
     private static final int COLOR_PLAYHEAD = 0xFFFF5252;
@@ -212,8 +197,6 @@ public class EditorTimelineView extends View {
         blockBorderPaint.setStrokeWidth(dp(1));
         wavePaint.setColor(COLOR_WAVE);
         waveSelectedPaint.setColor(COLOR_WAVE_SELECTED);
-        waveDimPaint.setColor(COLOR_WAVE_DIM);
-        selectionPaint.setColor(COLOR_SELECTION);
         markerPaint.setColor(COLOR_MARKER);
         markerPaint.setStrokeWidth(dp(2));
         markerHandlePaint.setColor(COLOR_MARKER);
@@ -235,14 +218,6 @@ public class EditorTimelineView extends View {
 
     public void setTimelineListener(TimelineListener l) {
         this.listener = l;
-    }
-
-    public void setMode(int mode) {
-        this.mode = mode;
-        this.selectedSplit = -1;
-        this.selectedSegment = -1;
-        requestLayout();
-        invalidate();
     }
 
     public void setDuration(long durationMs) {
@@ -304,32 +279,31 @@ public class EditorTimelineView extends View {
         return playheadMs;
     }
 
-    /** x position of the playhead in content coordinates (compressed
-     *  display mapping in split mode, linear in cut mode). */
+    /** x position of the playhead in content coordinates. */
     public float getPlayheadX() {
         return timeToX(playheadMs);
     }
 
-    // ---- cut mode (unchanged behaviour) ----
+    // ---- split points ----
 
-    public void setCutSelection(long startMs, long endMs) {
-        cutStartMs = clampCut(0, startMs);
-        cutEndMs = clampCut(1, endMs);
-        if (cutEndMs - cutStartMs < minGapMs) {
-            cutEndMs = Math.min(durationMs, cutStartMs + minGapMs);
+    /**
+     * Drop every edit (splits, deletions, order, selection). Used when the
+     * song list changes underneath the timeline: the axis shifts, so any
+     * existing split would point at the wrong audio.
+     */
+    public void clearEdits() {
+        splitPoints.clear();
+        deletedRanges.clear();
+        sequence.clear();
+        selectedSplit = -1;
+        selectedSegment = -1;
+        layoutDirty = true;
+        if (listener != null) {
+            listener.onSplitSelected(-1);
+            notifySplitChanged();
         }
         invalidate();
     }
-
-    public long getCutStartMs() {
-        return cutStartMs;
-    }
-
-    public long getCutEndMs() {
-        return cutEndMs;
-    }
-
-    // ---- split points ----
 
     public void setSplitPoints(List<Long> points) {
         splitPoints.clear();
@@ -626,17 +600,12 @@ public class EditorTimelineView extends View {
     }
 
     /**
-     * Segments implied by the current state. CUT mode: the A/B selection.
-     * SPLIT mode: the KEPT segments only, in the current PLAY order (the
-     * sequence) — deleted parts are excluded, and the order here drives
-     * the part list, Preview and the export.
+     * Segments implied by the current state: the KEPT segments only, in the
+     * current PLAY order (the sequence) — deleted parts are excluded, and
+     * the order here drives the part list, Preview and the export.
      */
     public List<long[]> getSegments() {
         List<long[]> segs = new ArrayList<>();
-        if (mode == MODE_CUT) {
-            segs.add(new long[]{cutStartMs, cutEndMs});
-            return segs;
-        }
         if (layoutDirty) rebuildLayout();
         for (int idx : sequence) {
             for (SegmentInfo seg : keptSegs) {
@@ -758,7 +727,7 @@ public class EditorTimelineView extends View {
     /** Kept duration shown on the timeline (edited result length). */
     public long getEditedDurationMs() {
         if (layoutDirty) rebuildLayout();
-        if (mode == MODE_CUT || !displayCompressed) return durationMs;
+        if (!displayCompressed) return durationMs;
         return totalKeptMs;
     }
 
@@ -774,16 +743,12 @@ public class EditorTimelineView extends View {
     }
 
     /**
-     * Display x for an original time. In CUT mode this stays the old
-     * linear mapping. In SPLIT mode kept segments are laid out in sequence
-     * order with the visual gaps included; a time inside a deleted gap
-     * maps to the seam before the next kept part chronologically.
+     * Display x for an original time. Kept segments are laid out in sequence
+     * order with the visual gaps included; a time inside a deleted gap maps
+     * to the seam before the next kept part chronologically.
      */
     private float timeToX(long ms) {
         if (layoutDirty) rebuildLayout();
-        if (mode == MODE_CUT) {
-            return Math.max(0, Math.min(durationMs, ms)) * pxPerMs;
-        }
         for (int i = 0; i < keptSegs.size(); i++) {
             SegmentInfo seg = keptSegs.get(i);
             if (ms >= seg.startMs && ms <= seg.endMs) {
@@ -805,16 +770,12 @@ public class EditorTimelineView extends View {
     }
 
     /**
-     * Original time for a display x. In SPLIT mode the result always lies
-     * inside a kept segment (a tap on a seam selects the next kept part).
-     * Gap-aware so a tap maps to exactly the time under the finger.
+     * Original time for a display x. The result always lies inside a kept
+     * segment (a tap on a seam selects the next kept part). Gap-aware so a
+     * tap maps to exactly the time under the finger.
      */
     private long xToTime(float x) {
         if (layoutDirty) rebuildLayout();
-        if (mode == MODE_CUT) {
-            long ms = (long) (x / pxPerMs);
-            return Math.max(0, Math.min(durationMs, ms));
-        }
         for (int i = 0; i < keptSegs.size(); i++) {
             SegmentInfo seg = keptSegs.get(i);
             float xs = displayStartX(i);
@@ -835,7 +796,7 @@ public class EditorTimelineView extends View {
      */
     public long toDisplayMs(long origMs) {
         if (layoutDirty) rebuildLayout();
-        if (mode == MODE_CUT || !displayCompressed) {
+        if (!displayCompressed) {
             return Math.max(0, Math.min(durationMs, origMs));
         }
         for (int i = 0; i < keptSegs.size(); i++) {
@@ -881,7 +842,7 @@ public class EditorTimelineView extends View {
     }
 
     private float rulerHeight() {
-        return mode == MODE_SPLIT ? dp(RULER_HEIGHT_DP) : 0;
+        return dp(RULER_HEIGHT_DP);
     }
 
     private float dp(float v) {
@@ -905,12 +866,11 @@ public class EditorTimelineView extends View {
         int h = MeasureSpec.getSize(heightMeasureSpec);
         if (h == 0) h = getSuggestedMinimumHeight();
         // Content width comes from the EDITED duration x zoom (deleted
-        // segments are compressed out in split mode) plus the visual gaps
-        // between blocks, so the last block is never clipped; the hosting
+        // segments are compressed out) plus the visual gaps between blocks,
+        // so the last block is never clipped; the hosting
         // HorizontalScrollView gives us UNSPECIFIED/match behaviour.
         long edited = getEditedDurationMs();
-        float gaps = mode == MODE_SPLIT
-                ? Math.max(0, keptSegs.size() - 1) * dp(SEGMENT_GAP_DP) : 0;
+        float gaps = Math.max(0, keptSegs.size() - 1) * dp(SEGMENT_GAP_DP);
         int w = (int) Math.max(dp(1), edited * pxPerMs + gaps);
         setMeasuredDimension(w, h);
     }
@@ -931,14 +891,12 @@ public class EditorTimelineView extends View {
                 longPressed = false;
                 splitMoveNotified = false;
                 dragTarget = hitTest(downX, downY);
-                if (dragTarget == 1 || dragTarget == 2 || dragTarget >= 10) {
-                    // consuming drags for handles/boundaries: stop the
+                if (dragTarget >= 10) {
+                    // consuming drags for boundaries: stop the
                     // HorizontalScrollView from stealing the gesture
                     getParent().requestDisallowInterceptTouchEvent(true);
-                } else if (mode == MODE_CUT) {
-                    getParent().requestDisallowInterceptTouchEvent(true);
                 }
-                if (mode == MODE_SPLIT && dragTarget == 0) {
+                if (dragTarget == 0) {
                     // long-press on a segment opens the delete-split menu;
                     // it must NOT move the playhead or start playback
                     longPressRunnable = () -> {
@@ -968,15 +926,7 @@ public class EditorTimelineView extends View {
                         return true;
                     }
                 }
-                if (dragTarget == 1) {
-                    cutStartMs = clampCut(0, xToTime(event.getX()));
-                    if (listener != null) listener.onCutSelectionChanged(cutStartMs, cutEndMs);
-                    invalidate();
-                } else if (dragTarget == 2) {
-                    cutEndMs = clampCut(1, xToTime(event.getX()));
-                    if (listener != null) listener.onCutSelectionChanged(cutStartMs, cutEndMs);
-                    invalidate();
-                } else if (dragTarget >= 10) {
+                if (dragTarget >= 10) {
                     // boundary drags engage only after the tap slop is
                     // exceeded (prevents accidental moves on taps and
                     // junk undo snapshots from sub-slop jitter)
@@ -1004,7 +954,7 @@ public class EditorTimelineView extends View {
                 if (tapPending && !longPressed) {
                     if (dragTarget == 0) {
                         handleTap(downX, downY);
-                    } else if (dragTarget >= 10 && mode == MODE_SPLIT) {
+                    } else if (dragTarget >= 10) {
                         // tap (no drag) on a boundary: select that split
                         int idx = dragTarget - 10;
                         if (idx < splitPoints.size()) {
@@ -1012,15 +962,6 @@ public class EditorTimelineView extends View {
                             if (listener != null) listener.onSplitSelected(idx);
                             invalidate();
                         }
-                    } else if ((dragTarget == 1 || dragTarget == 2)
-                            && mode == MODE_CUT) {
-                        // cut mode tap: jump the tapped handle
-                        long t = xToTime(downX);
-                        if (dragTarget == 1) cutStartMs = clampCut(0, t);
-                        else cutEndMs = clampCut(1, t);
-                        if (listener != null)
-                            listener.onCutSelectionChanged(cutStartMs, cutEndMs);
-                        invalidate();
                     }
                 }
                 dragTarget = 0;
@@ -1051,18 +992,6 @@ public class EditorTimelineView extends View {
      * move the playhead to the tapped time and select that segment.
      */
     private void handleTap(float x, float y) {
-        if (mode == MODE_CUT) {
-            // cut mode keeps old behaviour: nearest handle jumped on tap band
-            long t = xToTime(x);
-            float dxs = Math.abs(x - timeToX(cutStartMs));
-            float dxe = Math.abs(x - timeToX(cutEndMs));
-            if (dxs < dxe) cutStartMs = clampCut(0, t);
-            else cutEndMs = clampCut(1, t);
-            if (listener != null) listener.onCutSelectionChanged(cutStartMs, cutEndMs);
-            invalidate();
-            return;
-        }
-
         // boundary under the tap? (frozen deletion edges are skipped)
         float slop = handleSlopPx();
         for (int i = 0; i < splitPoints.size(); i++) {
@@ -1088,20 +1017,9 @@ public class EditorTimelineView extends View {
 
     private int hitTest(float x, float y) {
         float slop = handleSlopPx();
-        float h = getHeight();
 
-        if (mode == MODE_CUT) {
-            float dxs = Math.abs(x - timeToX(cutStartMs));
-            float dxe = Math.abs(x - timeToX(cutEndMs));
-            if (y > h * 0.05f && y < h * 0.95f) {
-                if (dxs <= dxe) return 1;
-                return 2;
-            }
-            return 0;
-        }
-
-        // split mode: boundary handles live in the waveform area;
-        // frozen boundaries (deletion edges) are not interactive
+        // boundary handles live in the waveform area; frozen boundaries
+        // (deletion edges) are not interactive
         int best = -1;
         float bestDx = Float.MAX_VALUE;
         for (int i = 0; i < splitPoints.size(); i++) {
@@ -1122,14 +1040,6 @@ public class EditorTimelineView extends View {
             else break;
         }
         return idx;
-    }
-
-    private long clampCut(int which, long t) {
-        t = Math.max(0, Math.min(durationMs, t));
-        if (which == 0) {
-            return Math.min(t, cutEndMs - minGapMs);
-        }
-        return Math.max(t, cutStartMs + minGapMs);
     }
 
     private long clampMarker(int idx, long t) {
@@ -1158,14 +1068,10 @@ public class EditorTimelineView extends View {
         super.onDraw(canvas);
         if (durationMs <= 0) return;
         if (layoutDirty) rebuildLayout();
-        if (mode == MODE_SPLIT) {
-            drawSplitTimeline(canvas);
-        } else {
-            drawCutTimeline(canvas);
-        }
+        drawSplitTimeline(canvas);
     }
 
-    // ---- SPLIT mode: pro scrollable timeline ----
+    // ---- pro scrollable timeline ----
 
     private void drawSplitTimeline(Canvas canvas) {
         float h = getHeight();
@@ -1363,74 +1269,5 @@ public class EditorTimelineView extends View {
         long s = totalSec % 60;
         if (h > 0) return String.format("%d:%02d:%02d", h, m, s);
         return String.format("%02d:%02d", m, s);
-    }
-
-    // ---- CUT mode: original compact timeline ----
-
-    private void drawCutTimeline(Canvas canvas) {
-        float w = getWidth();
-        float h = getHeight();
-        float cy = h / 2f;
-        float maxAmp = h * 0.40f;
-
-        float xs = timeToX(cutStartMs);
-        float xe = timeToX(cutEndMs);
-        rect.set(xs, h * 0.06f, xe, h * 0.94f);
-        canvas.drawRoundRect(rect, dp(6), dp(6), selectionPaint);
-
-        int bucketCount = waveform != null ? waveform.length : 64;
-        float barW = w / (float) bucketCount;
-        for (int i = 0; i < bucketCount; i++) {
-            float x = i * barW;
-            float amp;
-            if (waveform != null) {
-                amp = waveform[i] * maxAmp;
-            } else {
-                amp = (0.15f + 0.25f * (float) Math.abs(Math.sin(i * 0.35))) * maxAmp;
-            }
-            if (amp < dp(1)) amp = dp(1);
-            boolean inSelection = x >= xs && x <= xe;
-            Paint p;
-            if (waveform != null) {
-                p = inSelection ? wavePaint : waveDimPaint;
-            } else {
-                placeholderPaint.setColor(inSelection
-                        ? PLACEHOLDER_SELECTED_COLOR : PLACEHOLDER_COLOR);
-                p = placeholderPaint;
-            }
-            canvas.drawRect(x + barW * 0.15f, cy - amp, x + barW * 0.85f, cy + amp, p);
-        }
-
-        canvas.drawLine(0, cy, w, cy, linePaint);
-
-        canvas.drawText(formatRuler(0), dp(2), h - dp(3), textPaint);
-        String endLabel = formatRuler(durationMs);
-        canvas.drawText(endLabel, w - textPaint.measureText(endLabel) - dp(2), h - dp(3), textPaint);
-        String midLabel = formatRuler(durationMs / 2);
-        canvas.drawText(midLabel, w / 2f - textPaint.measureText(midLabel) / 2f, h - dp(3), textPaint);
-
-        drawCutHandle(canvas, xs, h, "A");
-        drawCutHandle(canvas, xe, h, "B");
-
-        // playhead (if any) in accent
-        if (playheadMs >= 0) {
-            float px = timeToX(playheadMs);
-            canvas.drawLine(px, 0, px, h, playheadPaint);
-        }
-    }
-
-    private void drawCutHandle(Canvas canvas, float x, float h, String label) {
-        markerHandlePaint.setColor(COLOR_MARKER);
-        rect.set(x - dp(10), h * 0.0f, x + dp(10), h * 0.13f);
-        canvas.drawRoundRect(rect, dp(7), dp(7), markerHandlePaint);
-        markerPaint.setColor(COLOR_MARKER);
-        canvas.drawLine(x, h * 0.13f, x, h, markerPaint);
-        float oldSize = textPaint.getTextSize();
-        int oldColor = textPaint.getColor();
-        textPaint.setTextSize(sp(10));
-        textPaint.setColor(Color.WHITE);
-        canvas.drawText(label, x - textPaint.measureText(label) / 2f, h * 0.10f, textPaint);
-        textPaint.setTextSize(oldSize);
-        textPaint.setColor(oldColor);
     }
 }

@@ -67,7 +67,7 @@
             android:paddingTop="2dp">
 
             <TextView
-                android:id="@+id/editorTabCut"
+                android:id="@+id/editorTabMerge"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="6dp"
@@ -76,7 +76,7 @@
                 android:gravity="center"
                 android:paddingHorizontal="16dp"
                 android:paddingVertical="5dp"
-                android:text="Cut / Trim"
+                android:text="Merge"
                 android:textColor="#FFFFFFFF"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -97,8 +97,9 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Timeline panel -->
+        <!-- Timeline panel (Split mode only) -->
         <LinearLayout
+            android:id="@+id/editorTimelinePanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginHorizontal="10dp"
@@ -178,28 +179,38 @@
                 android:layout_marginTop="2dp"
                 android:textColor="#77FFFFFF"
                 android:textSize="10sp"
-                tools:text="Drag A / B handles to select the part to keep." />
+                tools:text="Tap the timeline to position the playhead, then ✂ Split." />
         </LinearLayout>
 
-        <!-- Cut mode action row -->
+        <!-- Merge mode action row: add a song + song count / total length -->
         <LinearLayout
-            android:id="@+id/editorCutActionRow"
+            android:id="@+id/editorMergeActionRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="12dp"
             android:paddingTop="8dp">
 
-            <TextView
-                android:id="@+id/editorPreviewBtn"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
+            <ImageButton
+                android:id="@+id/editorMergeAddSongBtn"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
                 android:background="@drawable/bg_editor_btn_secondary"
-                android:gravity="center"
-                android:paddingVertical="8dp"
-                android:text="▶ Preview"
+                android:contentDescription="Add a song to merge"
+                android:src="@drawable/ic_queue_music"
+                app:tint="#FFFFFFFF" />
+
+            <TextView
+                android:id="@+id/editorMergeInfoText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
                 android:textColor="#FFFFFFFF"
-                android:textSize="13sp" />
+                android:textSize="12sp"
+                android:textStyle="bold"
+                tools:text="3 songs  •  Total 09:41" />
         </LinearLayout>
 
         <!-- Split mode pro control bar: Play/Pause | Auto-scroll | Split | Delete | Add song | Zoom- | Zoom+ -->
