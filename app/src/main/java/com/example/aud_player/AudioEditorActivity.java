@@ -37,10 +37,13 @@ import java.util.List;
  * Audio Editor: multi-split and merge for the currently selected track,
  * powered by FFmpeg (FFmpegAudioEditor).
  *
- * - Merge tab: the song list itself — add songs, reorder them (drag the ⠿
- *   handle) or remove them, then join them into one file. The concatenation
- *   is a stream copy whenever the formats allow it, with the automatic AAC
- *   re-encode fallback when they don't.
+ * - Merge tab: its own song list — EMPTY when the editor opens (the song the
+ *   editor was launched with is not added automatically). ＋ opens the
+ *   library in multi-select mode, so several songs can be added at once; the
+ *   rows can then be reordered (drag the ⠿ handle) or removed, and joined
+ *   into one file. The concatenation is a stream copy whenever the formats
+ *   allow it, with the automatic AAC re-encode fallback when they don't.
+ *   This list is independent of the Split timeline's sources.
  * - Split tab: professional timeline editor (video-editor style):
  *   scrollable + zoomable waveform timeline with a time ruler, numbered
  *   segment blocks, draggable split boundaries, tap-to-position playhead,
@@ -121,6 +124,17 @@ public class AudioEditorActivity extends AppCompatActivity {
     /** TOTAL length of the edited timeline (all sources concatenated). */
     private long durationMs;
 
+    /**
+     * The Merge tab's own song list, deliberately SEPARATE from the Split
+     * timeline's {@link #sources} — and EMPTY when the editor opens:
+     * launching the editor from a playing song must not silently put that
+     * song into a merge, and reordering/removing merge songs must not
+     * disturb the Split tab's splits.
+     */
+    private final List<Source> mergeSources = new ArrayList<>();
+    /** TOTAL length of the merge list (0 while it is empty). */
+    private long mergeDurationMs;
+
     private EditorTimelineView timeline;
     private HorizontalScrollView timelineScroll;
     private TextView rangeText, durationText, hintText, currentTimeText, zoomText;
@@ -178,6 +192,13 @@ public class AudioEditorActivity extends AppCompatActivity {
     private long previewStartMs, previewEndMs;
     /** Which source `previewPlayer` is currently playing. */
     private int previewSourceIndex;
+    /**
+     * Which list the preview is playing: null = the Split timeline's
+     * {@link #sources} (playhead, deleted-range skipping and the compressed
+     * time readout all apply), non-null = the Merge tab's list (nothing on
+     * the hidden timeline may be touched).
+     */
+    private List<Source> previewList;
 
     /** "+": pick another song from the library and append it to the timeline. */
     private final ActivityResultLauncher<Intent> songPickerLauncher = registerForActivityResult(
@@ -187,6 +208,27 @@ public class AudioEditorActivity extends AppCompatActivity {
                     Uri uri = result.getData().getData();
                     if (uri != null) appendSong(uri);
                 }
+            });
+
+    /**
+     * Merge tab's "+": the picker runs in multi-select mode, so several songs
+     * can be added in one go. Falls back to the single-URI contract if the
+     * caller is handed an older-style result.
+     */
+    private final ActivityResultLauncher<Intent> mergePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
+                Intent data = result.getData();
+                ArrayList<Uri> uris =
+                        data.getParcelableArrayListExtra(AudioListActivity.EXTRA_PICKED_URIS);
+                if (uris == null || uris.isEmpty()) {
+                    Uri single = data.getData();
+                    if (single == null) return;
+                    uris = new ArrayList<>();
+                    uris.add(single);
+                }
+                addMergeSongs(uris);
             });
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable playheadUpdater = new Runnable() {
@@ -199,15 +241,18 @@ public class AudioEditorActivity extends AppCompatActivity {
                     long pos = toGlobal(previewSourceIndex,
                             previewPlayer.getCurrentPosition());
                     // skip over deleted segments (KineMaster-style: the
-                    // playhead jumps the gap instead of playing removed audio)
-                    long mapped = timeline.skipDeletedForward(pos);
-                    if (mapped < 0) {
-                        stopPreview();
-                        return;
-                    }
-                    if (mapped != pos) {
-                        seekPreviewTo(mapped);
-                        pos = mapped;
+                    // playhead jumps the gap instead of playing removed audio).
+                    // Merge-tab previews have no timeline: nothing to skip.
+                    if (previewList == null) {
+                        long mapped = timeline.skipDeletedForward(pos);
+                        if (mapped < 0) {
+                            stopPreview();
+                            return;
+                        }
+                        if (mapped != pos) {
+                            seekPreviewTo(mapped);
+                            pos = mapped;
+                        }
                     }
                     if (previewEndMs > 0 && pos >= previewEndMs - 40) {
                         if (previewQueue == null) {
@@ -226,12 +271,14 @@ public class AudioEditorActivity extends AppCompatActivity {
                             pos = previewStartMs;
                         }
                     }
-                    timeline.setPlayheadMs(pos);
+                    if (previewList == null) {
+                        timeline.setPlayheadMs(pos);
+                        // auto-scroll only when the user turned the toggle on;
+                        // otherwise the timeline stays where they left it and
+                        // manual scrolling is always free
+                        if (autoScrollEnabled) followPlayhead();
+                    }
                     updateCurrentTimeText(pos);
-                    // auto-scroll only when the user turned the toggle on;
-                    // otherwise the timeline stays where they left it and
-                    // manual scrolling is always free
-                    if (autoScrollEnabled) followPlayhead();
                 } catch (Exception ignored) {
                 }
                 mainHandler.postDelayed(this, PLAYHEAD_UPDATE_MS);
@@ -447,7 +494,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         zoomOutBtn.setOnClickListener(v -> zoomBy(1f / 1.6f));
         zoomInBtn.setOnClickListener(v -> zoomBy(1.6f));
         addSongBtn.setOnClickListener(v -> pickSongToAppend());
-        mergeAddSongBtn.setOnClickListener(v -> pickSongToAppend());
+        mergeAddSongBtn.setOnClickListener(v -> pickSongsToMerge());
         saveBtn.setOnClickListener(v -> confirmSave());
         cancelBtn.setOnClickListener(v -> {
             if (jobRunning) {
@@ -462,6 +509,9 @@ public class AudioEditorActivity extends AppCompatActivity {
     // ------------------------------------------------------------------
 
     private void updateUiForTab() {
+        // a preview belongs to the tab it was started from (Merge previews
+        // play a list the Split tab knows nothing about)
+        stopPreview();
         boolean merge = currentTab == TAB_MERGE;
         int active = 0xFFFFFFFF;
         int inactive = 0x88FFFFFF;
@@ -519,10 +569,14 @@ public class AudioEditorActivity extends AppCompatActivity {
 
     /** Merge tab readout: how many songs, and how long the merged file will be. */
     private void updateMergeInfoText() {
-        int n = sources.size();
-        mergeInfoText.setText(n == 1
-                ? "1 song  •  add one more to merge"
-                : n + " songs  •  Total " + formatTime(durationMs));
+        int n = mergeSources.size();
+        if (n == 0) {
+            mergeInfoText.setText("No songs yet  •  tap the ＋ button to add some");
+        } else if (n == 1) {
+            mergeInfoText.setText("1 song  •  add one more to merge");
+        } else {
+            mergeInfoText.setText(n + " songs  •  Total " + formatTime(mergeDurationMs));
+        }
         updateSaveButtonState();
     }
 
@@ -537,14 +591,16 @@ public class AudioEditorActivity extends AppCompatActivity {
             saveBtn.setAlpha(1f);
             return;
         }
-        boolean canMerge = sources.size() >= 2 && !jobRunning;
+        boolean canMerge = mergeSources.size() >= 2 && !jobRunning;
         saveBtn.setEnabled(canMerge);
         saveBtn.setAlpha(canMerge ? 1f : 0.45f);
     }
 
     private void updateCurrentTimeText(long ms) {
-        // display (edited-result) time so it matches the compressed ruler
-        currentTimeText.setText("▶ " + formatTime(timeline.toDisplayMs(ms)));
+        // Split tab: the display (edited-result) time, so it matches the
+        // compressed ruler. Merge tab: its own axis, no timeline mapping.
+        currentTimeText.setText("▶ " + formatTime(
+                previewList != null ? ms : timeline.toDisplayMs(ms)));
     }
 
     private void updateZoomText() {
@@ -754,8 +810,19 @@ public class AudioEditorActivity extends AppCompatActivity {
 
     /** One row per song, in merge order: [⠿][title + times][▶][🗑]. */
     private void renderSourceList() {
-        for (int i = 0; i < sources.size(); i++) {
-            segmentList.addView(buildSourceRow(i, sources.get(i)));
+        if (mergeSources.isEmpty()) {
+            TextView hint = new TextView(this);
+            hint.setText("No songs added yet.\nTap the ＋ button above to pick songs "
+                    + "— you can select several at once.");
+            hint.setTextColor(0x99FFFFFF);
+            hint.setTextSize(12f);
+            hint.setGravity(Gravity.CENTER);
+            hint.setPadding(dp(12), dp(28), dp(12), dp(28));
+            segmentList.addView(hint);
+            return;
+        }
+        for (int i = 0; i < mergeSources.size(); i++) {
+            segmentList.addView(buildSourceRow(i, mergeSources.get(i)));
         }
     }
 
@@ -820,7 +887,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         pbLp.leftMargin = dp(6);
         play.setLayoutParams(pbLp);
         play.setContentDescription("Preview this song");
-        play.setOnClickListener(v -> previewRange(startMs, endMs));
+        play.setOnClickListener(v -> previewMergeSource(index));
         row.addView(play);
 
         ImageButton delete = new ImageButton(this);
@@ -831,68 +898,73 @@ public class AudioEditorActivity extends AppCompatActivity {
         dbLp.leftMargin = dp(6);
         delete.setLayoutParams(dbLp);
         delete.setContentDescription("Remove this song from the merge");
-        delete.setOnClickListener(v -> removeSource(index));
+        delete.setOnClickListener(v -> removeMergeSource(index));
         row.addView(delete);
 
         return row;
     }
 
-    /** Drop one song from the merge list (never the last one). */
-    private void removeSource(int index) {
-        if (index < 0 || index >= sources.size()) return;
-        if (sources.size() <= 1) {
-            Toast.makeText(this, "Can't remove the only song", Toast.LENGTH_SHORT).show();
-            return;
+    /** Recompute the merge list's own axis (independent of the timeline's). */
+    private void rebuildMergeMap() {
+        long off = 0;
+        for (Source s : mergeSources) {
+            s.offsetMs = off;
+            off += s.durationMs;
         }
+        mergeDurationMs = Math.max(0, off);
+    }
+
+    /**
+     * Add every picked song to the END of the merge list, in the order the
+     * picker returned them. One toast and one re-render for the whole batch.
+     */
+    private void addMergeSongs(List<Uri> uris) {
+        if (uris == null || uris.isEmpty() || isFinishing()) return;
         stopPreview();
-        sources.remove(index);
-        rebuildTimeMap();
-        timeline.setDuration(durationMs);
-        timeline.setWaveform(combineWaveforms());
-        resetTimelineEdits();
-        updateSongNameLabel();
+        int added = 0;
+        long addedMs = 0;
+        for (Uri uri : uris) {
+            if (uri == null) continue;
+            long dur = Math.max(1000, probeDuration(uri));
+            mergeSources.add(new Source(uri, displayNameOf(uri), dur));
+            addedMs += dur;
+            added++;
+        }
+        if (added == 0) return;
+        rebuildMergeMap();
         updateMergeInfoText();
         renderSegmentList();
-        updateCurrentTimeText(timeline.getPlayheadMs());
+        Toast.makeText(this, "Added " + added + (added == 1 ? " song" : " songs")
+                + "  •  " + formatTime(addedMs) + "  •  total "
+                + formatTime(mergeDurationMs), Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * Drop one song from the merge list. Removing the last one is allowed —
+     * the list simply goes back to being empty (the Split tab is untouched).
+     */
+    private void removeMergeSource(int index) {
+        if (index < 0 || index >= mergeSources.size()) return;
+        stopPreview();
+        mergeSources.remove(index);
+        rebuildMergeMap();
+        updateMergeInfoText();
+        renderSegmentList();
     }
 
     /**
      * Move the song at {@code from} to position {@code to} in the merge order.
-     * Returns false when the move is a no-op.
+     * Returns false when the move is a no-op. The caller re-renders the list.
      */
-    private boolean moveSource(int from, int to) {
-        if (from < 0 || from >= sources.size() || to < 0 || to >= sources.size()) return false;
+    private boolean moveMergeSource(int from, int to) {
+        if (from < 0 || from >= mergeSources.size()
+                || to < 0 || to >= mergeSources.size()) return false;
         if (from == to) return false;
         stopPreview(); // the old order must not keep playing
-        Source s = sources.remove(from);
-        sources.add(to, s);
-        rebuildTimeMap();
-        timeline.setDuration(durationMs);
-        timeline.setWaveform(combineWaveforms());
-        resetTimelineEdits();
-        updateSongNameLabel();
+        mergeSources.add(to, mergeSources.remove(from));
+        rebuildMergeMap();
         updateMergeInfoText();
-        renderSegmentList();
-        updateCurrentTimeText(timeline.getPlayheadMs());
         return true;
-    }
-
-    /**
-     * Adding, removing or reordering songs shifts the time axis under every
-     * existing split, so the Split tab's edits are dropped (and the undo
-     * history with them — it does not cover the song list).
-     */
-    private void resetTimelineEdits() {
-        boolean hadEdits = !timeline.getSplitPoints().isEmpty()
-                || !timeline.getDeletedRanges().isEmpty();
-        timeline.clearEdits();
-        undoStack.clear();
-        redoStack.clear();
-        updateUndoRedoButtons();
-        if (hadEdits) {
-            Toast.makeText(this, "Splits cleared — the song list changed",
-                    Toast.LENGTH_SHORT).show();
-        }
     }
 
     private String rangeLabel(long startMs, long endMs) {
@@ -1137,8 +1209,8 @@ public class AudioEditorActivity extends AppCompatActivity {
         int ins = to > from ? to + 1 : to;
         if (moved && ins != from && ins != from + 1) {
             if (mode == DRAG_SOURCES) {
-                // merge order: moveSource already re-rendered the list
-                moveSource(from, ins);
+                moveMergeSource(from, ins); // merge order; re-render below
+                renderSegmentList();
                 return;
             }
             EditorState before = currentState();
@@ -1178,8 +1250,9 @@ public class AudioEditorActivity extends AppCompatActivity {
     /**
      * Bottom Preview button: play the parts CONTINUOUSLY in their current
      * list order — the sequence is the single source of truth, matching the
-     * final Merge/Save. In the Merge tab there are no splits, so the single
-     * part covers every song and this plays the whole merged result. One
+     * final Merge/Save. On the Split tab that is the part sequence of the
+     * timeline; on the Merge tab it is the merge list itself (one part per
+     * song, in list order), i.e. exactly what Merge will write out. One
      * player, seeked part to part: no duplicate or overlapping playback.
      * Click again to stop.
      */
@@ -1188,13 +1261,43 @@ public class AudioEditorActivity extends AppCompatActivity {
             stopPreview();
             return;
         }
-        List<long[]> segs = timeline.getSegments();
+        boolean merge = currentTab == TAB_MERGE;
+        List<long[]> segs;
+        if (merge) {
+            if (mergeSources.isEmpty()) {
+                Toast.makeText(this, "Add at least two songs to preview the merge",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            segs = new ArrayList<>(mergeSources.size());
+            long off = 0;
+            for (Source s : mergeSources) {
+                segs.add(new long[]{off, off + s.durationMs});
+                off += s.durationMs;
+            }
+        } else {
+            segs = timeline.getSegments();
+        }
         if (segs.isEmpty()) return;
         stopPreview();
+        // after stopPreview (it clears the list): which axis this preview runs on
+        previewList = merge ? mergeSources : null;
         previewQueue = segs;
         previewQueueIndex = 0;
         lastQueueAdvanceEnd = Long.MIN_VALUE;
         createPreviewPlayer(segs.get(0)[0], segs.get(0)[1]);
+    }
+
+    /**
+     * ▶ on a Merge-tab row: play just that song. It runs on the merge list's
+     * own axis, so the hidden Split timeline is never touched.
+     */
+    private void previewMergeSource(int index) {
+        if (index < 0 || index >= mergeSources.size()) return;
+        stopPreview();
+        previewList = mergeSources;
+        Source s = mergeSources.get(index);
+        createPreviewPlayer(s.offsetMs, s.offsetMs + s.durationMs);
     }
 
     /**
@@ -1235,9 +1338,11 @@ public class AudioEditorActivity extends AppCompatActivity {
             }
             previewPlayer.seekTo((int) toLocal(idx, next[0]));
             previewPlayer.start();
-            timeline.setPlayheadMs(next[0]);
+            if (previewList == null) {
+                timeline.setPlayheadMs(next[0]);
+                if (autoScrollEnabled) followPlayhead();
+            }
             updateCurrentTimeText(next[0]);
-            if (autoScrollEnabled) followPlayhead();
         } catch (Exception e) {
             stopPreview();
         }
@@ -1283,13 +1388,14 @@ public class AudioEditorActivity extends AppCompatActivity {
      * The sequence queue is owned by the caller and never touched here.
      */
     private void createPreviewPlayer(long startMs, long endMs, int srcIndex) {
-        if (sources.isEmpty()) return;
-        if (srcIndex < 0 || srcIndex >= sources.size()) srcIndex = 0;
+        List<Source> list = activeSources();
+        if (list.isEmpty()) return;
+        if (srcIndex < 0 || srcIndex >= list.size()) srcIndex = 0;
         try {
             final int index = srcIndex;
             previewSourceIndex = index;
             previewPlayer = new MediaPlayer();
-            previewPlayer.setDataSource(this, sources.get(index).uri);
+            previewPlayer.setDataSource(this, list.get(index).uri);
             previewPlayer.setOnPreparedListener(mp -> {
                 try {
                     previewStartMs = startMs;
@@ -1349,9 +1455,10 @@ public class AudioEditorActivity extends AppCompatActivity {
      */
     private boolean continueIntoNextSource() {
         if (previewPlayer == null) return false;
+        List<Source> list = activeSources();
         int next = previewSourceIndex + 1;
-        if (next >= sources.size()) return false;
-        long seam = sources.get(next).offsetMs;
+        if (next >= list.size()) return false;
+        long seam = list.get(next).offsetMs;
         if (previewEndMs <= seam) return false; // the range ends in this song
         createPreviewPlayer(seam, previewEndMs, next);
         return true;
@@ -1378,6 +1485,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         previewQueue = null;
         previewQueueIndex = -1;
         lastQueueAdvanceEnd = Long.MIN_VALUE;
+        previewList = null; // back to the timeline axis
         updatePlayButtons();
         if (timeline != null) updateCurrentTimeText(timeline.getPlayheadMs());
     }
@@ -1504,33 +1612,48 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     /**
-     * Output base name. Always the FIRST song of the current list — with
-     * removal in the Merge tab the opening song can change, so the title the
-     * activity was launched with is no longer authoritative.
+     * Output base name. Always the FIRST song of the LIST being written —
+     * with removal in the Merge tab the opening song can change, so the
+     * title the activity was launched with is no longer authoritative.
      */
     private String baseName() {
-        String n = sources.isEmpty() ? songTitle : sources.get(0).title;
+        return baseNameOf(sources);
+    }
+
+    private String baseNameOf(List<Source> list) {
+        String n = list.isEmpty() ? songTitle : list.get(0).title;
         int dot = n.lastIndexOf('.');
         if (dot > 0) n = n.substring(0, dot);
         return n;
     }
 
     /**
-     * Merge tab: join every song of the list, in list order, into one file.
-     * The whole timeline is a single segment, so FFmpegAudioEditor copies
-     * each song (stream copy) and concatenates the pieces — falling back to
-     * the AAC re-encode automatically when a copy is impossible.
+     * Merge tab: join every song of the merge list, in list order, into one
+     * file. The list is one global segment on ITS OWN axis, so
+     * FFmpegAudioEditor copies each song (stream copy) and concatenates the
+     * pieces — falling back to the AAC re-encode automatically when a copy
+     * is impossible.
      */
     private void runMergeJob() {
-        if (sources.size() < 2) {
+        if (mergeSources.size() < 2) {
             Toast.makeText(this, "Add at least one more song to merge",
                     Toast.LENGTH_SHORT).show();
             return;
         }
         List<FFmpegAudioEditor.Segment> segs = new ArrayList<>();
-        segs.add(new FFmpegAudioEditor.Segment(0, durationMs));
+        segs.add(new FFmpegAudioEditor.Segment(0, mergeDurationMs));
+
+        List<Uri> uris = new ArrayList<>(mergeSources.size());
+        for (Source s : mergeSources) uris.add(s.uri);
+        long[] boundaries = new long[mergeSources.size() + 1];
+        for (int i = 0; i < mergeSources.size(); i++) {
+            boundaries[i] = mergeSources.get(i).offsetMs;
+        }
+        boundaries[mergeSources.size()] = mergeDurationMs;
+
         // doJob names a MODE_MERGE output "<base>_merged"
-        startJob(FFmpegAudioEditor.MODE_MERGE, segs, baseName());
+        startJob(FFmpegAudioEditor.MODE_MERGE, uris, boundaries, segs,
+                baseNameOf(mergeSources));
     }
 
     private void runSplitJob(boolean merge, List<Integer> customOrder) {
@@ -1551,6 +1674,16 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     private void startJob(int mode, List<FFmpegAudioEditor.Segment> segments, String name) {
+        startJob(mode, sourceUris(), sourceBoundaries(), segments, name);
+    }
+
+    /**
+     * Run an export over an explicit song list. Split jobs pass the timeline's
+     * sources; a Merge job passes the Merge tab's own list, which is a
+     * different set of files on a different axis.
+     */
+    private void startJob(int mode, List<Uri> uris, long[] boundaries,
+                          List<FFmpegAudioEditor.Segment> segments, String name) {
         stopPreview();
         jobRunning = true;
         progressTitle.setText("Processing…");
@@ -1559,7 +1692,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         progressText.setText("Preparing…");
         progressOverlay.setVisibility(View.VISIBLE);
 
-        editor.runJobFromUri(this, sourceUris(), sourceBoundaries(), mode, segments, name,
+        editor.runJobFromUri(this, uris, boundaries, mode, segments, name,
                 new FFmpegAudioEditor.EditListener() {
                     @Override
                     public void onProgress(int percent) {
@@ -1644,24 +1777,37 @@ public class AudioEditorActivity extends AppCompatActivity {
         durationMs = Math.max(1, off);
     }
 
+    /**
+     * The axis the preview is currently running on: the Merge tab's list
+     * while one of its previews plays, the timeline's sources otherwise.
+     * Every global-time mapping below goes through this, so the two lists
+     * can never be mixed up mid-playback.
+     */
+    private List<Source> activeSources() {
+        return previewList != null ? previewList : sources;
+    }
+
     /** Index of the source that owns a GLOBAL time (always 0 when alone). */
     private int sourceIndexAt(long globalMs) {
-        for (int i = sources.size() - 1; i >= 0; i--) {
-            if (globalMs >= sources.get(i).offsetMs) return i;
+        List<Source> list = activeSources();
+        for (int i = list.size() - 1; i >= 0; i--) {
+            if (globalMs >= list.get(i).offsetMs) return i;
         }
         return 0;
     }
 
     /** GLOBAL time -> time inside that source's own file. */
     private long toLocal(int index, long globalMs) {
-        if (index < 0 || index >= sources.size()) return Math.max(0, globalMs);
-        return Math.max(0, globalMs - sources.get(index).offsetMs);
+        List<Source> list = activeSources();
+        if (index < 0 || index >= list.size()) return Math.max(0, globalMs);
+        return Math.max(0, globalMs - list.get(index).offsetMs);
     }
 
     /** Time inside a source's own file -> GLOBAL time. */
     private long toGlobal(int index, long localMs) {
-        if (index < 0 || index >= sources.size()) return localMs;
-        return localMs + sources.get(index).offsetMs;
+        List<Source> list = activeSources();
+        if (index < 0 || index >= list.size()) return localMs;
+        return localMs + list.get(index).offsetMs;
     }
 
     private List<Uri> sourceUris() {
@@ -1683,6 +1829,17 @@ public class AudioEditorActivity extends AppCompatActivity {
         try {
             // the list returns RESULT_OK with the picked track's URI
             songPickerLauncher.launch(new Intent(this, AudioListActivity.class));
+        } catch (Exception e) {
+            Toast.makeText(this, "Couldn't open the song list", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /** Merge tab's "+": same picker, in multi-select mode. */
+    private void pickSongsToMerge() {
+        try {
+            Intent i = new Intent(this, AudioListActivity.class);
+            i.putExtra(AudioListActivity.EXTRA_MULTI_SELECT, true);
+            mergePickerLauncher.launch(i);
         } catch (Exception e) {
             Toast.makeText(this, "Couldn't open the song list", Toast.LENGTH_SHORT).show();
         }
@@ -1729,7 +1886,6 @@ public class AudioEditorActivity extends AppCompatActivity {
         renderSegmentList();
         updateRangeText();
         updateCurrentTimeText(timeline.getPlayheadMs());
-        updateMergeInfoText();
 
         String msg = "Added \"" + title + "\"  •  total " + formatTime(durationMs);
         if (hadHistory) msg += "\nUndo history cleared";

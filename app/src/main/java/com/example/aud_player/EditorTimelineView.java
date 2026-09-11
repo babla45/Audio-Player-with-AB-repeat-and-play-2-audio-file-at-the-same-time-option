@@ -286,25 +286,6 @@ public class EditorTimelineView extends View {
 
     // ---- split points ----
 
-    /**
-     * Drop every edit (splits, deletions, order, selection). Used when the
-     * song list changes underneath the timeline: the axis shifts, so any
-     * existing split would point at the wrong audio.
-     */
-    public void clearEdits() {
-        splitPoints.clear();
-        deletedRanges.clear();
-        sequence.clear();
-        selectedSplit = -1;
-        selectedSegment = -1;
-        layoutDirty = true;
-        if (listener != null) {
-            listener.onSplitSelected(-1);
-            notifySplitChanged();
-        }
-        invalidate();
-    }
-
     public void setSplitPoints(List<Long> points) {
         splitPoints.clear();
         if (points != null) {

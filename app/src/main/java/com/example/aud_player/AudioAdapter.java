@@ -61,6 +61,19 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
     // Whether rows should prefer embedded album art over the music note icon
     // (default on; falls back to the icon for songs without artwork)
     private boolean showAlbumArt = true;
+    /**
+     * Multi-select mode (off by default, so every existing screen is
+     * unchanged): a tap toggles the row into a selection set instead of
+     * opening the song, the three-dot menu becomes a check indicator and
+     * the host is told the new count. Used by the editor's Merge picker.
+     */
+    private boolean selectionMode = false;
+    private final java.util.Set<String> selectedUris = new java.util.LinkedHashSet<>();
+    private OnSelectionChangedListener selectionListener;
+
+    public interface OnSelectionChangedListener {
+        void onSelectionChanged(int selectedCount);
+    }
     // Background executor for reading embedded artwork off the main thread
     private final ExecutorService artExecutor = Executors.newSingleThreadExecutor();
     // LRU cache of loaded artwork keyed by audio URI.
@@ -132,6 +145,52 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
 
     public void setOnItemClickListener(OnItemClickListener listener) {
         this.listener = listener;
+    }
+
+    public void setOnSelectionChangedListener(OnSelectionChangedListener l) {
+        this.selectionListener = l;
+    }
+
+    /** Turn multi-select on/off (off = the original single-tap behaviour). */
+    public void setSelectionMode(boolean on) {
+        if (this.selectionMode != on) {
+            this.selectionMode = on;
+            if (!on) selectedUris.clear();
+            notifyDataSetChanged();
+        }
+    }
+
+    public boolean isSelectionMode() {
+        return selectionMode;
+    }
+
+    /** Toggle one row's selected state; returns true when it is now selected. */
+    public boolean toggleSelection(AudioFile file) {
+        if (file == null || file.getUri() == null) return false;
+        String key = file.getUri().toString();
+        boolean nowSelected;
+        if (selectedUris.contains(key)) {
+            selectedUris.remove(key);
+            nowSelected = false;
+        } else {
+            selectedUris.add(key);
+            nowSelected = true;
+        }
+        int pos = findPositionByUri(file.getUri());
+        if (pos >= 0) notifyItemChanged(pos);
+        if (selectionListener != null) selectionListener.onSelectionChanged(selectedUris.size());
+        return nowSelected;
+    }
+
+    public int getSelectedCount() {
+        return selectedUris.size();
+    }
+
+    /** Selected URIs, in the order they were picked. */
+    public List<Uri> getSelectedUris() {
+        List<Uri> list = new ArrayList<>(selectedUris.size());
+        for (String s : selectedUris) list.add(Uri.parse(s));
+        return list;
     }
 
     public void setOnOptionsItemClickListener(OnOptionsItemClickListener listener) {
@@ -209,8 +268,19 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         
         // Highlight if this is the currently playing track
         boolean isCurrentlyPlaying = currentlyPlayingUri != null && currentlyPlayingUri.equals(audioFile.getUri());
+        boolean isSelected = selectionMode && audioFile.getUri() != null
+                && selectedUris.contains(audioFile.getUri().toString());
 
-        if (isCurrentlyPlaying) {
+        if (isSelected) {
+            // merge-picker selection wins over the now-playing highlight
+            holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item_playing);
+            showEqualizerIndicator(holder, false);
+            holder.titleTextView.setTextColor(
+                    ContextCompat.getColor(holder.itemContainer.getContext(), R.color.accent_primary2));
+            holder.durationTextView.setTextColor(
+                    ContextCompat.getColor(holder.itemContainer.getContext(), R.color.text_secondary));
+            holder.nowPlayingTag.setVisibility(View.GONE);
+        } else if (isCurrentlyPlaying) {
             // Gradient background for the currently playing row (keeps rounded corners + ripple)
             holder.itemContainer.setBackgroundResource(R.drawable.bg_song_item_playing);
             // Animated equalizer overlay: dancing bars while playing, dimmed static bars when paused
@@ -237,15 +307,29 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             holder.nowPlayingTag.setVisibility(View.GONE);
         }
         
+        // In selection mode the three-dot menu becomes the check indicator
+        if (selectionMode) {
+            holder.optionsMenu.setImageResource(isSelected
+                    ? R.drawable.ic_check_circle : R.drawable.ic_circle_outline);
+            holder.optionsMenu.setContentDescription(isSelected ? "Selected" : "Not selected");
+            holder.optionsMenu.setOnClickListener(v -> {
+                toggleSelection(audioFile);
+            });
+        } else {
+            holder.optionsMenu.setImageResource(R.drawable.ic_more_vert);
+            holder.optionsMenu.setContentDescription("File options");
+            holder.optionsMenu.setOnClickListener(v -> showPopupMenu(v, audioFile));
+        }
+
         holder.itemContainer.setOnClickListener(v -> {
+            if (selectionMode) {
+                // multi-select: a row tap toggles, it never opens the song
+                toggleSelection(audioFile);
+                return;
+            }
             if (listener != null) {
                 listener.onItemClick(audioFile);
             }
-        });
-        
-        // Setup three-dot menu click listener
-        holder.optionsMenu.setOnClickListener(v -> {
-            showPopupMenu(v, audioFile);
         });
     }
 

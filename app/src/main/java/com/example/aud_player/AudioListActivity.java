@@ -25,11 +25,18 @@ import java.util.concurrent.TimeUnit;
 
 public class AudioListActivity extends AppCompatActivity {
 
+    /** Multi-select mode: pick several songs, confirm, return them all. */
+    public static final String EXTRA_MULTI_SELECT = "extra_multi_select";
+    /** Result extra: the picked URIs (ArrayList&lt;Uri&gt;) in multi-select mode. */
+    public static final String EXTRA_PICKED_URIS = "extra_picked_uris";
+
     private RecyclerView recyclerView;
     private View emptyView;
     private TextView emptyText;
     private EditText searchEditText;
     private View clearSearchButton, searchContainer;
+    private View confirmBar;
+    private TextView selectedCountText, confirmButton;
 
     /** The whole MediaStore library (never filtered). */
     private final List<AudioFile> audioFiles = new ArrayList<>();
@@ -38,6 +45,8 @@ public class AudioListActivity extends AppCompatActivity {
     private AudioAdapter adapter;
 
     private boolean isSelectingSecondFile = false;
+    /** true when the caller wants several songs at once (editor Merge tab). */
+    private boolean multiSelect = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,10 +59,14 @@ public class AudioListActivity extends AppCompatActivity {
         searchEditText = findViewById(R.id.audioListSearchEditText);
         clearSearchButton = findViewById(R.id.audioListClearSearch);
         searchContainer = findViewById(R.id.audioListSearchContainer);
+        confirmBar = findViewById(R.id.audioListConfirmBar);
+        selectedCountText = findViewById(R.id.audioListSelectedCount);
+        confirmButton = findViewById(R.id.audioListConfirmBtn);
 
         // Get intent extras to determine if we're selecting primary or secondary audio
         if (getIntent() != null) {
             isSelectingSecondFile = getIntent().getBooleanExtra("select_second_file", false);
+            multiSelect = getIntent().getBooleanExtra(EXTRA_MULTI_SELECT, false);
         }
 
         // Setup RecyclerView
@@ -73,9 +86,39 @@ public class AudioListActivity extends AppCompatActivity {
         recyclerView.setAdapter(adapter);
 
         setupSearch();
+        setupMultiSelect();
 
         // Load audio files
         loadAudioFiles();
+    }
+
+    /** Merge picker: rows toggle a selection and the confirm bar adds them all. */
+    private void setupMultiSelect() {
+        if (!multiSelect) return;
+        adapter.setSelectionMode(true);
+        adapter.setOnSelectionChangedListener(count -> {
+            selectedCountText.setText(count == 0
+                    ? "No songs selected"
+                    : count + (count == 1 ? " song selected" : " songs selected"));
+            confirmButton.setEnabled(count > 0);
+            confirmButton.setAlpha(count > 0 ? 1f : 0.45f);
+        });
+        confirmBar.setVisibility(View.VISIBLE);
+        selectedCountText.setText("No songs selected");
+        confirmButton.setEnabled(false);
+        confirmButton.setAlpha(0.45f);
+        confirmButton.setOnClickListener(v -> {
+            List<Uri> picked = adapter.getSelectedUris();
+            if (picked.isEmpty()) return;
+            Intent resultIntent = new Intent();
+            resultIntent.putParcelableArrayListExtra(EXTRA_PICKED_URIS,
+                    new ArrayList<>(picked));
+            // the first pick also travels as the plain data URI, so a caller
+            // that only knows the single-pick contract still works
+            resultIntent.setData(picked.get(0));
+            setResult(RESULT_OK, resultIntent);
+            finish();
+        });
     }
 
     /** Wire the search box: live filtering as the user types. */

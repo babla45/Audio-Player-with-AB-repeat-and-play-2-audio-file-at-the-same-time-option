@@ -121,4 +121,39 @@
                 android:padding="16dp" />
         </LinearLayout>
     </FrameLayout>
+
+    <!-- Multi-select confirm bar (Merge picker only; hidden otherwise) -->
+    <LinearLayout
+        android:id="@+id/audioListConfirmBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:background="@drawable/bg_editor_panel"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="10dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/audioListSelectedCount"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="No songs selected"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/audioListConfirmBtn"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_editor_btn_primary"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="8dp"
+            android:text="Add"
+            android:textColor="#FFFFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
