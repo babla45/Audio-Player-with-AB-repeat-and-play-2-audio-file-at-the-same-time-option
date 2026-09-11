@@ -64,9 +64,22 @@
 
         <activity
             android:name=".AudioEditorActivity"
-            android:exported="false"
+            android:exported="true"
             android:label="Audio Editor"
-            android:parentActivityName=".MainActivity" />
+            android:parentActivityName=".MainActivity">
+            <!-- Share target: one shared song opens the Split tab, several
+                 shared songs open the Merge tab with all of them loaded -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".AudioPlaybackService"

@@ -50,6 +50,9 @@ import java.util.List;
  *   play/pause and per-segment preview.
  * - Save options: separately (one file per segment) or merged — sequential
  *   order by default, manual reorder (▲/▼) before merging.
+ * - Entry points: the app's own Menu → Audio Edit, and the system SHARE
+ *   sheet — one shared audio file opens the Split tab, several open the
+ *   Merge tab with all of them already loaded.
  * - Preview uses an independent MediaPlayer, leaving the main app
  *   playback untouched.
  */
@@ -320,21 +323,48 @@ public class AudioEditorActivity extends AppCompatActivity {
         setContentView(R.layout.activity_audio_editor);
 
         Intent intent = getIntent();
-        String uriStr = intent.getStringExtra(EXTRA_URI);
-        if (uriStr == null) {
-            finish();
-            return;
+        // launched from the system share sheet ("Share" on audio files)?
+        List<Uri> shared = sharedAudioUris(intent);
+        boolean fromShare = !shared.isEmpty();
+
+        Uri firstUri;
+        if (fromShare) {
+            firstUri = shared.get(0);
+            songTitle = displayNameOf(firstUri);
+            sources.add(new Source(firstUri, songTitle,
+                    Math.max(1000, probeDuration(firstUri))));
+        } else {
+            String uriStr = intent.getStringExtra(EXTRA_URI);
+            if (uriStr == null) {
+                finish();
+                return;
+            }
+            firstUri = Uri.parse(uriStr);
+            songTitle = intent.getStringExtra(EXTRA_TITLE);
+            if (songTitle == null) songTitle = "audio";
+            long firstDurationMs = Math.max(1000, intent.getLongExtra(EXTRA_DURATION_MS, 0));
+            if (firstDurationMs <= 1000) {
+                firstDurationMs = probeDuration(firstUri);
+            }
+            // the timeline starts as this one file; "+" appends more after it
+            sources.add(new Source(firstUri, songTitle, firstDurationMs));
         }
-        Uri firstUri = Uri.parse(uriStr);
-        songTitle = intent.getStringExtra(EXTRA_TITLE);
-        if (songTitle == null) songTitle = "audio";
-        long firstDurationMs = Math.max(1000, intent.getLongExtra(EXTRA_DURATION_MS, 0));
-        if (firstDurationMs <= 1000) {
-            firstDurationMs = probeDuration(firstUri);
-        }
-        // the timeline starts as this one file; "+" appends more after it
-        sources.add(new Source(firstUri, songTitle, firstDurationMs));
         rebuildTimeMap();
+
+        // Sharing several songs is a merge request: pre-load the Merge tab
+        // with all of them, in the order the share sheet handed them over.
+        // (The Split timeline keeps the first song as its baseline, exactly
+        // as if the editor had been opened on it.)
+        if (fromShare && shared.size() > 1) {
+            Source first = sources.get(0);
+            mergeSources.add(new Source(first.uri, first.title, first.durationMs));
+            for (int i = 1; i < shared.size(); i++) {
+                Uri u = shared.get(i);
+                mergeSources.add(new Source(u, displayNameOf(u),
+                        Math.max(1000, probeDuration(u))));
+            }
+            rebuildMergeMap();
+        }
 
         bindViews();
         setupTabs();
@@ -356,11 +386,58 @@ public class AudioEditorActivity extends AppCompatActivity {
         // Waveform (null result falls back to placeholder bars)
         extractWaveforms();
 
-        // reopen on the tab the user last worked on
-        currentTab = getSharedPreferences(PREFS, MODE_PRIVATE)
-                .getInt(KEY_LAST_TAB, TAB_MERGE);
+        // reopen on the tab the user last worked on — but a share decides
+        // the tab: one song is a split request, several are a merge request
+        currentTab = fromShare
+                ? (shared.size() > 1 ? TAB_MERGE : TAB_SPLIT)
+                : getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getInt(KEY_LAST_TAB, TAB_MERGE);
 
         updateUiForTab();
+    }
+
+    /**
+     * Audio files handed over by the system share sheet: one for ACTION_SEND,
+     * any number for ACTION_SEND_MULTIPLE. Empty for every other launch, so a
+     * normal "Audio Edit" from the app is completely unaffected.
+     */
+    private List<Uri> sharedAudioUris(Intent intent) {
+        List<Uri> out = new ArrayList<>();
+        if (intent == null || intent.getExtras() == null) return out;
+        String action = intent.getAction();
+        Object raw = intent.getExtras().get(Intent.EXTRA_STREAM);
+        if (Intent.ACTION_SEND.equals(action)) {
+            Uri u = streamUri(raw);
+            if (u != null) out.add(u);
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            if (raw instanceof List) {
+                for (Object o : (List<?>) raw) {
+                    Uri u = streamUri(o);
+                    if (u != null) out.add(u);
+                }
+            } else if (raw instanceof Object[]) {
+                // a few senders put a plain array in EXTRA_STREAM
+                for (Object o : (Object[]) raw) {
+                    Uri u = streamUri(o);
+                    if (u != null) out.add(u);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * EXTRA_STREAM is normally a content Uri, but a few file managers still
+     * hand over a plain string — either a URI or a bare filesystem path.
+     */
+    private Uri streamUri(Object raw) {
+        if (raw instanceof Uri) return (Uri) raw;
+        if (raw instanceof String) {
+            String s = (String) raw;
+            if (s.isEmpty()) return null;
+            return s.contains("://") ? Uri.parse(s) : Uri.fromFile(new File(s));
+        }
+        return null;
     }
 
     private void bindViews() {
