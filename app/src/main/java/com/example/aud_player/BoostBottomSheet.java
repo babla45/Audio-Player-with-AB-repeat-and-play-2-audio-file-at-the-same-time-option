@@ -33,20 +33,15 @@ public class BoostBottomSheet extends BottomSheetDialogFragment {
         TextView currentValue = view.findViewById(R.id.boost_current_value);
         SeekBar seekBar = view.findViewById(R.id.boost_seekbar);
 
-        // B027 FIX: Removed chips above 3.0x to match shared boost range.
+        // B027 FIX: chips above 3.0x were removed from the layout to match
+        // the shared boost range (BOOST_MAX = 3.0x).
+        com.google.android.material.chip.Chip c100 = view.findViewById(R.id.boost_chip_100);
         com.google.android.material.chip.Chip c150 = view.findViewById(R.id.boost_chip_150);
         com.google.android.material.chip.Chip c200 = view.findViewById(R.id.boost_chip_200);
         com.google.android.material.chip.Chip c250 = view.findViewById(R.id.boost_chip_250);
         com.google.android.material.chip.Chip c300 = view.findViewById(R.id.boost_chip_300);
 
-        com.google.android.material.chip.Chip[] chips = new com.google.android.material.chip.Chip[] { c150, c200, c250, c300 };
-
-        // Hide chips above the shared BOOST_MAX (3.0x)
-        int[] hideChipIds = { R.id.boost_chip_350, R.id.boost_chip_400, R.id.boost_chip_450, R.id.boost_chip_500 };
-        for (int id : hideChipIds) {
-            View chipView = view.findViewById(id);
-            if (chipView != null) chipView.setVisibility(View.GONE);
-        }
+        com.google.android.material.chip.Chip[] chips = new com.google.android.material.chip.Chip[] { c100, c150, c200, c250, c300 };
 
         // B027 FIX: Use shared BOOST_MIN/BOOST_MAX constants (matching
         // MainActivity and AudioPlaybackService) so all UIs stay in sync.
@@ -114,6 +109,23 @@ public class BoostBottomSheet extends BottomSheetDialogFragment {
                 float val = Float.parseFloat(ch.getText().toString().replace("x", ""));
                 ch.setChecked(Math.abs(val - currentBoost) < 0.01f);
             } catch (Exception ignored) {}
+        }
+
+        // Reset button: back to 1.0x (no boost)
+        View resetBtn = view.findViewById(R.id.boost_reset_btn);
+        if (resetBtn != null) {
+            resetBtn.setOnClickListener(v -> {
+                seekBar.setProgress(Math.round(MainActivity.BOOST_MIN * 100));
+                currentValue.setText(String.format("%.2fx", MainActivity.BOOST_MIN));
+                if (listener != null) listener.onBoostChanged(MainActivity.BOOST_MIN);
+                for (com.google.android.material.chip.Chip c : chips) {
+                    if (c == null) continue;
+                    try {
+                        float val = Float.parseFloat(c.getText().toString().replace("x", ""));
+                        c.setChecked(Math.abs(val - MainActivity.BOOST_MIN) < 0.01f);
+                    } catch (Exception ignored) {}
+                }
+            });
         }
 
         return view;
