@@ -264,6 +264,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREF_MINI_PLAYER_THEME = "mini_player_theme";
     private static final String PREF_CUSTOM_APP_COLOR = "custom_app_color";
     private static final String PREF_CUSTOM_MINI_PLAYER_COLOR = "custom_mini_player_color";
+    // Last applied picker positions (HSV csv) — powers the picker's
+    // "where you left off" marker on the saturation/value panel
+    private static final String PREF_LAST_APP_PICKER_HSV = "last_app_picker_hsv";
+    private static final String PREF_LAST_MINI_PICKER_HSV = "last_mini_picker_hsv";
     // Saved custom themes stored as a JSON array (name + full theme state)
     private static final String PREF_SAVED_THEMES = "saved_custom_themes";
     // One-time flag: stored list was reversed so newest-saved comes first
@@ -8627,39 +8631,22 @@ public class MainActivity extends AppCompatActivity {
                     );
 
                     if (newThemeMode == THEME_MODE_CUSTOM) {
-                        showRgbColorPickerDialog(
-                                "Custom App Color",
-                                getSavedCustomAppColor(),
-                                this::applyCustomAppColorPreview,
-                                selectedAppColor -> {
-                            prefs.edit().putInt(PREF_CUSTOM_APP_COLOR, selectedAppColor).apply();
-                            if (newMiniTheme == MINI_PLAYER_THEME_CUSTOM) {
-                                showRgbColorPickerDialog(
-                                        "Custom Mini Player Color",
-                                        getSavedCustomMiniPlayerColor(),
-                                        this::applyCustomMiniPlayerColorPreview,
-                                        selectedMiniColor -> {
-                                    prefs.edit().putInt(PREF_CUSTOM_MINI_PLAYER_COLOR, selectedMiniColor).apply();
-                                    applySelection.run();
-                                        },
-                                        this::restoreThemePreview
-                                );
-                            } else {
-                                applySelection.run();
-                            }
-                                },
-                                this::restoreThemePreview
+                        // One tabbed window for BOTH colors — switch tabs
+                        // instead of stacking one dialog after another
+                        showTabbedColorPickerDialog(
+                                "Custom Colors",
+                                buildColorTabs(prefs),
+                                0,
+                                this::restoreThemePreview,
+                                applySelection
                         );
                     } else if (newMiniTheme == MINI_PLAYER_THEME_CUSTOM) {
-                        showRgbColorPickerDialog(
-                                "Custom Mini Player Color",
-                                getSavedCustomMiniPlayerColor(),
-                                this::applyCustomMiniPlayerColorPreview,
-                                selectedMiniColor -> {
-                            prefs.edit().putInt(PREF_CUSTOM_MINI_PLAYER_COLOR, selectedMiniColor).apply();
-                            applySelection.run();
-                                },
-                                this::restoreThemePreview
+                        showTabbedColorPickerDialog(
+                                "Custom Colors",
+                                buildColorTabs(prefs),
+                                1,
+                                this::restoreThemePreview,
+                                applySelection
                         );
                     } else {
                         applySelection.run();
@@ -8858,19 +8845,256 @@ public class MainActivity extends AppCompatActivity {
         void onColorPreview(int color);
     }
 
-    private void showRgbColorPickerDialog(String title, int initialColor,
-                                          ColorPreviewCallback previewCallback,
-                                          ColorSelectionCallback applyCallback,
-                                          Runnable cancelCallback) {
-        final float[] hsv = new float[3];
-        Color.colorToHSV(initialColor, hsv);
-        final int[] alpha = {Color.alpha(initialColor)};
+    /** One tab of the color picker dialog (app color or mini player color). */
+    private static class ColorTabSpec {
+        final String label;
+        final int initialColor;
+        final boolean mini; // true = mini player mock, false = app theme mock
+        final ColorPreviewCallback preview;
+        final ColorSelectionCallback apply;
+        final String lastHsvCsv; // persisted "h,s,v" of the last APPLIED color (nullable)
+        ColorTabSpec(String label, int initialColor, boolean mini,
+                     ColorPreviewCallback preview, ColorSelectionCallback apply,
+                     String lastHsvCsv) {
+            this.label = label;
+            this.initialColor = initialColor;
+            this.mini = mini;
+            this.preview = preview;
+            this.apply = apply;
+            this.lastHsvCsv = lastHsvCsv;
+        }
+
+        /** Last color successfully APPLIED on this tab (marker source). */
+        boolean hasLastApplied() {
+            return lastHsvCsv != null;
+        }
+
+        float[] lastAppliedHsv() {
+            if (lastHsvCsv == null) return null;
+            String[] parts = lastHsvCsv.split(",");
+            if (parts.length != 3) return null;
+            try {
+                return new float[]{
+                        Float.parseFloat(parts[0]),
+                        Float.parseFloat(parts[1]),
+                        Float.parseFloat(parts[2])};
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Overlays the saturation/value panel: draws a draggable-looking ring at
+     * the CURRENT selection's (s,v) position, plus a smaller hollow dot at
+     * the LAST APPLIED color's position — so reopening the picker shows
+     * where you left off. Purely visual: never consumes touches.
+     */
+    private static class SVMarkerView extends View {
+        private float[] currentHsv;
+        private float[] lastHsv;
+        private final android.graphics.Paint ringPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final android.graphics.Paint lastPaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+        SVMarkerView(android.content.Context context) {
+            super(context);
+            setClickable(false);
+            setFocusable(false);
+        }
+
+        void setCurrentHsv(float[] hsv) {
+            this.currentHsv = hsv == null ? null : new float[]{hsv[0], hsv[1], hsv[2]};
+            invalidate();
+        }
+
+        void setLastHsv(float[] hsv) {
+            this.lastHsv = hsv == null ? null : new float[]{hsv[0], hsv[1], hsv[2]};
+            invalidate();
+        }
+
+        void clearLastHsv() {
+            this.lastHsv = null;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+
+            // Hollow dot: last APPLIED position (small, white stroke +
+            // dark outline so it stays visible on any color)
+            if (lastHsv != null) {
+                float cx = Math.max(0f, Math.min(1f, lastHsv[1])) * w;
+                float cy = (1f - Math.max(0f, Math.min(1f, lastHsv[2]))) * h;
+                lastPaint.setStyle(android.graphics.Paint.Style.STROKE);
+                lastPaint.setStrokeWidth(dp(2));
+                lastPaint.setColor(0xFF212121);
+                canvas.drawCircle(cx, cy, dp(6), lastPaint);
+                lastPaint.setColor(0xFFFFFFFF);
+                canvas.drawCircle(cx, cy, dp(5), lastPaint);
+            }
+
+            // Ring: CURRENT selection position
+            if (currentHsv != null) {
+                float cx = Math.max(0f, Math.min(1f, currentHsv[1])) * w;
+                float cy = (1f - Math.max(0f, Math.min(1f, currentHsv[2]))) * h;
+                ringPaint.setStyle(android.graphics.Paint.Style.STROKE);
+                ringPaint.setStrokeWidth(dp(2));
+                ringPaint.setColor(0xFF212121);
+                canvas.drawCircle(cx, cy, dp(9), ringPaint);
+                ringPaint.setColor(0xFFFFFFFF);
+                canvas.drawCircle(cx, cy, dp(8), ringPaint);
+            }
+        }
+
+        private float dp(int value) {
+            return value * getResources().getDisplayMetrics().density;
+        }
+    }
+
+    /**
+     * Tabbed color picker: lets the user switch between the app theme color
+     * and the mini player color inside ONE window (instead of one dialog
+     * after another). Apply saves every tab's color, then runs onApplied.
+     */
+    private ColorTabSpec[] buildColorTabs(SharedPreferences prefs) {
+        return new ColorTabSpec[]{
+                new ColorTabSpec("App Theme",
+                        getSavedCustomAppColor(), false,
+                        this::applyCustomAppColorPreview,
+                        selectedAppColor -> prefs.edit()
+                                .putInt(PREF_CUSTOM_APP_COLOR, selectedAppColor).apply(),
+                        prefs.getString(PREF_LAST_APP_PICKER_HSV, null)),
+                new ColorTabSpec("Mini Player",
+                        getSavedCustomMiniPlayerColor(), true,
+                        this::applyCustomMiniPlayerColorPreview,
+                        selectedMiniColor -> prefs.edit()
+                                .putInt(PREF_CUSTOM_MINI_PLAYER_COLOR, selectedMiniColor).apply(),
+                        prefs.getString(PREF_LAST_MINI_PICKER_HSV, null))
+        };
+    }
+
+    private void showTabbedColorPickerDialog(String title, ColorTabSpec[] tabs,
+                                             int startTab, Runnable cancelCallback,
+                                             Runnable onApplied) {
+        final int n = tabs.length;
+        final float[][] hsv = new float[n][3];
+        final int[] alpha = new int[n];
+        for (int i = 0; i < n; i++) {
+            Color.colorToHSV(tabs[i].initialColor, hsv[i]);
+            alpha[i] = Color.alpha(tabs[i].initialColor);
+        }
+        final int[] active = {Math.max(0, Math.min(n - 1, startTab))};
         final boolean[] programmaticUpdate = {false};
+        // so the tab buttons (created before the controls) can rebind them
+        // when switching tabs.
+        final View[] satValPanelRef = new View[1];
+        final SeekBar[] hueSeekRef = new SeekBar[1];
+        final SeekBar[] alphaSeekRef = new SeekBar[1];
+        final EditText[] rFieldRef = new EditText[1];
+        final EditText[] gFieldRef = new EditText[1];
+        final EditText[] bFieldRef = new EditText[1];
+        final EditText[] aFieldRef = new EditText[1];
+        final EditText[] hexFieldRef = new EditText[1];
+        final TextView[] hexInfoRef = new TextView[1];
+        final LinearLayout[] appMockRef = new LinearLayout[1];
+        final LinearLayout[] miniMockRef = new LinearLayout[1];
+        final SVMarkerView[] svMarkerRef = new SVMarkerView[1];
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int padding = (int) dpToPx(16);
         root.setPadding(padding, padding, padding, 0);
+
+        // ---- Tab row (only when there is more than one tab)
+        if (n > 1) {
+            LinearLayout tabRow = new LinearLayout(this);
+            tabRow.setOrientation(LinearLayout.HORIZONTAL);
+            final android.widget.Button[] tabButtons = new android.widget.Button[n];
+            for (int i = 0; i < n; i++) {
+                final int idx = i;
+                android.widget.Button tabBtn = new android.widget.Button(this);
+                tabBtn.setText(tabs[i].label);
+                tabBtn.setAllCaps(false);
+                LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(
+                        0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                tp.rightMargin = (int) dpToPx(6);
+                tabBtn.setLayoutParams(tp);
+                tabBtn.setOnClickListener(v -> switchColorTab(idx, tabs, active, hsv, alpha,
+                        tabButtons, satValPanelRef[0], hueSeekRef[0], alphaSeekRef[0],
+                        rFieldRef[0], gFieldRef[0], bFieldRef[0], aFieldRef[0], hexFieldRef[0],
+                        hexInfoRef[0], appMockRef[0], miniMockRef[0], svMarkerRef[0], programmaticUpdate));
+                tabRow.addView(tabBtn);
+                tabButtons[i] = tabBtn;
+            }
+            root.addView(tabRow);
+            // style initial active/inactive buttons after refs exist
+            root.post(() -> styleTabButtons(tabs, active[0], tabButtons));
+        }
+
+        // ---- In-dialog live preview mocks. Both are built; only the active
+        // tab's mock is visible. Same shade math as the real apply methods.
+        LinearLayout previewRow = new LinearLayout(this);
+        previewRow.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, (int) dpToPx(44));
+        previewParams.bottomMargin = (int) dpToPx(12);
+        previewRow.setLayoutParams(previewParams);
+
+        // App theme mock: background / panel / nav / search shades
+        LinearLayout appMock = new LinearLayout(this);
+        appMock.setOrientation(LinearLayout.HORIZONTAL);
+        final View[] appBoxes = new View[4];
+        for (int i = 0; i < 4; i++) {
+            View box = new View(this);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(dpToPx(6));
+            box.setBackground(bg);
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            bp.rightMargin = (int) dpToPx(6);
+            appMock.addView(box, bp);
+            appBoxes[i] = box;
+        }
+        previewRow.addView(appMock, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        // Mini player mock: gradient bar + auto-contrast text
+        LinearLayout miniMock = new LinearLayout(this);
+        miniMock.setOrientation(LinearLayout.HORIZONTAL);
+        miniMock.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        miniMock.setPadding((int) dpToPx(12), 0, (int) dpToPx(12), 0);
+        GradientDrawable barBg = new GradientDrawable();
+        barBg.setCornerRadius(dpToPx(8));
+        miniMock.setBackground(barBg);
+        TextView mockTitle = new TextView(this);
+        mockTitle.setText("Song Title");
+        mockTitle.setTextSize(14);
+        mockTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        miniMock.addView(mockTitle);
+        previewRow.addView(miniMock, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        root.addView(previewRow);
+
+        // Wraps the active tab's preview callback: refresh the in-dialog
+        // mock AND live-preview onto the real app UI. The SV marker ref is
+        // assigned later (the marker view is created below), so index [0].
+        final ColorPreviewCallback combinedPreview = color -> {
+            if (svMarkerRef[0] != null) {
+                svMarkerRef[0].setCurrentHsv(hsv[active[0]]);
+            }
+            if (tabs[active[0]].mini) {
+                updateMiniMock(color, miniMock, mockTitle);
+            } else {
+                updateAppMock(color, appBoxes);
+            }
+            if (tabs[active[0]].preview != null) {
+                tabs[active[0]].preview.onColorPreview(color);
+            }
+        };
 
         View satValPanel = new View(this);
         LinearLayout.LayoutParams svParams = new LinearLayout.LayoutParams(
@@ -8878,26 +9102,48 @@ public class MainActivity extends AppCompatActivity {
                 (int) dpToPx(180)
         );
         svParams.bottomMargin = (int) dpToPx(12);
-        satValPanel.setLayoutParams(svParams);
+
+        // Frame wrapper so the last-selected-position marker can overlay
+        // the saturation/val panel without intercepting its touches.
+        android.widget.FrameLayout svWrap = new android.widget.FrameLayout(this);
+        svWrap.setLayoutParams(svParams);
+        satValPanel.setLayoutParams(new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final SVMarkerView svMarker = new SVMarkerView(this);
+        svWrap.addView(satValPanel);
+        svWrap.addView(svMarker, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // Persisted last-position indicator: shows a ring exactly where the
+        // current color's saturation/value maps on the panel, and a distinct
+        // hollow "last" dot where the LAST APPLIED color sits — so reopening
+        // the picker reveals where you left off.
+        svMarker.setCurrentHsv(hsv[active[0]]);
+        final boolean[] hasLast = {tabs[active[0]].hasLastApplied()};
+        final float[][] lastHsv = {tabs[active[0]].lastAppliedHsv()};
+        if (hasLast[0]) {
+            svMarker.setLastHsv(lastHsv[0]);
+        }
+
         satValPanel.setOnTouchListener((v, event) -> {
             if (v.getWidth() <= 0 || v.getHeight() <= 0) return false;
             float x = Math.max(0f, Math.min(event.getX(), v.getWidth()));
             float y = Math.max(0f, Math.min(event.getY(), v.getHeight()));
-            hsv[1] = x / (float) v.getWidth();
-            hsv[2] = 1f - (y / (float) v.getHeight());
-            refreshPickerUi(satValPanel, hsv, alpha[0], null, null, null, null, null, programmaticUpdate, previewCallback);
+            hsv[active[0]][1] = x / (float) v.getWidth();
+            hsv[active[0]][2] = 1f - (y / (float) v.getHeight());
+            svMarker.setCurrentHsv(hsv[active[0]]);
+            refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], null, null, null, null, null, programmaticUpdate, combinedPreview);
             return true;
         });
-        root.addView(satValPanel);
+        root.addView(svWrap);
 
         SeekBar hueSeek = new SeekBar(this);
         hueSeek.setMax(360);
-        hueSeek.setProgress(Math.round(hsv[0]));
+        hueSeek.setProgress(Math.round(hsv[active[0]][0]));
         root.addView(hueSeek);
 
         SeekBar alphaSeek = new SeekBar(this);
         alphaSeek.setMax(100);
-        alphaSeek.setProgress(Math.round(alpha[0] * 100f / 255f));
+        alphaSeek.setProgress(Math.round(alpha[active[0]] * 100f / 255f));
         root.addView(alphaSeek);
 
         LinearLayout fieldsRow = new LinearLayout(this);
@@ -8936,21 +9182,21 @@ public class MainActivity extends AppCompatActivity {
             circle.setColor(swatchColor);
             swatch.setBackground(circle);
             swatch.setOnClickListener(v -> {
-                Color.colorToHSV(swatchColor, hsv);
-                alpha[0] = 255;
-                hueSeek.setProgress(Math.round(hsv[0]));
+                Color.colorToHSV(swatchColor, hsv[active[0]]);
+                alpha[active[0]] = 255;
+                hueSeek.setProgress(Math.round(hsv[active[0]][0]));
                 alphaSeek.setProgress(100);
-                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+                refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
             });
             swatchRow.addView(swatch);
         }
 
         hueSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                hsv[0] = progress;
-                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+                hsv[active[0]][0] = progress;
+                refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -8958,9 +9204,9 @@ public class MainActivity extends AppCompatActivity {
 
         alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                alpha[0] = Math.round(progress * 255f / 100f);
-                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+                alpha[active[0]] = Math.round(progress * 255f / 100f);
+                refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -8980,12 +9226,12 @@ public class MainActivity extends AppCompatActivity {
                 int gg = clampColorValue(g);
                 int bb = clampColorValue(b);
                 int aaPercent = Math.max(0, Math.min(100, a));
-                alpha[0] = Math.round(aaPercent * 255f / 100f);
-                Color.colorToHSV(Color.rgb(rr, gg, bb), hsv);
-                hueSeek.setProgress(Math.round(hsv[0]));
+                alpha[active[0]] = Math.round(aaPercent * 255f / 100f);
+                Color.colorToHSV(Color.rgb(rr, gg, bb), hsv[active[0]]);
+                hueSeek.setProgress(Math.round(hsv[active[0]][0]));
                 alphaSeek.setProgress(aaPercent);
-                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+                refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
             }
         };
         rField.addTextChangedListener(fieldWatcher);
@@ -9000,31 +9246,244 @@ public class MainActivity extends AppCompatActivity {
                 if (programmaticUpdate[0]) return;
                 Integer parsed = parseHexColorOrNull(s.toString());
                 if (parsed == null) return;
-                alpha[0] = Color.alpha(parsed);
-                Color.colorToHSV(parsed, hsv);
-                hueSeek.setProgress(Math.round(hsv[0]));
-                alphaSeek.setProgress(Math.round(alpha[0] * 100f / 255f));
-                refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
+                alpha[active[0]] = Color.alpha(parsed);
+                Color.colorToHSV(parsed, hsv[active[0]]);
+                hueSeek.setProgress(Math.round(hsv[active[0]][0]));
+                alphaSeek.setProgress(Math.round(alpha[active[0]] * 100f / 255f));
+                refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+                hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
             }
         });
 
-        programmaticUpdate[0] = true;
-        refreshPickerUi(satValPanel, hsv, alpha[0], rField, gField, bField, aField, hexField, programmaticUpdate, previewCallback);
-        hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[0], hsv)));
-        programmaticUpdate[0] = false;
+        // Keep late-bound refs so the tab buttons (created above) can
+        // rebind the shared picker controls when switching tabs
+        satValPanelRef[0] = satValPanel;
+        hueSeekRef[0] = hueSeek;
+        alphaSeekRef[0] = alphaSeek;
+        rFieldRef[0] = rField;
+        gFieldRef[0] = gField;
+        bFieldRef[0] = bField;
+        aFieldRef[0] = aField;
+        hexFieldRef[0] = hexField;
+        hexInfoRef[0] = hexInfo;
+        appMockRef[0] = appMock;
+        miniMockRef[0] = miniMock;
+        svMarkerRef[0] = svMarker;
 
-        new AlertDialog.Builder(this)
+        programmaticUpdate[0] = true;
+        refreshPickerUi(satValPanel, hsv[active[0]], alpha[active[0]], rField, gField, bField, aField, hexField, programmaticUpdate, combinedPreview);
+        hexInfo.setText(String.format(Locale.US, "Selected: #%08X", buildColor(alpha[active[0]], hsv[active[0]])));
+        programmaticUpdate[0] = false;
+        // Show the active tab's mock (and live-preview its color)
+        appMock.setVisibility(tabs[active[0]].mini ? View.GONE : View.VISIBLE);
+        miniMock.setVisibility(tabs[active[0]].mini ? View.VISIBLE : View.GONE);
+        combinedPreview.onColorPreview(buildColor(alpha[active[0]], hsv[active[0]]));
+
+        // ---- Hold-to-preview button: press & hold hides the whole dialog
+        // (fully transparent, non-touchable) so the user sees the app's live
+        // color change unobstructed; releasing brings the dialog back.
+        final AlertDialog[] dialogRef = new AlertDialog[1];
+        android.widget.Button holdPreviewBtn = new android.widget.Button(this);
+        holdPreviewBtn.setText("Hold to Preview Full Screen");
+        holdPreviewBtn.setAllCaps(false);
+        LinearLayout.LayoutParams holdParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        holdParams.topMargin = (int) dpToPx(4);
+        holdParams.bottomMargin = (int) dpToPx(4);
+        holdPreviewBtn.setLayoutParams(holdParams);
+        holdPreviewBtn.setOnTouchListener((v, event) -> {
+            AlertDialog dlg = dialogRef[0];
+            if (dlg == null || dlg.getWindow() == null) return false;
+            android.view.Window w = dlg.getWindow();
+            switch (event.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                case android.view.MotionEvent.ACTION_MOVE:
+                    // Make the dialog fully invisible and let touches pass
+                    // through to the app behind
+                    w.setDimAmount(0f);
+                    w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                    w.addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+                    w.getDecorView().setVisibility(View.INVISIBLE);
+                    v.setPressed(true);
+                    break;
+                case android.view.MotionEvent.ACTION_UP:
+                case android.view.MotionEvent.ACTION_CANCEL:
+                default:
+                    // Restore the dialog exactly as it was
+                    w.getDecorView().setVisibility(View.VISIBLE);
+                    w.clearFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+                    w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                    w.setDimAmount(0.15f);
+                    v.setPressed(false);
+                    v.performClick();
+                    break;
+            }
+            return true;
+        });
+        root.addView(holdPreviewBtn);
+
+        AlertDialog pickerDialog = new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(root)
-                .setPositiveButton("Apply", (dialog, which) ->
-                        applyCallback.onColorSelected(buildColor(alpha[0], hsv)))
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    // Save every tab's current color, then finish the flow
+                    SharedPreferences.Editor ed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+                    for (int i = 0; i < n; i++) {
+                        if (tabs[i].apply != null) {
+                            tabs[i].apply.onColorSelected(buildColor(alpha[i], hsv[i]));
+                        }
+                        // Persist this tab's HSV so the next picker session
+                        // shows a "where you left off" marker on the SV panel
+                        ed.putString(tabs[i].mini ? PREF_LAST_MINI_PICKER_HSV : PREF_LAST_APP_PICKER_HSV,
+                                hsv[i][0] + "," + hsv[i][1] + "," + hsv[i][2]);
+                    }
+                    ed.apply();
+                    if (onApplied != null) {
+                        onApplied.run();
+                    }
+                })
                 .setNegativeButton("Cancel", (dialog, which) -> {
                     if (cancelCallback != null) {
                         cancelCallback.run();
                     }
                 })
-                .show();
+                .create();
+        dialogRef[0] = pickerDialog;
+
+        // Keep the dialog near the TOP of the screen with a light dim so
+        // the live-previewed app UI below (player panel, seekbar, mini
+        // player) stays visible while picking a color.
+        pickerDialog.setOnShowListener(d ->
+                pickerDialog.getWindow().setGravity(android.view.Gravity.TOP));
+
+        pickerDialog.show();
+        android.view.Window w = pickerDialog.getWindow();
+        if (w != null) {
+            w.setGravity(android.view.Gravity.TOP);
+            // Minimal dim: the app behind keeps its true colors
+            w.setDimAmount(0.15f);
+            w.setLayout((int) (getResources().getDisplayMetrics().widthPixels * 0.92f),
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    /** Switches the tabbed picker to the given tab and rebinds all controls. */
+    private void switchColorTab(int idx, ColorTabSpec[] tabs, int[] active, float[][] hsv, int[] alpha,
+                                android.widget.Button[] tabButtons,
+                                View satValPanel, SeekBar hueSeek, SeekBar alphaSeek,
+                                EditText rField, EditText gField, EditText bField, EditText aField, EditText hexField,
+                                TextView hexInfo, LinearLayout appMock, LinearLayout miniMock,
+                                SVMarkerView svMarker,
+                                boolean[] programmaticUpdate) {
+        if (idx == active[0] || idx < 0 || idx >= tabs.length) return;
+        active[0] = idx;
+        styleTabButtons(tabs, idx, tabButtons);
+        // Rebind the marker to the newly active tab's colors: ring at the
+        // current position, hollow dot at that tab's last-applied position
+        if (svMarker != null) {
+            svMarker.setCurrentHsv(hsv[idx]);
+            if (tabs[idx].hasLastApplied()) {
+                svMarker.setLastHsv(tabs[idx].lastAppliedHsv());
+            } else {
+                svMarker.clearLastHsv();
+            }
+        }
+        programmaticUpdate[0] = true;
+        hueSeek.setProgress(Math.round(hsv[idx][0]));
+        alphaSeek.setProgress(Math.round(alpha[idx] * 100f / 255f));
+        programmaticUpdate[0] = false;
+        int color = buildColor(alpha[idx], hsv[idx]);
+        appMock.setVisibility(tabs[idx].mini ? View.GONE : View.VISIBLE);
+        miniMock.setVisibility(tabs[idx].mini ? View.VISIBLE : View.GONE);
+        if (tabs[idx].mini) {
+            updateMiniMock(color, miniMock, (TextView) miniMock.getChildAt(0));
+        } else {
+            updateAppMock(color, extractMockBoxes(appMock));
+        }
+        if (tabs[idx].preview != null) {
+            tabs[idx].preview.onColorPreview(color);
+        }
+        programmaticUpdate[0] = true;
+        rField.setText(String.valueOf(Color.red(color)));
+        gField.setText(String.valueOf(Color.green(color)));
+        bField.setText(String.valueOf(Color.blue(color)));
+        aField.setText(String.valueOf(Math.round(alpha[idx] * 100f / 255f)));
+        hexField.setText(String.format(Locale.US, "%08X", color));
+        programmaticUpdate[0] = false;
+        hexInfo.setText(String.format(Locale.US, "Selected: #%08X", color));
+    }
+
+    /** Highlights the active tab button and fades the inactive ones. */
+    private void styleTabButtons(ColorTabSpec[] tabs, int activeIdx, android.widget.Button[] tabButtons) {
+        for (int i = 0; i < tabButtons.length; i++) {
+            if (tabButtons[i] == null) continue;
+            tabButtons[i].setAlpha(i == activeIdx ? 1f : 0.45f);
+            tabButtons[i].setPressed(i == activeIdx);
+        }
+    }
+
+    private View[] extractMockBoxes(LinearLayout appMock) {
+        View[] boxes = new View[appMock.getChildCount()];
+        for (int i = 0; i < appMock.getChildCount(); i++) {
+            boxes[i] = appMock.getChildAt(i);
+        }
+        return boxes;
+    }
+
+    private void updateAppMock(int color, View[] appBoxes) {
+        float[] ratios = {0.80f, 0.70f, 0.74f, 0.64f};
+        for (int i = 0; i < appBoxes.length; i++) {
+            GradientDrawable bg = (GradientDrawable) appBoxes[i].getBackground();
+            bg.setColor(lightenColor(color, ratios[i % ratios.length]));
+            appBoxes[i].setBackground(bg);
+        }
+    }
+
+    private void updateMiniMock(int color, LinearLayout miniMock, TextView mockTitle) {
+        GradientDrawable bg = new GradientDrawable(
+                GradientDrawable.Orientation.BL_TR,
+                new int[]{color, darkenColor(color, 0.22f)});
+        bg.setCornerRadius(dpToPx(8));
+        miniMock.setBackground(bg);
+        int contentColor = isColorDark(color) ? Color.WHITE : Color.BLACK;
+        if (mockTitle != null) {
+            mockTitle.setTextColor(contentColor);
+        }
+    }
+
+    /**
+     * Refreshes the in-dialog live preview mock. Uses the exact same shade
+     * math as the real apply methods so what the user sees in the dialog is
+     * what the app will look like.
+     */
+    private void updateInDialogColorPreview(int color, boolean miniPreview,
+                                            View[] previewBoxes, TextView previewLabel) {
+        if (previewBoxes == null || previewBoxes.length == 0) return;
+        if (miniPreview) {
+            // Mini player mock: same gradient + contrast text as
+            // applyMiniPlayerCustomGradient()
+            LinearLayout bar = (LinearLayout) previewBoxes[0];
+            GradientDrawable bg = new GradientDrawable(
+                    GradientDrawable.Orientation.BL_TR,
+                    new int[]{color, darkenColor(color, 0.22f)});
+            bg.setCornerRadius(dpToPx(8));
+            bar.setBackground(bg);
+            int contentColor = isColorDark(color) ? Color.WHITE : Color.BLACK;
+            if (previewLabel != null) {
+                previewLabel.setTextColor(contentColor);
+            }
+        } else {
+            // App theme mock: background / panel / nav / search shades —
+            // same ratios as applyCustomAppColorPreview()
+            float[] ratios = {0.80f, 0.70f, 0.74f, 0.64f};
+            for (int i = 0; i < previewBoxes.length; i++) {
+                GradientDrawable bg = (GradientDrawable) previewBoxes[i].getBackground();
+                bg.setColor(lightenColor(color, ratios[i]));
+                previewBoxes[i].setBackground(bg);
+            }
+        }
     }
 
     private EditText createColorField(String hint, LinearLayout parent) {
