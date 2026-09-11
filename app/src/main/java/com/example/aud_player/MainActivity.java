@@ -186,7 +186,8 @@ public class MainActivity extends AppCompatActivity {
     // Green A→B band overlay on the main seek bar while A-B repeat is enabled.
     // Cached so we only re-inset, not recreate, on every poll tick.
     private LayerDrawable abGreenBand;
-    private Drawable abGreenBandOriginalBg;
+    private Drawable abOriginalSecondaryLayer;
+    private ABBandDrawable abBandDrawable;
     private long lastBottomSheetMenuShowMs = 0;
     private Runnable searchDebounceRunnable;
     private TextView abRepeatIndicator;
@@ -2241,17 +2242,20 @@ public class MainActivity extends AppCompatActivity {
         lastGreenBandB = show ? pointB : -1;
         lastGreenBandWidth = trackW;
         if (!show) {
-            if (abGreenBand != null) {
-                abGreenBand = null;
-                // B016 FIX: Restore original seekbar background
-                if (abGreenBandOriginalBg != null) {
-                    seekBar.setBackground(abGreenBandOriginalBg);
-                    abGreenBandOriginalBg = null;
+            if (abBandDrawable != null) {
+                // Swap the secondary layer back to the original platform
+                // drawable and clear the band state
+                if (abGreenBand != null && abOriginalSecondaryLayer != null) {
+                    abGreenBand.setDrawableByLayerId(
+                            android.R.id.secondaryProgress, abOriginalSecondaryLayer);
                 }
-                seekBar.setProgressTintList(android.content.res.ColorStateList.valueOf(
-                        ContextCompat.getColor(this, R.color.accent_primary)));
+                abOriginalSecondaryLayer = null;
+                abBandDrawable = null;
+                abGreenBand = null;
+                seekBar.setSecondaryProgressTintList(null);
                 seekBar.setSecondaryProgress(0);
                 seekBar.setProgress(position);
+                seekBar.invalidate();
             }
             return;
         }
@@ -2262,37 +2266,97 @@ public class MainActivity extends AppCompatActivity {
             return; // not laid out yet; the next poll tick retries
         }
 
-        // B016 FIX: Draw the green band from A to B as a background
-        // overlay behind the seekbar, rather than using secondaryProgress
-        // which always starts from 0.
-        if (abGreenBand == null) {
-            abGreenBandOriginalBg = seekBar.getBackground();
+        // B031 FIX: the platform progress drawable's secondary layer is a
+        // ScaleDrawable (not ClipDrawable) on this device, so the old
+        // bounds-shift never applied and the restore-path cast crashed.
+        // Instead, replace ONLY the secondaryProgress layer with a custom
+        // drawable that fills the exact A→B window. Background and progress
+        // layers are left untouched.
+        if (abBandDrawable == null) {
+            abGreenBand = (LayerDrawable) seekBar.getProgressDrawable();
+            if (abGreenBand == null) return;
+            Drawable layer = abGreenBand.findDrawableByLayerId(
+                    android.R.id.secondaryProgress);
+            if (layer == null) return;
+            abOriginalSecondaryLayer = layer;
+            // Band thickness follows the platform track's own thickness
+            int thickness = layer.getIntrinsicHeight();
+            if (thickness <= 0) {
+                thickness = (int) (4 * getResources().getDisplayMetrics().density);
+            }
+            abBandDrawable = new ABBandDrawable(
+                    ContextCompat.getColor(this, R.color.success), thickness);
+            // Start from the original layer's bounds (track area) so the
+            // band keeps the correct vertical extent
+            abBandDrawable.setBounds(layer.getBounds());
+            if (!abGreenBand.setDrawableByLayerId(
+                    android.R.id.secondaryProgress, abBandDrawable)) {
+                abBandDrawable = null;
+                abOriginalSecondaryLayer = null;
+                return;
+            }
         }
 
-        int paddingStart = seekBar.getPaddingStart();
-        if (paddingStart == 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            paddingStart = seekBar.getPaddingLeft();
-        }
-        int paddingEnd = seekBar.getPaddingEnd();
-        if (paddingEnd == 0 && Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            paddingEnd = seekBar.getPaddingRight();
-        }
+        // The band's window: fraction A/duration .. B/duration of the track.
+        // The custom drawable fills exactly its own bounds, so insetting the
+        // bounds places the green band from A to B.
+        int bandLeft = (int) ((long) pointA * trackWidth / duration);
+        int bandRight = (int) ((long) pointB * trackWidth / duration);
+        android.graphics.Rect bb = abBandDrawable.getBounds();
+        abBandDrawable.setBounds(bandLeft, bb.top, bandRight,
+                bb.height() > 0 ? bb.bottom : seekBar.getHeight());
 
-        int abLeft = paddingStart + (int) ((long) pointA * trackWidth / duration);
-        int abRight = paddingStart + (int) ((long) pointB * trackWidth / duration);
-        int top = seekBar.getPaddingTop();
-        int bottom = seekBar.getHeight() - seekBar.getPaddingBottom();
-
-        android.graphics.drawable.GradientDrawable greenDrawable =
-                new android.graphics.drawable.GradientDrawable();
-        greenDrawable.setColor(ContextCompat.getColor(this, R.color.success));
-        greenDrawable.setCornerRadius(4f);
-        greenDrawable.setBounds(abLeft, top, abRight, bottom);
-        seekBar.setBackground(greenDrawable);
-        // Store non-null so the show/hide logic can detect the band is active
-        abGreenBand = (LayerDrawable) seekBar.getProgressDrawable();
-
+        // Level must be > 0 for LayerDrawable to keep drawing the layer;
+        // the custom drawable ignores the level and uses its own bounds.
+        seekBar.setSecondaryProgress(1);
         seekBar.setProgress(position);
+    }
+
+    /**
+     * Lightweight drawable that fills its (already inset) bounds with the
+     * A-B band color. Used as a drop-in replacement for the seekbar's
+     * secondaryProgress layer so the band spans exactly A→B regardless of
+     * the platform's Clip/Scale drawable structure.
+     */
+    private static class ABBandDrawable extends Drawable {
+        private final android.graphics.Paint paint = new android.graphics.Paint();
+        // Vertical thickness of the drawn band (matches the platform track's
+        // thickness when available); the band is centered within the bounds
+        // so it never grows to the full seekbar height.
+        private final int thickness;
+
+        ABBandDrawable(int color, int thicknessPx) {
+            paint.setColor(color);
+            this.thickness = Math.max(1, thicknessPx);
+        }
+
+        @Override
+        public void draw(android.graphics.Canvas canvas) {
+            android.graphics.Rect r = getBounds();
+            if (r.width() > 0 && r.height() > 0) {
+                int cy = r.centerY();
+                int half = thickness / 2;
+                canvas.drawRect(r.left, cy - half, r.right, cy + half + (thickness & 1), paint);
+            }
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            paint.setAlpha(alpha);
+            invalidateSelf();
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter cf) {
+            paint.setColorFilter(cf);
+            invalidateSelf();
+        }
+
+        @Deprecated
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
+        }
     }
 
     private String cachedCurrentTime = "";

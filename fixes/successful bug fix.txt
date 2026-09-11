@@ -125,3 +125,89 @@ second track sob khetre protected (stopAllExcept dutO keeper rakhe).
 Debug: logcat-e "PlaybackRegistry" filter korle orphan marle
 "Stopped and released an orphaned MediaPlayer" log porbe.
 ========================================================================
+
+
+========================================================================
+BUG FIX — A-B Repeat Green Band: Not Showing + Crash on Disable
+========================================================================
+Date: 2026-09-11
+App: AudPlayer (com.example.aud_player)
+Status: FIXED & VERIFIED ON DEVICE (1399e3f4)
+
+--------------------------------------------------------------------------
+1. THE BUG (SYMPTOMS)
+--------------------------------------------------------------------------
+• A-B repeat set korle main seek bar e A→B porsi green band dekhato na.
+• Pore band dekhao hoyeo AB repeat DISABLE korle app CRASH korto.
+
+--------------------------------------------------------------------------
+2. ROOT CAUSE
+--------------------------------------------------------------------------
+Debug logging diye (tag: AudioPlayerApp, "ABGB" prefix) device-e
+progress drawable er structure dekha gelo:
+
+  Layer 0: background   = GradientDrawable
+  Layer 1: secondary    = ScaleDrawable   (!)
+  Layer 2: progress     = ScaleDrawable
+
+2.1 BAND DEKHATO NA / MOTO HOYETO NA:
+    Code dhorechilo secondary layer ta ClipDrawable. Kintu ei device
+    (Material3 theme) te ta ScaleDrawable. Java er generic cast
+    (ClipDrawable) silent fail na — instanceof check er karone
+    bounds-shift code SKIP hoto. Fole green tint full track 0 theke
+    dekhato, A theke na.
+
+2.2 DISABLE-EO CRASH:
+    Restore path-e chilo direct cast:
+        (ClipDrawable) findDrawableByLayerId(secondaryProgress)
+    ScaleDrawable ke ClipDrawable e cast → ClassCastException → CRASH.
+
+2.3 THICKNESS ISSUE:
+    First fix-e band ta layer er FULL bounds e akikto holo (seekbar er
+    puro height, thumb area soho) — band mota dekhacchilo.
+
+--------------------------------------------------------------------------
+3. THE FIX (B031)
+--------------------------------------------------------------------------
+Platform drawable-er Clip/Scale structure er upor AR nirdoshito kora
+hoyeche. Sudhu secondaryProgress layer-ta ekta custom drawable
+(ABBandDrawable) diye replace kora hoy:
+
+  • ABBandDrawable (inner static class, MainActivity):
+      - nijer bounds er MIDDLE-e TRACK THICKNESS-e bar drawing kore
+        (thickness = original layer er getIntrinsicHeight(),
+         fallback 4dp) — full height e na
+  • Enable er somoy:
+      - original layer reference rakha (abOriginalSecondaryLayer)
+      - LayerDrawable.setDrawableByLayerId(secondaryProgress,
+        abBandDrawable) diye swap
+      - bar er window: bounds.left  = A/duration * trackWidth
+                       bounds.right = B/duration * trackWidth
+      - setSecondaryProgress(1) — layer-ta draw hoyar jonno level > 0
+        lagbe; custom drawable level ignore kore
+  • Disable/Clear er somoy:
+      - original layer abar setDrawableByLayerId diye phire boshano
+      - setSecondaryProgressTintList(null) + setSecondaryProgress(0)
+      - kono cast nei → crash er shohoj achei na
+
+Redundant-redraw guard (lastGreenBandA/B/Width) intact — performance
+unchanged. Background/progress layer chhoya hoy nai, tai normal
+seekbar look/behavior ekdom same.
+
+--------------------------------------------------------------------------
+4. FILES CHANGED
+--------------------------------------------------------------------------
+  • MainActivity.java — abOriginalSecondaryLayer, abBandDrawable fields;
+                        updateABGreenBand() rework; ABBandDrawable class
+
+Kono existing feature remove/poriborton kora hoy nai.
+
+--------------------------------------------------------------------------
+5. VERIFY KORAR STEPS
+---------------------------------------------------------------------
+  1. Song bajao → A-B repeat set koro → A theke B porsi thin green
+     band ✓
+  2. AB repeat disable/clear koro → band chole jay, crash nei ✓
+  3. Normal seek/scrub kaj kore ✓
+  4. Theme dark/light dutoite check ✓
+========================================================================
