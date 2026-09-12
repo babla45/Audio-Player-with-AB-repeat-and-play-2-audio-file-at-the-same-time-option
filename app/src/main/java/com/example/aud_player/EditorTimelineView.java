@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.util.AttributeSet;
 import android.view.MotionEvent;
@@ -62,6 +63,23 @@ public class EditorTimelineView extends View {
     private static final float WAVEFORM_FILL = 0.64f;
     /** Zoom limits as multiples of the fit-all scale. */
     public static final float MAX_ZOOM_MULTIPLE = 24f;
+    /**
+     * Deepest zoom (px per ms) a LONG file may reach: 8ms per pixel, which
+     * is the precision a normal few-minute song already gets at 24x of its
+     * fit. The multiple above shrinks with the fit, and the fit of a
+     * two-hour timeline is ~50x smaller than a four-minute one — without
+     * this floor, 24x of that fit would leave a long file impossible to
+     * split precisely. A short song is unaffected (24x of its fit is
+     * already deeper than this).
+     */
+    public static final float MAX_PX_PER_MS = 0.125f;
+    /**
+     * Ceiling on the timeline's content width (px). A long file needs a lot
+     * of zoom to stay editable, but the width the scroll view has to carry
+     * has to stop somewhere; ~120000px is 100+ viewports. Drawing is clipped
+     * to the visible window, so the per-frame cost does not grow with it.
+     */
+    public static final float MAX_CONTENT_PX = 120000f;
 
     private long durationMs = 0;
     private float[] waveform; // nullable
@@ -113,8 +131,25 @@ public class EditorTimelineView extends View {
 
     /** Horizontal zoom: pixels per millisecond of audio. */
     private float pxPerMs = 0.05f;
-    /** Fit-all scale (content == viewport width). Set by the activity. */
+    /**
+     * Fit-all scale (content == viewport width) — this is 1x, and 1x MUST
+     * show the whole edited result. It is computed by the view from the
+     * viewport width the activity hands over in {@link #setViewportWidth},
+     * and it subtracts the inter-block visual gaps because those gaps are
+     * part of the content width: fitting only the audio (viewport/duration)
+     * left the timeline a few dozen pixels wider than the viewport, so the
+     * tail of the song could never be seen at 1x.
+     */
     private float fitPxPerMs = 0.05f;
+    /** Visible viewport width in px; 0 until the activity reports it. */
+    private int viewportWidth = 0;
+    /**
+     * Cached display metrics: dp() is called inside per-bar draw loops, and
+     * every call otherwise goes through getResources().getDisplayMetrics().
+     * Refreshed on attach so a density change is picked up.
+     */
+    private float density = 1f;
+    private float scaledDensity = 1f;
 
     private int selectedSplit = -1;
     private int selectedSegment = -1;
@@ -185,6 +220,7 @@ public class EditorTimelineView extends View {
     }
 
     private void init() {
+        cacheDensity();
         rulerBgPaint.setColor(COLOR_RULER_BG);
         tickPaint.setColor(COLOR_TICK);
         tickPaint.setStrokeWidth(dp(1));
@@ -238,18 +274,50 @@ public class EditorTimelineView extends View {
 
     // ---- zoom ----
 
-    /** Fit-all scale: content width == viewport width. */
-    public void setFitPxPerMs(float fit) {
-        this.fitPxPerMs = Math.max(0.0001f, fit);
+    /**
+     * Viewport width in px — the visible slice of the timeline. Supplying it
+     * lets the view derive the fit-all scale itself, so 1x is always the
+     * whole edited result (see {@link #fitPxPerMs}). Called by the activity
+     * whenever the hosting scroll view's width is known or changes.
+     */
+    public void setViewportWidth(int widthPx) {
+        if (widthPx <= 0 || widthPx == viewportWidth) return;
+        viewportWidth = widthPx;
+        if (layoutDirty) rebuildLayout(); // ends with refreshFit()
+        else refreshFit();
+        requestLayout();
+        invalidate();
+    }
+
+    /**
+     * Recompute the fit scale from the viewport, the edited duration and the
+     * inter-block gaps. When the fit grows past the current zoom (parts were
+     * deleted, or the viewport got wider) the zoom is raised to it — the
+     * user can never end up below 1x with the song wider than the screen.
+     */
+    private void refreshFit() {
+        if (viewportWidth <= 0) return; // fit stays at its default until known
+        long edited = displayCompressed ? totalKeptMs : durationMs;
+        float gaps = Math.max(0, keptSegs.size() - 1) * dp(SEGMENT_GAP_DP);
+        float visible = Math.max(dp(4), viewportWidth - gaps);
+        float fit = visible / Math.max(1L, edited);
+        if (fit <= 0f || Math.abs(fit - fitPxPerMs) <= fitPxPerMs * 1e-4f) return;
+        fitPxPerMs = fit;
+        if (pxPerMs < fitPxPerMs) pxPerMs = fitPxPerMs;
     }
 
     public float getFitPxPerMs() {
+        if (layoutDirty) rebuildLayout();
         return fitPxPerMs;
     }
 
     public void setPxPerMs(float value) {
+        if (layoutDirty) rebuildLayout(); // the clamp below needs the real fit
+        long edited = Math.max(1L, displayCompressed ? totalKeptMs : durationMs);
         float min = fitPxPerMs;
-        float max = fitPxPerMs * MAX_ZOOM_MULTIPLE;
+        float max = Math.max(min, Math.min(
+                Math.max(min * MAX_ZOOM_MULTIPLE, MAX_PX_PER_MS),
+                MAX_CONTENT_PX / (float) edited));
         this.pxPerMs = Math.max(min, Math.min(max, value));
         requestLayout();
         invalidate();
@@ -260,6 +328,7 @@ public class EditorTimelineView extends View {
     }
 
     public float getZoomLevel() {
+        if (layoutDirty) rebuildLayout(); // the fit may have just moved
         return pxPerMs / Math.max(0.0001f, fitPxPerMs);
     }
 
@@ -662,6 +731,9 @@ public class EditorTimelineView extends View {
         // non-linear display mapping only when parts were deleted — a
         // reorder changes the PLAY order, not the timeline layout
         displayCompressed = keptCount != n;
+        // the fit depends on the edited length and the block count/gaps, so
+        // it has to be recomputed whenever this cache is rebuilt
+        refreshFit();
     }
 
     /** Full bounds array: [0, splitPoints..., durationMs] as ranges. */
@@ -827,11 +899,23 @@ public class EditorTimelineView extends View {
     }
 
     private float dp(float v) {
-        return v * getResources().getDisplayMetrics().density;
+        return v * density;
     }
 
     private float sp(float v) {
-        return v * getResources().getDisplayMetrics().scaledDensity;
+        return v * scaledDensity;
+    }
+
+    private void cacheDensity() {
+        android.util.DisplayMetrics m = getResources().getDisplayMetrics();
+        density = m.density;
+        scaledDensity = m.scaledDensity;
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        cacheDensity();
     }
 
     private float handleSlopPx() {
@@ -1067,7 +1151,16 @@ public class EditorTimelineView extends View {
 
         canvas.drawColor(COLOR_BG);
 
-        drawRuler(canvas, rh);
+        // Only the visible slice needs drawing: at high zoom on a long file
+        // the content is many viewports wide, and walking/invalidating every
+        // block and every bar of it every frame is what makes scrolling and
+        // the playhead feel heavy. getClipBounds is the visible window in
+        // content coordinates (the scroll view translates the canvas).
+        canvas.getClipBounds(clipBounds);
+        float visL = clipBounds.left;
+        float visR = clipBounds.right;
+
+        drawRuler(canvas, rh, visL, visR);
 
         float gap = dp(SEGMENT_GAP_DP);
 
@@ -1081,6 +1174,7 @@ public class EditorTimelineView extends View {
             float xe = (keptPrefix.get(i) + (seg.endMs - seg.startMs)) * pxPerMs
                     - (last ? 0 : gap);
             if (xe - xs < dp(2)) continue;
+            if (xe < visL - gap || xs > visR + gap) continue; // off-screen block
             boolean selected = seg.index == selectedSegment;
 
             rect.set(xs, waveTop, xe, waveBottom);
@@ -1092,13 +1186,15 @@ public class EditorTimelineView extends View {
             int save = canvas.save();
             canvas.clipRect(xs, waveTop, xe, waveBottom);
             drawWaveBars(canvas, xs, xe, seg.startMs, cy, maxAmp,
-                    selected ? PAINT_MODE_SELECTED : PAINT_MODE_NORMAL);
+                    selected ? PAINT_MODE_SELECTED : PAINT_MODE_NORMAL,
+                    visL, visR);
             canvas.restoreToCount(save);
 
-            // border + number badge
-            Paint border = new Paint(blockBorderPaint);
-            if (selected) border.setColor(COLOR_BLOCK_SELECTED_BORDER);
-            canvas.drawRoundRect(rect, dp(6), dp(6), border);
+            // border + number badge (the border paint is reconfigured in
+            // place — a per-block `new Paint(...)` was pure per-frame churn)
+            blockBorderPaint.setColor(selected ? COLOR_BLOCK_SELECTED_BORDER
+                    : COLOR_BLOCK_BORDER);
+            canvas.drawRoundRect(rect, dp(6), dp(6), blockBorderPaint);
             drawSegmentBadge(canvas, seg.number, xs, xe, waveTop, selected);
         }
 
@@ -1109,6 +1205,7 @@ public class EditorTimelineView extends View {
             SegmentInfo b = keptSegs.get(i + 1);
             if (a.endMs == b.startMs) continue; // naturally contiguous
             float x = keptPrefix.get(i + 1) * pxPerMs;
+            if (x < visL || x > visR) continue;
             seamPaint.setColor(COLOR_SEAM);
             canvas.drawLine(x, rh, x, h - dp(2), seamPaint);
         }
@@ -1118,6 +1215,7 @@ public class EditorTimelineView extends View {
         for (int i = 0; i < splitPoints.size(); i++) {
             if (isSplitFrozen(i)) continue;
             float x = splitDisplayX(i);
+            if (x < visL - dp(12) || x > visR + dp(12)) continue;
             boolean sel = i == selectedSplit;
             markerPaint.setColor(sel ? COLOR_MARKER_SELECTED : COLOR_MARKER);
             canvas.drawLine(x, rh, x, h - dp(2), markerPaint);
@@ -1141,33 +1239,49 @@ public class EditorTimelineView extends View {
 
         // playhead (prominent, full height with cap)
         float px = timeToX(playheadMs);
-        canvas.drawLine(px, 0, px, h, playheadPaint);
-        playheadCapPaint.setPathEffect(null);
-        rect.set(px - dp(7), 0, px + dp(7), dp(12));
-        canvas.drawRoundRect(rect, dp(3), dp(3), playheadCapPaint);
+        if (px >= visL - dp(8) && px <= visR + dp(8)) {
+            canvas.drawLine(px, 0, px, h, playheadPaint);
+            playheadCapPaint.setPathEffect(null);
+            rect.set(px - dp(7), 0, px + dp(7), dp(12));
+            canvas.drawRoundRect(rect, dp(3), dp(3), playheadCapPaint);
+        }
     }
+
+    /** Visible window in content coordinates (filled by getClipBounds). */
+    private final Rect clipBounds = new Rect();
 
     private static final int PAINT_MODE_NORMAL = 0;
     private static final int PAINT_MODE_SELECTED = 1;
 
     private void drawWaveBars(Canvas canvas, float xs, float xe, long origStartMs,
-                              float cy, float maxAmp, int paintMode) {
+                              float cy, float maxAmp, int paintMode,
+                              float visL, float visR) {
         float barW = dp(BAR_WIDTH_DP);
         float step = barW + dp(BAR_GAP_DP);
         int bars = (int) ((xe - xs) / step);
         if (bars <= 0) return;
-        for (int b = 0; b < bars; b++) {
+        // draw only the bars inside the visible window (a zoomed-in long
+        // timeline is otherwise thousands of draw calls off-screen)
+        int first = (int) Math.floor((visL - xs) / step);
+        int last = (int) Math.ceil((visR - xs) / step) + 1;
+        if (first < 0) first = 0;
+        if (last > bars) last = bars;
+        float minAmp = dp(1);
+        // waveform bucket -> x scale, hoisted out of the per-bar loop
+        int waveLen = waveform != null ? waveform.length : 0;
+        float wavePerMs = durationMs > 0 ? waveLen / (float) durationMs : 0f;
+        for (int b = first; b < last; b++) {
             float x = xs + b * step;
             float amp;
-            if (waveform != null && waveform.length > 0) {
+            if (waveLen > 0) {
                 // ORIGINAL time covered by this bar (display time advances
                 // 1:1 with original time inside a kept segment)
-                float t0 = origStartMs + (x - xs) / pxPerMs;
-                float t1 = origStartMs + (x + barW - xs) / pxPerMs;
-                int i0 = (int) Math.max(0, Math.min(waveform.length - 1,
-                        t0 * waveform.length / Math.max(1, durationMs)));
-                int i1 = (int) Math.max(0, Math.min(waveform.length - 1,
-                        t1 * waveform.length / Math.max(1, durationMs)));
+                int i0 = (int) ((origStartMs + (x - xs) / pxPerMs) * wavePerMs);
+                int i1 = (int) ((origStartMs + (x + barW - xs) / pxPerMs) * wavePerMs);
+                if (i0 < 0) i0 = 0;
+                if (i0 >= waveLen) i0 = waveLen - 1;
+                if (i1 < i0) i1 = i0;
+                if (i1 >= waveLen) i1 = waveLen - 1;
                 float v = 0;
                 for (int i = i0; i <= i1; i++) v = Math.max(v, waveform[i]);
                 amp = v * maxAmp;
@@ -1175,7 +1289,7 @@ public class EditorTimelineView extends View {
                 int pseudo = (int) (x / step);
                 amp = (0.15f + 0.25f * (float) Math.abs(Math.sin(pseudo * 0.35))) * maxAmp;
             }
-            if (amp < dp(1)) amp = dp(1);
+            if (amp < minAmp) amp = minAmp;
             Paint p;
             if (waveform != null) {
                 p = paintMode == PAINT_MODE_SELECTED ? waveSelectedPaint : wavePaint;
@@ -1215,23 +1329,30 @@ public class EditorTimelineView extends View {
 
     /** Adaptive ruler: pick a "nice" second step with >= 64dp spacing.
      * Ticks are in DISPLAY (edited-result) time, like pro editors. */
-    private void drawRuler(Canvas canvas, float rh) {
-        canvas.drawRect(0, 0, getWidth(), rh, rulerBgPaint);
+    private void drawRuler(Canvas canvas, float rh, float visL, float visR) {
+        canvas.drawRect(visL, 0, visR, rh, rulerBgPaint);
 
         long totalMs = getEditedDurationMs();
-        long stepMs = chooseRulerStepMs();
+        long stepMs = Math.max(1, chooseRulerStepMs());
         float labelW = dp(52);
-        // ticks
-        for (long t = 0; t <= totalMs; t += stepMs) {
+        // start at the first tick at or before the visible window instead of
+        // walking the whole (possibly hour-long) tick list every frame
+        long first = 0;
+        if (visL > 0 && pxPerMs > 0) {
+            first = (long) Math.floor(visL / pxPerMs / stepMs) * stepMs;
+            if (first < 0) first = 0;
+        }
+        for (long t = first; t <= totalMs; t += stepMs) {
             float x = t * pxPerMs;
-            if (x < -labelW || x > getWidth() + labelW) continue;
+            if (x > visR + labelW) break;
+            if (x < visL - labelW) continue;
             canvas.drawLine(x, rh - dp(6), x, rh, tickPaint);
             String label = formatRuler(t);
             float tw = textPaint.measureText(label);
             canvas.drawText(label, Math.max(dp(2), x - tw / 2f), rh - dp(9), textPaint);
         }
         // baseline between ruler and waveform area
-        canvas.drawLine(0, rh, getWidth(), rh, linePaint);
+        canvas.drawLine(visL, rh, visR, rh, linePaint);
     }
 
     private long chooseRulerStepMs() {

@@ -506,6 +506,23 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     private void setupTimeline() {
+        // The timeline's fit scale needs the viewport width, which only
+        // exists after the first layout — and it changes again on rotation
+        // or window resize. Report it on every layout change: the old
+        // one-shot fit ran BEFORE the first layout (getWidth() == 0), so the
+        // scale silently stayed at the view's 0.05 px/ms default and 1x was
+        // never the whole song. The default split zoom is applied here too,
+        // for the case where the Split panel becomes visible only once the
+        // user switches to that tab (it had no width to zoom against yet).
+        timelineScroll.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldL, oldT, oldR, oldB) -> {
+                    int w = right - left;
+                    if (w <= 0) return;
+                    timeline.setViewportWidth(w);
+                    if (currentTab == TAB_SPLIT) applyDefaultSplitZoom();
+                    updateZoomText();
+                });
+
         timeline.setTimelineListener(new EditorTimelineView.TimelineListener() {
             @Override
             public void onSplitPointsChanged(List<Long> pointsMs) {
@@ -649,6 +666,9 @@ public class AudioEditorActivity extends AppCompatActivity {
                 + (segs.size() == 1 ? "" : "s")
                 + (deleted > 0 ? "  •  " + deleted + " deleted" : "")
                 + (reordered ? "  •  reordered" : ""));
+        // the fit scale depends on the edited length and the block count, so
+        // it moves with these edits — keep the zoom readout in step
+        updateZoomText();
     }
 
     /** Merge tab readout: how many songs, and how long the merged file will be. */
@@ -696,26 +716,30 @@ public class AudioEditorActivity extends AppCompatActivity {
     // Zoom
     // ------------------------------------------------------------------
 
-    /** Fit-all zoom: content width == viewport width (edited result). */
+    /**
+     * Fit-all zoom: content width == viewport width, i.e. 1x shows the WHOLE
+     * edited result. The scale itself is computed by the timeline view from
+     * the viewport width (it owns the block gaps that are part of the
+     * content width), so all this needs to do is hand the width over and
+     * drop the zoom onto it.
+     */
     private void applyFitZoom() {
         int viewport = timelineScroll.getWidth();
         if (viewport <= 0) return;
-        float fit = viewport / (float) Math.max(1, timeline.getEditedDurationMs());
-        timeline.setFitPxPerMs(fit);
-        timeline.setPxPerMs(fit);
+        timeline.setViewportWidth(viewport);
+        timeline.setPxPerMs(timeline.getFitPxPerMs());
         updateZoomText();
     }
 
     /**
-     * Default zoom on first entry into split mode: 5x — only a slice of
-     * the song is visible, so the first waveform chunk (30s) paints almost
+     * Default zoom on first entry into split mode: 10x — only a slice of
+     * the song is visible, so the first waveform chunk paints almost
      * instantly. Later zoom/tab changes are never overridden.
      */
     private void applyDefaultSplitZoom() {
         if (splitZoomInitialized || timelineScroll.getWidth() <= 0) return;
         splitZoomInitialized = true;
-        timeline.setFitPxPerMs(Math.max(timeline.getFitPxPerMs(),
-                timelineScroll.getWidth() / (float) durationMs));
+        timeline.setViewportWidth(timelineScroll.getWidth());
         timeline.setPxPerMs(timeline.getFitPxPerMs() * DEFAULT_SPLIT_ZOOM);
         timelineScroll.scrollTo(0, 0);
         updateZoomText();
@@ -727,8 +751,9 @@ public class AudioEditorActivity extends AppCompatActivity {
         if (viewport <= 0) return;
         float oldPx = timeline.getPxPerMs();
         long centerMs = (long) ((timelineScroll.getScrollX() + viewport / 2f) / oldPx);
-        timeline.setFitPxPerMs(Math.max(timeline.getFitPxPerMs(),
-                viewport / (float) durationMs));
+        // the fit scale can have changed (parts deleted, viewport resized):
+        // refresh it first, then re-clamp the zoom against it
+        timeline.setViewportWidth(viewport);
         timeline.setPxPerMs(oldPx * factor);
         updateZoomText();
         final int targetX = (int) (centerMs * timeline.getPxPerMs() - viewport / 2f);
@@ -2145,8 +2170,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         // so its width is 0 there and this is skipped)
         if (timelineScroll.getWidth() > 0) {
             float keepPx = timeline.getPxPerMs();
-            timeline.setFitPxPerMs(Math.min(timeline.getFitPxPerMs(),
-                    timelineScroll.getWidth() / (float) durationMs));
+            timeline.setViewportWidth(timelineScroll.getWidth()); // new fit
             timeline.setPxPerMs(keepPx); // re-clamped to the new fit
             updateZoomText();
         }
@@ -2208,20 +2232,23 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     /**
-     * Lay every source's 600-bucket waveform onto the single global axis the
-     * timeline draws over `durationMs`. Bucket density is unchanged from the
-     * single-song case (600 buckets per first-song length), so with one
-     * source the array is exactly the one that used to be passed straight
-     * through. A source that has not decoded yet leaves zeroes — the same
-     * placeholder bars the timeline already draws while a chunk is pending.
+     * Lay every source's waveform onto the single global axis the timeline
+     * draws over `durationMs`. Bucket density follows the FIRST song's own
+     * bucket count (600 for the usual few-minute track — so with one source
+     * the array is exactly the one that used to be passed straight through —
+     * and finer for a long first song, which would otherwise lose all its
+     * detail to a 600-bucket ceiling). A source that has not decoded yet
+     * leaves zeroes — the same placeholder bars the timeline already draws
+     * while a chunk is pending.
      */
     private float[] combineWaveforms() {
         int n = sources.size();
         if (n == 0) return null;
         if (n == 1) return sources.get(0).waveform; // single song: unchanged
         long total = Math.max(1, durationMs);
-        int len = (int) Math.min(200000L, Math.max(WaveformExtractor.BUCKETS,
-                Math.round((double) WaveformExtractor.BUCKETS * total
+        int density = WaveformExtractor.bucketsFor(sources.get(0).durationMs);
+        int len = (int) Math.min(200000L, Math.max((long) density,
+                Math.round((double) density * total
                         / Math.max(1, sources.get(0).durationMs))));
         float[] out = new float[len];
         float k = len / (float) total; // buckets per ms
