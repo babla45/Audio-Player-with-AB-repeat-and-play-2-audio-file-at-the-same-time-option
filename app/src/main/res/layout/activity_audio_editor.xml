@@ -182,7 +182,8 @@
                 tools:text="Tap the timeline to position the playhead, then ✂ Split." />
         </LinearLayout>
 
-        <!-- Merge mode action row: add a song + song count / total length -->
+        <!-- Merge mode action row: add songs + count / total length
+             (play/pause lives on each row's ▶/⏸, the whole list on ▶ Preview) -->
         <LinearLayout
             android:id="@+id/editorMergeActionRow"
             android:layout_width="match_parent"
@@ -197,7 +198,7 @@
                 android:layout_width="32dp"
                 android:layout_height="32dp"
                 android:background="@drawable/bg_editor_btn_secondary"
-                android:contentDescription="Add a song to merge"
+                android:contentDescription="Add songs to merge"
                 android:src="@drawable/ic_queue_music"
                 app:tint="#FFFFFFFF" />
 

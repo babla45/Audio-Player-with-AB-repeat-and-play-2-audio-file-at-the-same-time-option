@@ -12,6 +12,7 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -202,6 +203,9 @@ public class AudioEditorActivity extends AppCompatActivity {
      * the hidden timeline may be touched).
      */
     private List<Source> previewList;
+    /** Merge rows' per-song progress bars / ▶-⏸ buttons, parallel to the list. */
+    private final List<ProgressBar> mergeRowBars = new ArrayList<>();
+    private final List<ImageButton> mergeRowButtons = new ArrayList<>();
 
     /** "+": pick another song from the library and append it to the timeline. */
     private final ActivityResultLauncher<Intent> songPickerLauncher = registerForActivityResult(
@@ -280,6 +284,9 @@ public class AudioEditorActivity extends AppCompatActivity {
                         // otherwise the timeline stays where they left it and
                         // manual scrolling is always free
                         if (autoScrollEnabled) followPlayhead();
+                    } else {
+                        // Merge rows: progress of the song being played
+                        updateMergeRowProgress(pos);
                     }
                     updateCurrentTimeText(pos);
                 } catch (Exception ignored) {
@@ -868,6 +875,9 @@ public class AudioEditorActivity extends AppCompatActivity {
 
     private void renderSegmentList() {
         segmentList.removeAllViews();
+        // the Merge rows' controls are rebuilt with the rows themselves
+        mergeRowBars.clear();
+        mergeRowButtons.clear();
         if (currentTab == TAB_MERGE) {
             renderSourceList();
             return;
@@ -938,6 +948,33 @@ public class AudioEditorActivity extends AppCompatActivity {
         times.setTextSize(11f);
         textCol.addView(times);
 
+        // per-song seek bar: tap or drag anywhere on it to jump to that point
+        // of the song (it starts playing there if it wasn't the loaded one).
+        // The strip is taller than the line so it is comfortable to hit.
+        FrameLayout barHolder = new FrameLayout(this);
+        LinearLayout.LayoutParams bhLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(22));
+        bhLp.topMargin = dp(1);
+        barHolder.setLayoutParams(bhLp);
+        android.util.TypedValue barTv = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, barTv, true);
+        barHolder.setBackgroundResource(barTv.resourceId != 0 ? barTv.resourceId : 0);
+        barHolder.setContentDescription("Seek within this song");
+
+        ProgressBar bar = new ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        bar.setProgress(0);
+        bar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF6C63FF));
+        bar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(0x33FFFFFF));
+        bar.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(5), Gravity.CENTER_VERTICAL));
+        barHolder.addView(bar);
+        barHolder.setOnTouchListener((v, ev) -> handleMergeBarTouch(v, ev, index));
+        textCol.addView(barHolder);
+        mergeRowBars.add(bar);
+
         row.addView(textCol);
 
         // borderless ripple background shared by the icon buttons
@@ -963,9 +1000,10 @@ public class AudioEditorActivity extends AppCompatActivity {
         LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(dp(28), dp(28));
         pbLp.leftMargin = dp(6);
         play.setLayoutParams(pbLp);
-        play.setContentDescription("Preview this song");
-        play.setOnClickListener(v -> previewMergeSource(index));
+        play.setContentDescription("Play/Pause this song");
+        play.setOnClickListener(v -> toggleMergeSourcePreview(index));
         row.addView(play);
+        mergeRowButtons.add(play);
 
         ImageButton delete = new ImageButton(this);
         delete.setImageResource(R.drawable.ic_delete);
@@ -1339,26 +1377,14 @@ public class AudioEditorActivity extends AppCompatActivity {
             return;
         }
         boolean merge = currentTab == TAB_MERGE;
-        List<long[]> segs;
         if (merge) {
-            if (mergeSources.isEmpty()) {
-                Toast.makeText(this, "Add at least two songs to preview the merge",
-                        Toast.LENGTH_SHORT).show();
-                return;
-            }
-            segs = new ArrayList<>(mergeSources.size());
-            long off = 0;
-            for (Source s : mergeSources) {
-                segs.add(new long[]{off, off + s.durationMs});
-                off += s.durationMs;
-            }
-        } else {
-            segs = timeline.getSegments();
+            startMergeSequencePreview();
+            return;
         }
+        List<long[]> segs = timeline.getSegments();
         if (segs.isEmpty()) return;
         stopPreview();
-        // after stopPreview (it clears the list): which axis this preview runs on
-        previewList = merge ? mergeSources : null;
+        previewList = null; // the timeline axis
         previewQueue = segs;
         previewQueueIndex = 0;
         lastQueueAdvanceEnd = Long.MIN_VALUE;
@@ -1366,8 +1392,45 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     /**
-     * ▶ on a Merge-tab row: play just that song. It runs on the merge list's
-     * own axis, so the hidden Split timeline is never touched.
+     * Merge tab play button: play the whole merge list in order, starting at
+     * the first song — one part per song, exactly what Merge will write out.
+     */
+    private void startMergeSequencePreview() {
+        if (mergeSources.isEmpty()) {
+            Toast.makeText(this, "Add a song first", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        stopPreview();
+        List<long[]> segs = new ArrayList<>(mergeSources.size());
+        long off = 0;
+        for (Source s : mergeSources) {
+            segs.add(new long[]{off, off + s.durationMs});
+            off += s.durationMs;
+        }
+        previewList = mergeSources; // the merge list's own axis
+        previewQueue = segs;
+        previewQueueIndex = 0;
+        lastQueueAdvanceEnd = Long.MIN_VALUE;
+        createPreviewPlayer(segs.get(0)[0], segs.get(0)[1]);
+    }
+
+    /**
+     * ▶/⏸ on a Merge-tab row: pause/resume when that song is the one already
+     * loaded in the player, otherwise start it (replacing whatever played).
+     */
+    private void toggleMergeSourcePreview(int index) {
+        if (previewPlayer != null && previewList == mergeSources
+                && index == previewSourceIndex) {
+            togglePlayPause();
+            return;
+        }
+        previewMergeSource(index);
+    }
+
+    /**
+     * Start the song at {@code index} of the merge list from its beginning.
+     * It runs on the merge list's own axis, so the hidden Split timeline is
+     * never touched.
      */
     private void previewMergeSource(int index) {
         if (index < 0 || index >= mergeSources.size()) return;
@@ -1425,7 +1488,12 @@ public class AudioEditorActivity extends AppCompatActivity {
         }
     }
 
-    /** Split tab control bar: play from playhead / pause / resume. */
+    /**
+     * Split tab control bar: play from the playhead / pause / resume.
+     * (In the Merge tab this is reached from a row's ⏸ button, which only
+     * calls it once that row's song is loaded — the Merge tab's play
+     * control is the bottom ▶ Preview / each row's ▶⏸.)
+     */
     private void togglePlayPause() {
         if (previewPlayer == null) {
             // start from the playhead to the end of the track
@@ -1563,6 +1631,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         previewQueueIndex = -1;
         lastQueueAdvanceEnd = Long.MIN_VALUE;
         previewList = null; // back to the timeline axis
+        resetMergeRowPlayback();
         updatePlayButtons();
         if (timeline != null) updateCurrentTimeText(timeline.getPlayheadMs());
     }
@@ -1576,8 +1645,97 @@ public class AudioEditorActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
         }
-        playBtn.setImageResource(playing ? R.drawable.ic_pause : R.drawable.ic_play);
+        int icon = playing ? R.drawable.ic_pause : R.drawable.ic_play;
+        playBtn.setImageResource(icon);
+        // the playing Merge row shows ⏸, every other row shows ▶
+        boolean mergePreview = previewList == mergeSources;
+        for (int i = 0; i < mergeRowButtons.size(); i++) {
+            mergeRowButtons.get(i).setImageResource(
+                    mergePreview && i == previewSourceIndex
+                            ? icon : R.drawable.ic_play);
+        }
         seqPreviewBtn.setText(previewQueue != null ? "■ Stop" : "▶ Preview");
+    }
+
+    /**
+     * Merge rows: the row of the song currently loaded shows a progress bar
+     * filled to the position inside THAT song; every other row's bar is
+     * empty (but still there — it is the seek control for that song).
+     */
+    private void updateMergeRowProgress(long globalPos) {
+        if (mergeRowBars.isEmpty()) return;
+        int playing = previewList == mergeSources ? previewSourceIndex : -1;
+        for (int i = 0; i < mergeRowBars.size(); i++) {
+            ProgressBar bar = mergeRowBars.get(i);
+            if (i != playing || i >= mergeSources.size()) {
+                if (bar.getProgress() != 0) bar.setProgress(0);
+                continue;
+            }
+            long dur = Math.max(1, mergeSources.get(i).durationMs);
+            long local = Math.max(0, Math.min(dur, toLocal(i, globalPos)));
+            bar.setProgress((int) (1000L * local / dur));
+        }
+    }
+
+    /**
+     * Tap or drag on a Merge row's progress bar: seek inside that song. The
+     * row's own ▶/⏸ state is respected — a paused song stays paused, a
+     * playing one keeps playing (and an ordered preview carries on with the
+     * following songs).
+     */
+    private boolean handleMergeBarTouch(View barArea, MotionEvent ev, int index) {
+        int action = ev.getActionMasked();
+        if (action != MotionEvent.ACTION_DOWN && action != MotionEvent.ACTION_MOVE
+                && action != MotionEvent.ACTION_UP) {
+            return false;
+        }
+        if (barArea.getWidth() <= 0 || index < 0 || index >= mergeSources.size()) {
+            return false;
+        }
+        if (action == MotionEvent.ACTION_DOWN && barArea.getParent() != null) {
+            // keep the row's ScrollView from stealing the drag
+            barArea.getParent().requestDisallowInterceptTouchEvent(true);
+        }
+        float fraction = Math.max(0f, Math.min(1f,
+                ev.getX() / (float) barArea.getWidth()));
+        seekMergeSourceTo(index, (long) (fraction * mergeSources.get(index).durationMs));
+        return true;
+    }
+
+    /**
+     * Move the merge preview to a point inside one song. The song already
+     * loaded keeps its player — so an ordered preview continues into the
+     * following songs — any other song starts fresh from that point.
+     */
+    private void seekMergeSourceTo(int index, long localMs) {
+        if (index < 0 || index >= mergeSources.size()) return;
+        Source s = mergeSources.get(index);
+        long dur = Math.max(1, s.durationMs);
+        long local = Math.max(0, Math.min(dur - 1, localMs));
+        long global = s.offsetMs + local;
+
+        if (previewPlayer != null && previewList == mergeSources
+                && index == previewSourceIndex) {
+            try {
+                previewPlayer.seekTo((int) local);
+            } catch (Exception ignored) {
+            }
+            updateMergeRowProgress(global);
+            updateCurrentTimeText(global);
+            return;
+        }
+        stopPreview();
+        previewList = mergeSources;
+        // play from the touched point to the end of that song
+        createPreviewPlayer(global, s.offsetMs + s.durationMs);
+    }
+
+    /** Idle look again (▶ and empty bars) once a preview has ended. */
+    private void resetMergeRowPlayback() {
+        for (ProgressBar b : mergeRowBars) b.setProgress(0);
+        for (ImageButton b : mergeRowButtons) {
+            b.setImageResource(R.drawable.ic_play);
+        }
     }
 
     // ------------------------------------------------------------------
