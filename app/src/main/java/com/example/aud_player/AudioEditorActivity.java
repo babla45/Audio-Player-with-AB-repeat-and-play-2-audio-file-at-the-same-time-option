@@ -1068,15 +1068,19 @@ public class AudioEditorActivity extends AppCompatActivity {
     }
 
     /**
-     * Move the song at {@code from} to position {@code to} in the merge order.
+     * Move the song at {@code from} to the WITH-item insertion position
+     * {@code to} in the merge order — the same contract finishRowDrag gives
+     * EditorTimelineView.reorderSegment.
      * Returns false when the move is a no-op. The caller re-renders the list.
      */
     private boolean moveMergeSource(int from, int to) {
         if (from < 0 || from >= mergeSources.size()
-                || to < 0 || to >= mergeSources.size()) return false;
-        if (from == to) return false;
+                || to < 0 || to > mergeSources.size()) return false;
+        if (to == from || to == from + 1) return false;
         stopPreview(); // the old order must not keep playing
-        mergeSources.add(to, mergeSources.remove(from));
+        // removing the item first shifts the insertion point by one for
+        // downward moves
+        mergeSources.add(to > from ? to - 1 : to, mergeSources.remove(from));
         rebuildMergeMap();
         updateMergeInfoText();
         return true;

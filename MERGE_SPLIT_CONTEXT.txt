@@ -1,0 +1,459 @@
+================================================================================
+AUD PLAYER — AUDIO EDITOR (MERGE + SPLIT) — SESSION CONTEXT HANDOFF
+================================================================================
+Written: 2026-09-12
+Project: C:\Users\babla\AndroidStudioProjects\aud_player
+Package: com.example.aud_player
+Purpose: hand this file to another session / another AI model so it can continue
+         work on the Audio Editor (Merge tab + Split tab) with full context.
+
+READ THIS FIRST. Then read the files listed in section 9 before editing.
+
+
+================================================================================
+1. WHAT THE AUDIO EDITOR IS TODAY
+================================================================================
+AudioEditorActivity has TWO tabs:
+
+  Tab 0 — "Merge"  (TAB_MERGE)   -> join several songs into ONE output file
+  Tab 1 — "Split"  (TAB_SPLIT)   -> pro timeline: split / delete parts / reorder
+
+Tab numbering matters: TAB_MERGE is deliberately 0 and TAB_SPLIT is 1 because the
+last-used tab is persisted in SharedPreferences ("audio_editor_prefs", key
+"last_tab"). Keeping the numbers means an existing user's saved value still points
+at the same screen it used to.
+
+The editor is reachable three ways:
+  1. Main screen -> Menu bottom sheet -> "Audio Edit" tile          (Split, current song)
+  2. From any file manager: SHARE one or more audio files           (share sheet)
+  3. Internal "+" buttons inside the editor itself                  (picker)
+
+Output files always go to:  <shared storage>/aud_player/edited/
+  (fallback chain: getExternalFilesDir("edited") -> filesDir/edited,
+   see FFmpegAudioEditor.outputDir())
+
+
+================================================================================
+2. THE MERGE TAB  (the newest, biggest change of this session)
+================================================================================
+
+2.1 OWN LIST, EMPTY BY DEFAULT  (this was an explicit user request)
+-------------------------------------------------------------------
+Earlier the Merge tab listed the SAME list the Split tab uses (`sources`), which
+is seeded with the song the editor was opened with. The user asked for it to be
+EMPTY by default and to be independent:
+
+    "in merger, dont add the currently playing song by default, it should be
+     empty by default."
+
+So there is now a SECOND list:
+
+    private final List<Source> mergeSources = new ArrayList<>();
+    private long mergeDurationMs;              // 0 while the list is empty
+
+`mergeSources` is completely independent of the Split timeline's `sources`.
+Consequence (a real benefit, not a bug): editing the Merge list NEVER clears the
+Split tab's splits/deleted-ranges. That is why `resetTimelineEdits()` and
+`EditorTimelineView.clearEdits()` were DELETED as dead code — nothing needs them
+anymore.
+
+Its own time axis is built by `rebuildMergeMap()` (same algorithm as the Split
+`rebuildTimeMap()`), producing `mergeDurationMs`.
+
+2.2 ADDING SONGS — MULTI-SELECT  (explicit user request)
+-------------------------------------------------------------------
+    "also for adding, make sure multiple songs can be added at once"
+
+`AudioListActivity` gained an OPT-IN multi-select mode. The single-pick path is
+byte-for-byte unchanged; without the extra nothing behaves differently.
+
+  AudioListActivity:
+    public static final String EXTRA_MULTI_SELECT = "extra_multi_select";
+    public static final String EXTRA_PICKED_URIS  = "extra_picked_uris";
+
+    // onCreate:  multiSelect = getIntent().getBooleanExtra(EXTRA_MULTI_SELECT, false);
+    //            setupMultiSelect();   // returns immediately when !multiSelect
+    // on confirm: setResult(RESULT_OK, intent.putParcelableArrayListExtra(
+    //                 EXTRA_PICKED_URIS, new ArrayList<>(picked)));
+    //             (also intent.setData(picked.get(0)) for compatibility)
+
+  AudioAdapter gained:
+    setSelectionMode(boolean) / isSelectionMode()
+    toggleSelection(int) / getSelectedCount() / getSelectedUris()   // LinkedHashSet
+    OnSelectionChangedListener
+  A selected row reuses bg_song_item_playing, tints the title accent_primary2,
+  and swaps the options icon to ic_check_circle (else ic_circle_outline). In
+  selection mode a row click TOGGLES selection instead of firing the item listener.
+
+  Layout activity_audio_list.xml gained a bottom bar, hidden by default:
+    audioListConfirmBar / audioListSelectedCount / audioListConfirmBtn
+
+  AudioEditorActivity side:
+    pickSongsToMerge()  -> launches AudioListActivity with EXTRA_MULTI_SELECT=true
+    mergePickerLauncher -> reads EXTRA_PICKED_URIS (falls back to getData())
+    addMergeSongs(List<Uri>) -> probes duration per URI and appends to mergeSources
+
+2.3 PER-ROW PLAY/PAUSE + PROGRESS BAR  (explicit user request)
+-------------------------------------------------------------------
+    "merger er khetre play button ache kintu pause kora jay na, eta add koro,
+     ar kono song play korle tar jonno progress bar dekhabe"
+
+Row layout built in `buildSourceRow(index, src)`:
+
+    [⠿ drag] [ title + "mm:ss → mm:ss" + seek bar ] [▶/⏸] [🗑]
+
+    private final List<ProgressBar> mergeRowBars    = new ArrayList<>();
+    private final List<ImageButton> mergeRowButtons = new ArrayList<>();
+    (both cleared and rebuilt by renderSegmentList())
+
+  - ▶/⏸  -> toggleMergeSourcePreview(index) — calls togglePlayPause() when that
+            song is already the loaded one, else previewMergeSource(index).
+  - bar   -> handleMergeBarTouch(View, MotionEvent, int)   (DOWN/MOVE/UP)
+             -> seekMergeSourceTo(index, localMs)
+
+2.4 THE PROGRESS BAR IS TAPPABLE / DRAGGABLE  (explicit user request)
+-------------------------------------------------------------------
+    "merge er progress bar take clickable banao"
+
+The bar is a thin (5dp) horizontal ProgressBar wrapped in a 22dp FrameLayout so
+the hit target is comfortable. `handleMergeBarTouch` calls
+`barArea.getParent().requestDisallowInterceptTouchEvent(true)` on DOWN (so the
+enclosing ScrollView does not steal the drag), computes
+`fraction = clamp(ev.getX() / barArea.getWidth())`, then
+`seekMergeSourceTo(index, (long)(fraction * durationMs))`.
+
+`seekMergeSourceTo(int index, long localMs)`:
+  - if a preview player is already loaded on the SAME song -> seek in place, i.e.
+    the ordered preview queue SURVIVES the scrub (it keeps playing into the next
+    song afterwards).
+  - otherwise -> stopPreview(); previewList = mergeSources; createPreviewPlayer(...)
+
+2.5 THE DUPLICATE PLAY BUTTON WAS REMOVED  (explicit user request)
+-------------------------------------------------------------------
+    "in merger, remove the duplicate play button on the left of add song button"
+
+`editorMergePlayBtn` was deleted from activity_audio_editor.xml, along with its
+field, findViewById, setOnClickListener and its line in updatePlayButtons().
+`togglePlayPause()` was reverted to its original Split-only form.
+What remains for playback in Merge mode:
+  - per-row ▶/⏸
+  - the bottom "▶ Preview" / "■ Stop" (editorSeqPreviewBtn) for the WHOLE list
+    -> toggleSequencePreview() -> startMergeSequencePreview()
+
+`startMergeSequencePreview()` builds one [0,dur) part per merge source, sets
+previewList = mergeSources and feeds the normal previewQueue machinery.
+
+2.6 MERGE INFO TEXT / SAVE STATE
+-------------------------------------------------------------------
+    updateMergeInfoText():
+      0 songs -> "No songs yet  •  tap the ＋ button to add some"
+      1 song  -> "1 song  •  add one more to merge"
+      N songs -> "N songs  •  Total mm:ss"
+    updateSaveButtonState(): Merge enabled only when mergeSources.size() >= 2
+                             (and no job is running). Button label = "Merge".
+
+2.7 DRAG REORDER
+-------------------------------------------------------------------
+The existing MANUAL drag system (no ItemTouchHelper) is reused, not duplicated.
+There is a `dragMode` field: DRAG_PARTS = 0 / DRAG_SOURCES = 1.
+The ⠿ handle in a Merge row reports DRAG_SOURCES; `finishRowDrag` then calls
+`moveMergeSource(from, ins)` (same `ins = to > from ? to + 1 : to` conversion
+already used for parts) and re-renders. `moveMergeSource` returns boolean and does
+NOT render — the caller renders.
+`positionDragRow` / `updateRowDragTargets` / `resetRowDrag` are list-generic and
+were not touched.
+
+2.8 EXPORT
+-------------------------------------------------------------------
+    runMergeJob():
+      one Segment(0, mergeDurationMs) + explicit uris + boundaries built from
+      mergeSources, then
+      startJob(MODE_MERGE, uris, boundaries, segs, baseNameOf(mergeSources))
+
+    startJob(mode, segments, name) is the old 3-arg form; it now delegates to a
+    5-arg overload that passes sourceUris() / sourceBoundaries().
+
+`FFmpegAudioEditor.runJobFromUri(Context, List<Uri>, long[] boundariesMs, int mode,
+                                  List<Segment>, String baseName, EditListener)`
+copies each source once to temp, then `doJob`:
+  - computes each input's OWN container extension (stream-copying an m4a source
+    into a ".mp3" target fails outright — this is why)
+  - MODE_MERGE -> one output named `baseName + "_merged"` with the FIRST input's
+    extension
+  - stream copy (`-c copy`); on failure the existing automatic AAC re-encode
+    fallback runs (`reencodedTarget`), producing .m4a
+  - MODE_SEPARATE = 1, MODE_MERGE = 2, MODE_CUT was deleted (see section 4)
+  - progress is folded across pieces+runs into one 0..100
+
+
+================================================================================
+3. THE SPLIT TAB  (unchanged behaviour — must stay that way)
+================================================================================
+- `List<Source> sources` — the songs of the edited timeline, concatenated back to
+  back; `durationMs` is the TOTAL length; source i owns
+  [offsetMs, offsetMs + durationMs).
+- Time helpers: sourceIndexAt / toLocal / toGlobal / rebuildTimeMap.
+  With ONE source they are the identity, which is why the single-song path never
+  changed.
+- `combineWaveforms()` lays each source's 600 RMS buckets onto the global axis.
+- EditorTimelineView: scrollable + zoomable (1x–24x, 10x default), adaptive
+  ruler, numbered blocks, draggable split boundaries, tap-to-position playhead,
+  long-press a part -> delete it, KineMaster-style compression of deleted ranges,
+  auto-scroll toggle (OFF by default), per-row ⠿ drag reorder (affects play /
+  preview / export ORDER only — the drawn timeline stays chronological).
+- Undo/redo: EditorState deep copies (splits / deletedRanges / sequence /
+  selection) onto ArrayDeque, MAX_HISTORY 50. A new action clears the redo stack.
+  The snapshot does NOT cover the source list — appending a song clears history
+  with a toast.
+- `EditorTimelineView.setSplitPoints()` MUST keep using its explicit `hasLast`
+  flag; the old `-Long.MAX_VALUE` sentinel overflowed in `p - last` and silently
+  emptied the timeline on every restore.
+
+
+================================================================================
+4. WHAT WAS REMOVED (do not resurrect)
+================================================================================
+- CUT / TRIM tab and everything around it:
+    MODE_CUT, the cut fields, setMode/getMode, setCutSelection/clampCut/
+    getCutStartMs/getCutEndMs, the onCutSelectionChanged listener method, the
+    drawCut* painters, toggleCutPreview(), runCutJob(), the layout row
+    `editorCutActionRow`, `editorTabCut`.
+- `EditorTimelineView.clearEdits()` and `AudioEditorActivity.resetTimelineEdits()`
+  — both became dead once the Merge list stopped sharing `sources`.
+- `editorMergePlayBtn` (the duplicate play button) — section 2.5.
+- The "song list changed -> clear the Split edits" behaviour — no longer needed,
+  because the Merge list is separate.
+
+
+================================================================================
+5. PLAYBACK ARCHITECTURE — THE `previewList` PARAMETRISATION  (read carefully)
+================================================================================
+One shared `MediaPlayer` powers both tabs. Which list it is playing is recorded
+in:
+
+    private List<Source> previewList;   // null == the Split timeline (`sources`)
+                                        // non-null == the Merge list
+
+Every global-time helper goes through `activeSources()`:
+
+    private List<Source> activeSources() { return previewList != null ? previewList : sources; }
+
+`sourceIndexAt` / `toLocal` / `toGlobal` all use `activeSources()`.
+
+GUARD RULE: in `playheadUpdater`, all work that touches the SPLIT TIMELINE is
+wrapped in `if (previewList == null) { ... }`. This exists because
+`timeline.skipDeletedForward()` clamps to the timeline duration — running it while
+previewing the merge list would corrupt the hidden Split timeline. In Merge mode
+the tick instead calls `updateMergeRowProgress(pos)`.
+
+`updateMergeRowProgress(long globalPos)` gives only the CURRENT row a non-zero
+progress (others are forced to 0). `resetMergeRowPlayback()` zeroes every bar and
+resets every row icon to ic_play; it is called from `stopPreview()`.
+
+`updatePlayButtons()`: sets playBtn icon to ic_pause/ic_play, then loops
+mergeRowButtons setting ic_pause only for (previewList == mergeSources &&
+i == previewSourceIndex), else ic_play; and sets seqPreviewBtn text to
+"■ Stop" when previewQueue != null else "▶ Preview".
+
+`stopPreview()` = releasePlayer() + clear the queue (+ resetMergeRowPlayback()).
+`releasePlayer()` swaps the player WITHOUT dropping previewQueue, which is what
+lets a sequence preview continue into the next source at a seam.
+
+
+================================================================================
+6. SHARE-SHEET ENTRY POINT
+================================================================================
+    "i want from any file manager, if one or multiple audio selected and share
+     button clicked, my app should be there for merge option, for single song
+     split option should show and can do the purpose"
+
+AndroidManifest.xml — AudioEditorActivity is now `android:exported="true"` with:
+
+    <intent-filter>  ACTION_SEND           + DEFAULT + <data mimeType="audio/*"/>
+    <intent-filter>  ACTION_SEND_MULTIPLE  + DEFAULT + <data mimeType="audio/*"/>
+
+`sharedAudioUris(Intent)` handles ACTION_SEND (a single Uri extra) and
+ACTION_SEND_MULTIPLE (`List` AND `Object[]` forms), and `streamUri(Object)`
+accepts a Uri, a "scheme://..." String, or a bare filesystem path
+(-> Uri.fromFile(new File(s))).
+
+onCreate routing:
+    fromShare && 1 file  -> load it into `sources`, open TAB_SPLIT
+    fromShare && N files -> first file into `sources`, ALL of them into
+                            `mergeSources` in the order they were shared,
+                            rebuildMergeMap(), open TAB_MERGE
+    no share             -> the old EXTRA_URI path, last-used tab from prefs
+
+IMPORTANT: `android:exported="true"` is what fixed the earlier
+`SecurityException: not exported` when launching the activity directly with `am
+start`. Do not remove the filters without a replacement plan.
+
+
+================================================================================
+7. QUICK MAP OF METHODS IN AudioEditorActivity.java
+================================================================================
+Tab / UI
+  updateUiForTab()                  stops preview, toggles timelinePanel /
+                                    mergeActionRow / controlBar / undoRedoRow,
+                                    saveBtn text "Merge"/"Save", then delegates
+  updateMergeInfoText(), updateSaveButtonState()
+
+Merge
+  renderSourceList(), buildSourceRow(), rebuildMergeMap()
+  addMergeSongs(List<Uri>), removeMergeSource(int)   (removing the last is allowed)
+  moveMergeSource(int,int)
+  pickSongsToMerge(), mergePickerLauncher
+  runMergeJob()
+  toggleMergeSourcePreview(int), previewMergeSource(int)
+  handleMergeBarTouch(View, MotionEvent, int), seekMergeSourceTo(int, long)
+  startMergeSequencePreview()
+
+Split
+  rebuildTimeMap(), sourceIndexAt/toLocal/toGlobal, combineWaveforms()
+  appendSong(Uri), songPickerLauncher
+  runSplitJob()/save path, renderSegmentList() part rows (buildSegmentRow)
+  undo/redo: pushHistory(), updateUndoRedoButtons()
+
+Shared
+  toggleSequencePreview(), togglePlayPause(), stopPreview(), releasePlayer(),
+  createPreviewPlayer(start, end[, index]), continueIntoNextSource(),
+  advanceSequencePreview(), playheadUpdater (250ms poll), updateCurrentTimeText(long),
+  startJob(mode, uris, boundaries, segments, name), confirmSave()
+  baseNameOf(List<Source>) / baseName()
+
+Drag system (manual, no ItemTouchHelper)
+  startRowDrag / updateRowDrag / positionDragRow / updateRowDragTargets /
+  finishRowDrag / abortRowDrag / resetRowDrag      dragMode = DRAG_PARTS|DRAG_SOURCES
+
+
+================================================================================
+8. FILES TOUCHED THIS SESSION
+================================================================================
+app/src/main/java/com/example/aud_player/AudioEditorActivity.java   (main work)
+app/src/main/java/com/example/aud_player/AudioListActivity.java     (multi-select)
+app/src/main/java/com/example/aud_player/AudioAdapter.java          (selection mode)
+app/src/main/java/com/example/aud_player/EditorTimelineView.java    (CUT mode + clearEdits removed)
+app/src/main/java/com/example/aud_player/FFmpegAudioEditor.java     (MODE_CUT removed; multi-source entry)
+app/src/main/res/layout/activity_audio_editor.xml                   (Merge tab UI)
+app/src/main/res/layout/activity_audio_list.xml                     (confirm bar)
+app/src/main/res/drawable/ic_check_circle.xml                       (new)
+app/src/main/res/drawable/ic_circle_outline.xml                     (new)
+app/src/main/AndroidManifest.xml                                    (share filters)
+docs/CHANGELOG.md, docs/FEATURES.md, docs/ARCHITECTURE.md, docs/KNOWN_ISSUES.md
+
+
+================================================================================
+9. READ BEFORE YOU EDIT
+================================================================================
+1. app/src/main/java/com/example/aud_player/AudioEditorActivity.java
+   (~2.5k lines — the whole editor; read it in chunks, do not guess)
+2. app/src/main/java/com/example/aud_player/FFmpegAudioEditor.java
+3. app/src/main/java/com/example/aud_player/EditorTimelineView.java
+4. docs/ARCHITECTURE.md  — the "Merge tab list (mergeSources)" bullet
+5. docs/KNOWN_ISSUES.md  — the known merge caveats are listed there
+6. CLAUDE.md (project root) — the permanent coding rules
+
+
+================================================================================
+10. PROJECT RULES THAT MUST BE FOLLOWED
+================================================================================
+- PRESERVE ALL EXISTING FUNCTIONALITY. Never remove, disable or break a working
+  feature unless explicitly told to. Make the smallest safe change.
+- Find root causes, never workarounds.
+- Verify BUILD SUCCESSFUL before installing — a failed build silently installs a
+  STALE APK, which looks like "my change did nothing".
+- If a device is connected, install and launch the app.
+- Report: what changed, why, which files, risks, verification result.
+- Communication language: ENGLISH or PURE BANGLA only.
+  NEVER write Banglish (Bengali typed in Latin script) — the user rejects it.
+- Do not offer screenshots; the user rejects them.
+
+
+================================================================================
+11. BUILD / INSTALL / VERIFY
+================================================================================
+Build:
+    cd C:\Users\babla\AndroidStudioProjects\aud_player
+    ./gradlew assembleDebug                 # must print BUILD SUCCESSFUL
+
+Install + launch (device id 079883721E004919, Android 11):
+    adb install -r app/build/outputs/apk/debug/app-debug.apk
+    adb shell am force-stop com.example.aud_player
+    adb logcat -c
+    adb shell am start -n com.example.aud_player/.MainActivity
+    adb shell dumpsys activity activities | grep topResumedActivity
+    adb logcat -d -b crash                  # must be empty
+
+Share-sheet smoke test (the filters are exported, so this works):
+    adb shell am start -a android.intent.action.SEND -t audio/* \
+        --eu android.intent.extra.STREAM file:///sdcard/... \
+        -n com.example.aud_player/.AudioEditorActivity
+
+SHELL NOTES (Git Bash on Windows):
+  - `adb shell ls /sdcard/...` gets mangled to
+    "C:/Program Files/Git/sdcard/..." — use the PowerShell tool for device paths.
+  - `$env:JAVA_HOME\bin\jar` fails because JAVA_HOME is unset in that shell.
+  - `adb exec-out uiautomator dump /dev/tty` was REJECTED by the user; do not
+    propose UI dumps or screenshots. Ask for a manual tap-through instead.
+
+
+================================================================================
+12. NOT YET VERIFIED ON DEVICE (ask the user to tap through)
+================================================================================
+The installed APK contains everything above, but the user has not tap-tested it.
+Open items:
+
+  MERGE PASS
+    Merge tab -> list is EMPTY, Merge button disabled
+    -> ＋ -> pick SEVERAL songs at once -> all rows appear in pick order
+    -> info text "N songs • Total …", Merge enabled
+    -> ⠿ drag a row to reorder
+    -> ▶ on a row plays it; that row's ⏸ pauses it
+    -> tap / drag that row's progress bar -> audio seeks inside the song
+    -> ▶ Preview plays the whole list in order; ■ Stop stops it
+    -> 🗑 removes a row (removing the last one leaves the list empty, allowed)
+    -> Merge -> confirm `<first song>_merged.m4a` (or .mp3) in aud_player/edited/
+       and that it plays song A then song B in list order
+
+  SHARE PASS
+    From a file manager, share 1 audio file  -> app appears, opens Split
+    From a file manager, share N audio files -> app appears, opens Merge
+                                                with all N pre-loaded
+
+  SPLIT REGRESSION PASS (must be unchanged)
+    split at playhead, drag a boundary, tap to select a line, delete a line,
+    long-press a part -> delete part, ⠿ reorder, Undo/Redo, zoom −/＋,
+    auto-scroll, ▶ Preview, Save merged and Save separately.
+
+  CROSS-FORMAT MERGE
+    Merge an MP3 with an M4A — the copy concat may fail and the AAC re-encode
+    fallback must produce a playable file. The quality cost of that fallback is
+    documented behaviour, not a bug.
+
+  KNOWN NON-BLOCKING ISSUES (see docs/KNOWN_ISSUES.md for the full list)
+    - metadata probing for a merge add runs on the UI thread, one file at a time;
+      a very large multi-select delays the list by a few hundred ms
+    - a small audible gap at a song seam (a MediaPlayer reads one file)
+    - rapid scrub-dragging may emit several seeks and settle only when the drag
+      stops (the bar follows the finger either way)
+    - the Split undo history does not cover the source list
+
+
+================================================================================
+13. A STALE CRASH WORTH KNOWING ABOUT (not caused by this work)
+================================================================================
+Found in the crash buffer earlier:
+    FATAL EXCEPTION ... NoClassDefFoundError: Failed resolution of:
+        Lcom/arthenica/smartexception/java/Exceptions;
+      at FFmpegKitConfig.<clinit>
+      <- FFmpegAudioEditor.exec(:498) <- runFfmpegCut(:432) <- doJob(:321)
+
+It is STALE: the entry is dated 09-11 19:34 while the device clock read
+Sat Sep 12 09:31 +06 2026, and /sdcard/aud_player/edited/ holds successful
+exports from 2026-09-11 20:29 and 21:32 — i.e. exports worked after that crash.
+No fix was applied. If a SAVE crashes today, this ffmpeg-kit class-init linkage
+error is the first place to look.
+
+================================================================================
+END OF HANDOFF
+================================================================================
