@@ -1013,7 +1013,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         dbLp.leftMargin = dp(6);
         delete.setLayoutParams(dbLp);
         delete.setContentDescription("Remove this song from the merge");
-        delete.setOnClickListener(v -> removeMergeSource(index));
+        delete.setOnClickListener(v -> confirmRemoveMergeSource(index));
         row.addView(delete);
 
         return row;
@@ -1058,6 +1058,19 @@ public class AudioEditorActivity extends AppCompatActivity {
      * Drop one song from the merge list. Removing the last one is allowed —
      * the list simply goes back to being empty (the Split tab is untouched).
      */
+    /** Ask before dropping a song from the merge list (same idiom as the Split tab). */
+    private void confirmRemoveMergeSource(int index) {
+        if (index < 0 || index >= mergeSources.size()) return;
+        String title = mergeSources.get(index).title;
+        new AlertDialog.Builder(this)
+                .setTitle("Remove this song?")
+                .setMessage(title + " will be removed from the merge list.\n\n"
+                        + "The original file is not modified.")
+                .setPositiveButton("Remove", (d, w) -> removeMergeSource(index))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void removeMergeSource(int index) {
         if (index < 0 || index >= mergeSources.size()) return;
         stopPreview();
@@ -1749,7 +1762,7 @@ public class AudioEditorActivity extends AppCompatActivity {
     private void confirmSave() {
         if (jobRunning) return;
         if (currentTab == TAB_MERGE) {
-            runMergeJob();
+            confirmMergeJob();
             return;
         }
         // split mode: choose output style
@@ -1873,6 +1886,22 @@ public class AudioEditorActivity extends AppCompatActivity {
      * pieces — falling back to the AAC re-encode automatically when a copy
      * is impossible.
      */
+    /** Confirm before the export actually starts (same idiom as the other confirms). */
+    private void confirmMergeJob() {
+        if (mergeSources.size() < 2) {
+            runMergeJob(); // that path shows the "add one more" toast
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Merge " + mergeSources.size() + " songs?")
+                .setMessage(mergeSources.size() + " songs will be joined into one file "
+                        + "(" + formatTime(mergeDurationMs) + " total).\n\n"
+                        + "The original files are not modified.")
+                .setPositiveButton("Merge", (d, w) -> runMergeJob())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void runMergeJob() {
         if (mergeSources.size() < 2) {
             Toast.makeText(this, "Add at least one more song to merge",
