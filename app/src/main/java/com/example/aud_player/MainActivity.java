@@ -761,6 +761,28 @@ public class MainActivity extends AppCompatActivity {
                     // Persist position when paused externally (notification / headset / focus loss)
                     saveNowPlayingPrefs();
                 } else if ("PLAYBACK_RESUMED".equals(intent.getAction())) {
+                    // Scheduled playback carries its song: adopt it so the UI
+                    // shows the playing song instead of the old stopped one.
+                    String schedUri = intent.getStringExtra("uri");
+                    if (schedUri != null) {
+                        selectedAudioUri = Uri.parse(schedUri);
+                        String schedTitle = intent.getStringExtra("title");
+                        if (schedTitle != null && !schedTitle.isEmpty()) {
+                            fileNameText.setText(schedTitle);
+                        }
+                        // The service owns the player that is actually
+                        // playing — point our reference at it so the seekbar
+                        // and play/pause track the scheduled song.
+                        if (serviceBound && audioService != null) {
+                            try {
+                                MediaPlayer svcPlayer = audioService.getMediaPlayer();
+                                if (svcPlayer != null && svcPlayer.isPlaying()) {
+                                    mediaPlayer = svcPlayer;
+                                }
+                            } catch (Exception ignored) {}
+                        }
+                        saveNowPlayingPrefs();
+                    }
                     isPlaying = true;
                     safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
                 }
@@ -1059,6 +1081,10 @@ public class MainActivity extends AppCompatActivity {
                     } else if (id == R.id.nav_playlists) {
                         // Open playlists
                         Intent intent = new Intent(this, PlaylistActivity.class);
+                        startActivity(intent);
+                        return false;
+                    } else if (id == R.id.nav_video_edit) {
+                        Intent intent = new Intent(this, VideoEditorActivity.class);
                         startActivity(intent);
                         return false;
                     } else if (id == R.id.nav_mixer) {
@@ -2926,6 +2952,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void showTimerBottomSheet() {
         TimerBottomSheet timerSheet = new TimerBottomSheet();
+        // "▶ Current" in the Schedule tab schedules the song now open here
+        timerSheet.setCurrentSongProvider(new TimerBottomSheet.CurrentSongProvider() {
+            @Override
+            public Uri getCurrentSongUri() {
+                return selectedAudioUri;
+            }
+
+            @Override
+            public String getCurrentSongTitle() {
+                return fileNameText != null && fileNameText.getText() != null
+                        ? fileNameText.getText().toString() : "";
+            }
+        });
         timerSheet.setTimerListener(new TimerBottomSheet.TimerListener() {
             @Override
             public void onTimerSet(int minutes, int action) {

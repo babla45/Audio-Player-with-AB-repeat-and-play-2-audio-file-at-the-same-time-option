@@ -1,0 +1,529 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF17171C">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="2dp">
+
+            <ImageView
+                android:id="@+id/editorBackBtn"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:padding="6dp"
+                android:src="@drawable/ic_chevron_down"
+                app:tint="#FFFFFFFF" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Video Editor"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/editorSongName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="#AAFFFFFF"
+                    android:textSize="11sp"
+                    tools:text="video.mp4" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Mode tabs -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="2dp">
+
+            <TextView
+                android:id="@+id/editorTabMerge"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_chip"
+                android:gravity="center"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="5dp"
+                android:text="Merge"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/editorTabSplit"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_chip"
+                android:gravity="center"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="5dp"
+                android:text="Split"
+                android:textColor="#88FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Video Preview Viewport -->
+        <FrameLayout
+            android:id="@+id/videoPreviewContainer"
+            android:layout_width="match_parent"
+            android:layout_height="170dp"
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="4dp"
+            android:background="#FF0A0A0E">
+
+            <TextureView
+                android:id="@+id/videoTextureView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center" />
+
+            <!-- Empty state when no video is loaded in Split mode -->
+            <LinearLayout
+                android:id="@+id/videoEmptyContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <ImageView
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:alpha="0.4"
+                    android:src="@drawable/ic_video_edit"
+                    app:tint="#FFFFFFFF" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="No video loaded for split"
+                    android:textColor="#88FFFFFF"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/videoEmptyPickBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_editor_btn_primary"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="6dp"
+                    android:text="Choose Video"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Timeline panel (Split mode only) -->
+        <LinearLayout
+            android:id="@+id/editorTimelinePanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/bg_editor_panel"
+            android:orientation="vertical"
+            android:padding="6dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/editorRangeText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    tools:text="Split 2 at 01:20  •  4 parts" />
+
+                <TextView
+                    android:id="@+id/editorDurationText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#88FFFFFF"
+                    android:textSize="11sp"
+                    tools:text="Total 04:10" />
+            </LinearLayout>
+
+            <!-- Scrollable zoomable timeline -->
+            <HorizontalScrollView
+                android:id="@+id/editorTimelineScroll"
+                android:layout_width="match_parent"
+                android:layout_height="105dp"
+                android:layout_marginTop="4dp"
+                android:overScrollMode="never"
+                android:scrollbars="none">
+
+                <com.example.aud_player.EditorTimelineView
+                    android:id="@+id/editorTimeline"
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent" />
+            </HorizontalScrollView>
+
+            <!-- Current time / zoom readout -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/editorCurrentTimeText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="11sp"
+                    tools:text="▶ 00:42" />
+
+                <TextView
+                    android:id="@+id/editorZoomText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#77FFFFFF"
+                    android:textSize="11sp"
+                    tools:text="Zoom 1.0x" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/editorHintText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="#77FFFFFF"
+                android:textSize="10sp"
+                tools:text="Stream copy mode: cuts snap to keyframes. Tap timeline to position playhead, then ✂ Split." />
+        </LinearLayout>
+
+        <!-- Merge mode action row: add videos + count / total length -->
+        <LinearLayout
+            android:id="@+id/editorMergeActionRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="6dp">
+
+            <ImageButton
+                android:id="@+id/editorMergeAddSongBtn"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add videos to merge"
+                android:src="@drawable/ic_video_edit"
+                app:tint="#FFFFFFFF" />
+
+            <TextView
+                android:id="@+id/editorMergeInfoText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                tools:text="3 videos  •  Total 09:41" />
+        </LinearLayout>
+
+        <!-- Split mode control bar: Play/Pause | Auto-scroll | Split | Delete | Add video | Clear | Zoom- | Zoom+
+             Horizontally scrollable so every button stays reachable on any width.
+             Show/hide is driven on THIS view (the inner bar stays visible). -->
+        <HorizontalScrollView
+            android:id="@+id/editorControlBarScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/editorControlBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="4dp">
+
+            <ImageButton
+                android:id="@+id/editorPlayBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_primary"
+                android:contentDescription="Play/Pause"
+                android:src="@drawable/ic_play"
+                app:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/editorAutoScrollBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Auto-scroll"
+                android:src="@drawable/ic_auto_scroll"
+                app:tint="#88FFFFFF" />
+
+            <TextView
+                android:id="@+id/editorAddSplitBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add split at playhead"
+                android:gravity="center"
+                android:text="✂"
+                android:textColor="#FFFFFFFF"
+                android:textSize="15sp" />
+
+            <ImageButton
+                android:id="@+id/editorDeleteSplitBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Delete selected split"
+                android:src="@drawable/ic_delete"
+                app:tint="#FFFFFFFF" />
+
+            <ImageButton
+                android:id="@+id/editorAddSongBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add a video to the end of the timeline"
+                android:src="@drawable/ic_video_edit"
+                app:tint="#FFFFFFFF" />
+
+            <TextView
+                android:id="@+id/editorClearBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Clear the timeline and unload the video"
+                android:gravity="center"
+                android:text="🗑"
+                android:textColor="#FFFFFFFF"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/editorZoomOutBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="－"
+                android:textColor="#FFFFFFFF"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/editorZoomInBtn"
+                android:layout_width="40dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="＋"
+                android:textColor="#FFFFFFFF"
+                android:textSize="16sp" />
+        </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Split mode undo/redo -->
+        <LinearLayout
+            android:id="@+id/editorUndoRedoRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="10dp"
+            android:paddingTop="3dp"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:id="@+id/editorUndoBtn"
+                android:layout_width="0dp"
+                android:layout_height="30dp"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="↩ Undo"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/editorRedoBtn"
+                android:layout_width="0dp"
+                android:layout_height="30dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:text="↪ Redo"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- Segment list -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="3dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:overScrollMode="ifContentScrolls">
+
+            <LinearLayout
+                android:id="@+id/editorSegmentList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="12dp"
+                android:paddingBottom="6dp" />
+        </ScrollView>
+
+        <!-- Preview (split mode: plays parts in list order) + Save -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="10dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="6dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/editorSeqPreviewBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:gravity="center"
+                android:paddingVertical="7dp"
+                android:text="▶ Preview"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:visibility="gone"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/editorSaveBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.4"
+                android:background="@drawable/bg_editor_btn_primary"
+                android:gravity="center"
+                android:paddingVertical="7dp"
+                android:text="Save"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Progress overlay -->
+    <FrameLayout
+        android:id="@+id/editorProgressOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginHorizontal="32dp"
+            android:background="@drawable/bg_editor_panel"
+            android:orientation="vertical"
+            android:padding="24dp">
+
+            <TextView
+                android:id="@+id/editorProgressTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Processing Video…"
+                android:textColor="#FFFFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <ProgressBar
+                android:id="@+id/editorProgressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:max="100"
+                android:progressTint="#FF6C63FF" />
+
+            <TextView
+                android:id="@+id/editorProgressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="0%"
+                android:textColor="#AAFFFFFF"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/editorCancelBtn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:paddingHorizontal="22dp"
+                android:paddingVertical="9dp"
+                android:text="Cancel"
+                android:textColor="#FFFFFFFF"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </FrameLayout>
+</FrameLayout>

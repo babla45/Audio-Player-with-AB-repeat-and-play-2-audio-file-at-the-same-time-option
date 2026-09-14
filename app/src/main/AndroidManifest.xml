@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <!-- All files access: lets rename/delete write directly to MediaStore/SD card
          without per-file consent prompts (requires user grant via Settings) -->
     <uses-permission
@@ -20,6 +21,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Schedule Timer: re-arm daily schedules after reboot; arm exact alarms -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:allowBackup="true"
@@ -80,6 +84,29 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
+ 
+        <activity
+            android:name=".VideoListActivity"
+            android:label="Video Files"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".VideoEditorActivity"
+            android:exported="true"
+            android:label="Video Editor"
+            android:parentActivityName=".MainActivity">
+            <!-- Share target: one shared video opens Split, several open Merge -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".AudioPlaybackService"
@@ -92,6 +119,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Schedule Timer: fires the alarm (explicit PendingIntent, app-internal);
+             BOOT_COMPLETED re-arms daily schedules after a reboot -->
+        <receiver android:name=".ScheduleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
     </application>

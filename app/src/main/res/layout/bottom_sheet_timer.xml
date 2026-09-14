@@ -41,6 +41,48 @@
             android:layout_marginStart="12dp" />
     </LinearLayout>
 
+    <!-- Tabs: Sleep Timer | Schedule Timer -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:id="@+id/timer_tab_sleep"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/bg_icon_container"
+            android:gravity="center"
+            android:text="😴 Sleep"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:textColor="@color/accent_primary" />
+
+        <TextView
+            android:id="@+id/timer_tab_schedule"
+            android:layout_width="0dp"
+            android:layout_height="36dp"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/bg_icon_container"
+            android:gravity="center"
+            android:text="⏰ Schedule"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary" />
+    </LinearLayout>
+
+    <!-- ===== SLEEP PANE (original content, unchanged) ===== -->
+    <LinearLayout
+        android:id="@+id/timer_sleep_pane"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
     <!-- Quick presets -->
     <HorizontalScrollView
         android:layout_width="match_parent"
@@ -182,4 +224,317 @@
             android:text="Set Timer"
             android:layout_marginStart="8dp" />
     </LinearLayout>
+    </LinearLayout>
+    <!-- ===== END SLEEP PANE ===== -->
+
+    <!-- ===== SCHEDULE PANE ===== -->
+    <LinearLayout
+        android:id="@+id/timer_schedule_pane"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/schedule_status_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/accent_primary"
+            android:textSize="13sp"
+            android:paddingHorizontal="20dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone" />
+
+        <!-- Quick time presets -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/schedule_chip_1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="06:00"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/schedule_chip_2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="07:30"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/schedule_chip_3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="09:00"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/schedule_chip_4"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="22:00" />
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- Mode: at a clock time, or after a delay -->
+        <RadioGroup
+            android:id="@+id/schedule_mode_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="8dp">
+
+            <RadioButton
+                android:id="@+id/schedule_mode_at"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⏰ At time"
+                android:textColor="@color/text_primary"
+                android:buttonTint="@color/accent_primary"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/schedule_mode_after"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⏳ After"
+                android:textColor="@color/text_primary"
+                android:buttonTint="@color/accent_primary" />
+        </RadioGroup>
+
+        <!-- Clock time input -->
+        <LinearLayout
+            android:id="@+id/schedule_time_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="At:"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/schedule_hour_input"
+                android:layout_width="70dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/bg_icon_container"
+                android:gravity="center"
+                android:hint="HH"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:inputType="number"
+                android:maxLength="2"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=":"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginHorizontal="8dp" />
+
+            <EditText
+                android:id="@+id/schedule_minute_input"
+                android:layout_width="70dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_icon_container"
+                android:gravity="center"
+                android:hint="MM"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:inputType="number"
+                android:maxLength="2"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="(24h)"
+                android:textColor="@color/text_tertiary"
+                android:textSize="13sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- Duration input (After mode) -->
+        <LinearLayout
+            android:id="@+id/schedule_duration_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="16dp"
+            android:visibility="gone">
+
+            <EditText
+                android:id="@+id/schedule_dur_hour"
+                android:layout_width="64dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_icon_container"
+                android:gravity="center"
+                android:hint="HH"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:inputType="number"
+                android:maxLength="3"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=":"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginHorizontal="6dp" />
+
+            <EditText
+                android:id="@+id/schedule_dur_min"
+                android:layout_width="64dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_icon_container"
+                android:gravity="center"
+                android:hint="MM"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:inputType="number"
+                android:maxLength="2"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text=":"
+                android:textColor="@color/text_primary"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginHorizontal="6dp" />
+
+            <EditText
+                android:id="@+id/schedule_dur_sec"
+                android:layout_width="64dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_icon_container"
+                android:gravity="center"
+                android:hint="SS"
+                android:textColorHint="@color/text_tertiary"
+                android:textColor="@color/text_primary"
+                android:inputType="number"
+                android:maxLength="2"
+                android:padding="8dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="h : m : s"
+                android:textColor="@color/text_tertiary"
+                android:textSize="13sp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+
+        <!-- Song picker -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Play this song:"
+            android:textColor="@color/text_secondary"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="20dp"
+            android:paddingBottom="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="20dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/schedule_pick_song_btn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🎵 Choose song" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/schedule_current_song_btn"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="▶ Current" />
+
+            <TextView
+                android:id="@+id/schedule_song_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:text="No song selected"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp"
+                android:maxLines="2"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <!-- Repeat daily -->
+        <CheckBox
+            android:id="@+id/schedule_daily_check"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:paddingHorizontal="20dp"
+            android:text="Repeat daily"
+            android:textColor="@color/text_primary"
+            android:buttonTint="@color/accent_primary" />
+
+        <!-- Buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="end"
+            android:paddingHorizontal="20dp"
+            android:paddingTop="12dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/schedule_cancel_btn"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Cancel Schedule"
+                android:textColor="@color/text_tertiary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/schedule_set_btn"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Set Schedule"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
+    </LinearLayout>
+    <!-- ===== END SCHEDULE PANE ===== -->
 </LinearLayout>

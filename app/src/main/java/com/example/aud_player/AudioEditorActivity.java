@@ -675,7 +675,7 @@ public class AudioEditorActivity extends AppCompatActivity {
     private void updateMergeInfoText() {
         int n = mergeSources.size();
         if (n == 0) {
-            mergeInfoText.setText("No songs yet  •  tap the ＋ button to add some");
+            mergeInfoText.setText("No songs yet  •  tap the list icon to add some");
         } else if (n == 1) {
             mergeInfoText.setText("1 song  •  add one more to merge");
         } else {

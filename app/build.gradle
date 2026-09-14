@@ -13,6 +13,12 @@ android {
         versionCode 72
         versionName "7.2"
 
+        // Modern phones only (arm64) — drop emulator (x86) and old 32-bit
+        // (armeabi-v7a) ABIs to keep the APK small.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -45,8 +51,10 @@ dependencies {
     implementation 'com.google.android.material:material:1.9.0'
     implementation 'androidx.media:media:1.6.0'
     implementation 'androidx.documentfile:documentfile:1.0.1'
-    // FFmpeg for the Audio Editor (cut / split / merge).
+    // FFmpeg for the Audio + Video Editor (cut / split / merge).
     // Maintained drop-in replacement for the retired com.arthenica
     // ffmpeg-kit (same package/API, SDK 35 + 16KB pages).
-    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-min:8.1.7'
+    // full-gpl: adds libx264/libx265 so the video editor can re-encode the
+    // few seconds around a cut point (smart cut) — min has no H.264 encoder.
+    implementation 'dev.ffmpegkit-maintained:ffmpeg-kit-full-gpl:8.1.7'
 }

@@ -47,6 +47,8 @@ public class AudioPlaybackService extends Service {
     private static final String ACTION_STOP = "ACTION_STOP";
     private static final String ACTION_NEXT = "ACTION_NEXT";
     private static final String ACTION_PREV = "ACTION_PREV";
+    /** Schedule Timer: play the given Uri on a service-owned player. */
+    public static final String ACTION_SCHEDULED_PLAY = "ACTION_SCHEDULED_PLAY";
 
     // Shared boost range — must match MainActivity's BOOST_MIN / BOOST_MAX
     // so the slider, service, presets and voice-changer all agree.
@@ -364,6 +366,9 @@ public class AudioPlaybackService extends Service {
                     } catch (Exception e) {
                         Log.e(TAG, "Error broadcasting prev", e);
                     }
+                    break;
+                case ACTION_SCHEDULED_PLAY:
+                    playScheduled(intent);
                     break;
                 case ACTION_STOP:
                     try {
@@ -1082,6 +1087,10 @@ public class AudioPlaybackService extends Service {
             }
             secondAudioActive = false;
             isPlaying = false;
+            if (scheduledPlayer != null) {
+                try { scheduledPlayer.release(); } catch (Exception ignored) {}
+                scheduledPlayer = null;
+            }
             // Also kill any orphaned players that were never handed to this
             // service, so tearing the service down can never leave audio running.
             try {
@@ -1305,5 +1314,97 @@ public class AudioPlaybackService extends Service {
      */
     public void setSecondMediaPlayer(MediaPlayer second) {
         this.secondMediaPlayer = second;
+    }
+
+    // ---- Schedule Timer (⏰ tab of TimerBottomSheet) ----
+
+    /** Player owned by the service itself (schedule fires with no activity). */
+    private MediaPlayer scheduledPlayer;
+    private MediaPlayer.OnCompletionListener scheduledCompletion;
+
+    /**
+     * Play the scheduled song on a service-owned MediaPlayer. Works with the
+     * app closed/backgrounded: the alarm started this service via
+     * startForegroundService, so we are already foreground with the mini-
+     * player notification. If the activity happens to be alive and playing,
+     * its playback is stopped first (PlaybackRegistry) so two songs never
+     * overlap.
+     */
+    private void playScheduled(Intent intent) {
+        android.net.Uri uri = intent.getData();
+        if (uri == null) return;
+        String title = intent.getStringExtra("title");
+        if (title == null || title.isEmpty()) title = "Scheduled song";
+        final String songTitle = title;
+
+        // Stop everything else — the scheduled song takes over exclusively.
+        try { PlaybackRegistry.stopAll(); } catch (Exception ignored) {}
+        if (scheduledPlayer != null) {
+            try { scheduledPlayer.release(); } catch (Exception ignored) {}
+            scheduledPlayer = null;
+        }
+        mediaPlayer = null;      // activity-owned reference is dead now
+        secondMediaPlayer = null;
+        secondAudioActive = false;
+
+        try {
+            MediaPlayer mp = new MediaPlayer();
+            PlaybackRegistry.register(mp);
+            try {
+                mp.setDataSource(this, uri);
+            } catch (Exception e) {
+                // Same descriptor fallback the activity uses (some devices
+                // fail on plain content URIs for certain encodings).
+                try (android.content.res.AssetFileDescriptor afd =
+                             getContentResolver().openAssetFileDescriptor(uri, "r")) {
+                    if (afd == null) throw e;
+                    mp.setDataSource(afd.getFileDescriptor(), afd.getStartOffset(), afd.getLength());
+                }
+            }
+            mp.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build());
+            mp.setOnPreparedListener(player -> {
+                try {
+                    if (requestAudioFocus()) {
+                        currentTitle = songTitle;
+                        this.mediaPlayer = player; // the shared notification player
+                        isPlaying = true;
+                        player.start();
+                        registerBecomingNoisy();
+                        updateMediaSessionMetadata();
+                        startForeground(NOTIFICATION_ID, createNotification());
+                        updatePlaybackState();
+                        Log.i(TAG, "Scheduled playback started: " + songTitle);
+                        // Tell a live activity UI to adopt this song/player
+                        // (otherwise it keeps showing the old, now-stopped
+                        // song as paused while the scheduled one plays).
+                        Intent resumed = new Intent("PLAYBACK_RESUMED");
+                        resumed.putExtra("uri", uri.toString());
+                        resumed.putExtra("title", songTitle);
+                        sendLocalBroadcast(resumed);
+                    }
+                } catch (Exception ex) {
+                    Log.e(TAG, "Scheduled playback failed to start", ex);
+                }
+            });
+            scheduledCompletion = player -> {
+                // One song, no queue — end of the scheduled song just stops.
+                try {
+                    isPlaying = false;
+                    player.pause();
+                    abandonAudioFocus();
+                    unregisterBecomingNoisy();
+                    updateNotification();
+                    sendLocalBroadcast(new Intent("PLAYBACK_PAUSED"));
+                } catch (Exception ignored) {}
+            };
+            mp.setOnCompletionListener(scheduledCompletion);
+            scheduledPlayer = mp;
+            mp.prepareAsync();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to prepare scheduled playback", e);
+        }
     }
 }

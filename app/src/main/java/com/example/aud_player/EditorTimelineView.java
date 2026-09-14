@@ -13,6 +13,7 @@ import android.view.View;
 import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -94,6 +95,18 @@ public class EditorTimelineView extends View {
     private final List<long[]> deletedRanges = new ArrayList<>();
     private long minGapMs = FFmpegAudioEditor.MIN_SEGMENT_MS;
 
+    /**
+     * Optional keyframe grid in ORIGINAL time, ascending (null = off).
+     * A lossless stream copy can only start a cut on a keyframe, so when the
+     * video editor supplies the source's keyframes every marker is pulled
+     * onto the nearest one: the line is then drawn exactly where the cut
+     * will land. The audio editor never sets this, so its markers stay free.
+     */
+    private long[] snapPointsMs;
+
+    /** How many grid points addSplitPoint may try before giving up. */
+    private static final int MAX_SNAP_TRIES = 12;
+
     // ---- kept-layout cache (compressed display mapping) ----
 
     /** One kept segment: original range + original number + bounds index. */
@@ -174,6 +187,7 @@ public class EditorTimelineView extends View {
     private final Paint playheadCapPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint seamPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint keyframePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
 
     private static final int COLOR_BG = 0xFF1D1D24;
@@ -191,10 +205,15 @@ public class EditorTimelineView extends View {
     private static final int COLOR_PLAYHEAD = 0xFFFF5252;
     /** Dashed seam between kept parts across a deleted gap. */
     private static final int COLOR_SEAM = 0x99FF7043;
+    /**
+     * Keyframe ticks — the positions a lossless cut can actually start from.
+     * Shown so it reads as a deliberate grid, not as the pointer sticking.
+     */
+    private static final int COLOR_KEYFRAME = 0x8FA5F3FC;
     private static final int PLACEHOLDER_COLOR = 0x44999999;
     private static final int PLACEHOLDER_SELECTED_COLOR = 0x666C63FF;
 
-    /** drag state: 0 none, 1 cut start, 2 cut end, 10+i split boundary i */
+    /** drag state: 0 none, 1 cut start, 2 cut end, 3 playhead, 10+i split boundary i */
     private int dragTarget = 0;
     private float downX, downY;
     private boolean tapPending;
@@ -246,6 +265,8 @@ public class EditorTimelineView extends View {
         seamPaint.setStrokeWidth(dp(2));
         seamPaint.setPathEffect(new android.graphics.DashPathEffect(
                 new float[]{dp(4), dp(4)}, 0));
+        keyframePaint.setColor(COLOR_KEYFRAME);
+        keyframePaint.setStrokeWidth(dp(2));
     }
 
     // ------------------------------------------------------------------
@@ -355,6 +376,22 @@ public class EditorTimelineView extends View {
 
     // ---- split points ----
 
+    /**
+     * Hand over the keyframe grid every marker is pulled onto (see
+     * {@link #snapPointsMs}). Passing null or an empty array turns snapping
+     * off again and restores free positioning.
+     */
+    public void setSnapPoints(long[] points) {
+        if (points == null || points.length == 0) {
+            snapPointsMs = null;
+        } else {
+            long[] copy = Arrays.copyOf(points, points.length);
+            Arrays.sort(copy);
+            snapPointsMs = copy;
+        }
+        resnapSplitPoints();
+    }
+
     public void setSplitPoints(List<Long> points) {
         splitPoints.clear();
         if (points != null) {
@@ -389,6 +426,34 @@ public class EditorTimelineView extends View {
 
     /** Add a split at the given time if valid; returns the new index or -1. */
     public int addSplitPoint(long t) {
+        // With a keyframe grid in place the marker must land on a keyframe,
+        // otherwise a stream-copied cut would start at the keyframe BEFORE
+        // the line and drag extra video into the next part. The grid point
+        // AT OR AFTER the playhead is tried first: a backward snap steals
+        // video from before the pointer into the previous part and reads as
+        // "the split happened earlier than where I put it". Only when there
+        // is no keyframe ahead (pointer near the end) does it fall back to
+        // the ones behind.
+        if (snapPointsMs == null) {
+            int idx = insertSplitIfValid(t);
+            return idx;
+        }
+        int i = lowerBound(snapPointsMs, t);
+        for (int k = 0; k < MAX_SNAP_TRIES; k++) {
+            // ahead first (i, i+1, ...), then behind (i-1, i-2, ...)
+            int idx = k % 2 == 0 ? i + k / 2 : i - (k + 1) / 2;
+            if (idx < 0 || idx >= snapPointsMs.length) continue;
+            int inserted = insertSplitIfValid(snapPointsMs[idx]);
+            if (inserted >= 0) return inserted;
+        }
+        return -1;
+    }
+
+    /**
+     * Insert a marker at exactly {@code t} when every rule allows it,
+     * otherwise leave the split list untouched and return -1.
+     */
+    private int insertSplitIfValid(long t) {
         // Distances are measured through KEPT audio only: a deleted
         // (invisible) seam between t and a boundary contributes nothing,
         // so it can no longer trigger a false "too close" rejection.
@@ -956,8 +1021,8 @@ public class EditorTimelineView extends View {
                 longPressed = false;
                 splitMoveNotified = false;
                 dragTarget = hitTest(downX, downY);
-                if (dragTarget >= 10) {
-                    // consuming drags for boundaries: stop the
+                if (dragTarget >= 10 || dragTarget == 3) {
+                    // consuming drags for boundaries and the playhead: stop the
                     // HorizontalScrollView from stealing the gesture
                     getParent().requestDisallowInterceptTouchEvent(true);
                 }
@@ -991,6 +1056,16 @@ public class EditorTimelineView extends View {
                         return true;
                     }
                 }
+                if (dragTarget == 3) {
+                    // playhead scrub: follow the finger exactly — free and
+                    // smooth. Only the split action snaps (to a keyframe) and
+                    // then moves the pointer onto itself, so pointer and cut
+                    // still agree without the pointer sticking to the grid.
+                    playheadMs = clampPlayhead(xToTime(event.getX()));
+                    if (listener != null) listener.onPlayheadMoved(playheadMs);
+                    invalidate();
+                    return true;
+                }
                 if (dragTarget >= 10) {
                     // boundary drags engage only after the tap slop is
                     // exceeded (prevents accidental moves on taps and
@@ -1019,6 +1094,10 @@ public class EditorTimelineView extends View {
                 if (tapPending && !longPressed) {
                     if (dragTarget == 0) {
                         handleTap(downX, downY);
+                    } else if (dragTarget == 3) {
+                        // tap on the playhead: select nothing, just re-seek to
+                        // where the playhead already is (keeps the frame fresh)
+                        if (listener != null) listener.onPlayheadMoved(playheadMs);
                     } else if (dragTarget >= 10) {
                         // tap (no drag) on a boundary: select that split
                         int idx = dragTarget - 10;
@@ -1095,6 +1174,15 @@ public class EditorTimelineView extends View {
                 best = i;
             }
         }
+        // The playhead line (with its cap) is grabbable anywhere along its
+        // height. It often sits EXACTLY on a split line (splitting snaps the
+        // pointer onto it), so when both are under the finger the closer one
+        // wins — an exact tie favours the playhead, since scrubbing away from
+        // a split is the more common intent right after a split.
+        float phDx = Math.abs(x - timeToX(playheadMs));
+        if (phDx <= slop && phDx <= bestDx) {
+            return 3;
+        }
         return best >= 0 ? 10 + best : 0;
     }
 
@@ -1108,17 +1196,116 @@ public class EditorTimelineView extends View {
     }
 
     private long clampMarker(int idx, long t) {
-        t = Math.max(minGapMs, Math.min(durationMs - minGapMs, t));
+        // Work out the window this marker may occupy FIRST, then pull the
+        // time into it, then snap — so the snapped position can never end up
+        // outside the window and the rules below stay byte-for-byte the same.
+        long lo = minGapMs;
+        long hi = durationMs - minGapMs;
         if (idx > 0) {
             Long prev = splitPoints.get(idx - 1);
-            t = Math.max(t, prev + minGapMs);
+            lo = Math.max(lo, prev + minGapMs);
         }
         if (idx < splitPoints.size() - 1) {
             Long next = splitPoints.get(idx + 1);
-            t = Math.min(t, next - minGapMs);
+            hi = Math.min(hi, next - minGapMs);
         }
-        return t;
+        t = Math.max(lo, Math.min(hi, t));
+        if (snapPointsMs == null) return t; // free positioning (audio editor)
+        long snap = snapInWindow(t, lo, hi);
+        // No keyframe anywhere in the window means there is no legal cut
+        // position to move to, so the marker holds its current time (which is
+        // already on the grid) instead of settling between keyframes and
+        // dragging extra video into the next part.
+        return snap >= 0 ? snap : splitPoints.get(idx);
     }
+
+    // ---- keyframe grid ----
+
+    /**
+     * Draw a tick at every keyframe, so the snapping the pointer and the
+     * split lines do is visible as a grid of cuttable positions. Only the
+     * visible slice is walked: the grid can hold thousands of entries on a
+     * long file, and the display mapping is monotone, so a binary search
+     * finds the first visible tick and the loop stops at the last one.
+     */
+    private void drawKeyframeTicks(Canvas canvas, float waveBottom, float visL, float visR) {
+        long[] pts = snapPointsMs;
+        if (pts == null || pts.length == 0) return;
+        int lo = 0, hi = pts.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (timeToX(pts[mid]) < visL) lo = mid + 1;
+            else hi = mid;
+        }
+        float top = waveBottom - dp(10);
+        float bottom = waveBottom - dp(2);
+        for (int i = lo; i < pts.length; i++) {
+            // a keyframe inside a deleted range has no position on screen
+            // (timeToX would report the next kept part's start)
+            if (isInDeletedRange(pts[i])) continue;
+            float x = timeToX(pts[i]);
+            if (x > visR) break;
+            canvas.drawLine(x, top, x, bottom, keyframePaint);
+        }
+    }
+
+    /** First index whose grid time is >= t (grid is sorted and non-empty). */
+    private static int lowerBound(long[] pts, long t) {
+        int lo = 0, hi = pts.length;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (pts[mid] < t) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
+    }
+
+    /**
+     * The grid point nearest {@code t} that lies inside [lo, hi], or -1 when
+     * the window contains none. O(log n): only the two grid points that
+     * straddle {@code t} can be the answer.
+     */
+    private long snapInWindow(long t, long lo, long hi) {
+        long[] pts = snapPointsMs;
+        if (pts == null || pts.length == 0 || hi < lo) return -1;
+        long c = Math.max(lo, Math.min(hi, t));
+        int i = lowerBound(pts, c);
+        long best = -1;
+        if (i < pts.length && pts[i] <= hi) best = pts[i];
+        if (i > 0 && pts[i - 1] >= lo && (best < 0 || c - pts[i - 1] < best - c)) {
+            best = pts[i - 1];
+        }
+        return best;
+    }
+
+    /**
+     * Pull the markers that are already on the timeline onto the grid. A
+     * marker can be placed while a keyframe probe is still running (snapping
+     * stays off until every source has answered) or arrive from an older
+     * undo snapshot, and a cut at an off-grid marker would still carry the
+     * extra video this grid exists to remove. A no-op without a grid, so the
+     * audio editor's free positioning is untouched.
+     */
+    private void resnapSplitPoints() {
+        if (snapPointsMs == null || splitPoints.isEmpty()) return;
+        boolean moved = false;
+        for (int i = 0; i < splitPoints.size(); i++) {
+            long lo = minGapMs;
+            long hi = durationMs - minGapMs;
+            if (i > 0) lo = Math.max(lo, splitPoints.get(i - 1) + minGapMs);
+            if (i < splitPoints.size() - 1) hi = Math.min(hi, splitPoints.get(i + 1) - minGapMs);
+            long snapped = snapInWindow(splitPoints.get(i), lo, hi);
+            if (snapped >= 0 && snapped != splitPoints.get(i)) {
+                splitPoints.set(i, snapped);
+                moved = true;
+            }
+        }
+        if (!moved) return;
+        layoutDirty = true;
+        notifySplitChanged();
+        invalidate();
+    }
+
 
     private void notifySplitChanged() {
         if (listener != null) listener.onSplitPointsChanged(new ArrayList<>(splitPoints));
@@ -1198,10 +1385,11 @@ public class EditorTimelineView extends View {
             drawSegmentBadge(canvas, seg.number, xs, xe, waveTop, selected);
         }
 
+        drawKeyframeTicks(canvas, waveBottom, visL, visR);
+
         // seams: where two kept parts meet without being chronologically
         // contiguous — across a deleted gap OR at a reorder junction
-        for (int i = 0; i + 1 < keptSegs.size(); i++) {
-            SegmentInfo a = keptSegs.get(i);
+        for (int i = 0; i + 1 < keptSegs.size(); i++) {            SegmentInfo a = keptSegs.get(i);
             SegmentInfo b = keptSegs.get(i + 1);
             if (a.endMs == b.startMs) continue; // naturally contiguous
             float x = keptPrefix.get(i + 1) * pxPerMs;
