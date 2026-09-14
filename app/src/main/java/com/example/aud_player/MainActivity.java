@@ -611,6 +611,8 @@ public class MainActivity extends AppCompatActivity {
     private BroadcastReceiver closeAppReceiver;
     private BroadcastReceiver mediaControlsReceiver;
     private BroadcastReceiver pausedStateReceiver;
+    private BroadcastReceiver scheduledPlayStateReceiver;
+    private BroadcastReceiver scheduledResumeStateReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -747,6 +749,43 @@ public class MainActivity extends AppCompatActivity {
         // intent.setPackage(getPackageName()) so same-app broadcasts
         // are received correctly on all Android versions.
         ContextCompat.registerReceiver(this, mediaControlsReceiver, mediaFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Scheduled Timer fire: play the scheduled song through the normal
+        // playback path (claiming it away from the service's fallback player)
+        BroadcastReceiver scheduledPlayReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (isFinishing() || isDestroyed()) return;
+                String uriStr = intent.getStringExtra("uri");
+                if (uriStr == null) return;
+                if (serviceBound && audioService != null) {
+                    audioService.claimScheduledPlayback();
+                }
+                String title = intent.getStringExtra("title");
+                playScheduledSong(Uri.parse(uriStr),
+                        title != null ? title : "Scheduled song");
+            }
+        };
+        ContextCompat.registerReceiver(this, scheduledPlayReceiver,
+                new IntentFilter("SCHEDULED_PLAY"), ContextCompat.RECEIVER_NOT_EXPORTED);
+        scheduledPlayStateReceiver = scheduledPlayReceiver;
+
+        // Scheduled Timer "resume" fire: exactly what pressing the player's
+        // play button does — main song continues from its paused position,
+        // and the mixer's second track resumes along with it if it was active.
+        BroadcastReceiver scheduledResumeReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (isFinishing() || isDestroyed()) return;
+                if (serviceBound && audioService != null) {
+                    audioService.claimScheduledPlayback();
+                }
+                resumePlaybackLikePlayButton();
+            }
+        };
+        ContextCompat.registerReceiver(this, scheduledResumeReceiver,
+                new IntentFilter("SCHEDULED_RESUME"), ContextCompat.RECEIVER_NOT_EXPORTED);
+        scheduledResumeStateReceiver = scheduledResumeReceiver;
 
         // Update UI when playback is paused/resumed outside the UI (notification,
         // media session button, headphones unplugged, audio focus changes)
@@ -5730,6 +5769,24 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        // Unregister the scheduled-play receiver
+        if (scheduledPlayStateReceiver != null) {
+            try {
+                unregisterReceiver(scheduledPlayStateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering scheduled play receiver", e);
+            }
+        }
+
+        // Unregister the scheduled-resume receiver
+        if (scheduledResumeStateReceiver != null) {
+            try {
+                unregisterReceiver(scheduledResumeStateReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering scheduled resume receiver", e);
+            }
+        }
+
         // Unregister the close app receiver
         if (closeAppReceiver != null) {
             try {
@@ -5970,6 +6027,87 @@ public class MainActivity extends AppCompatActivity {
                 filteredAudioFiles.addAll(allAudioFiles);
                 updateAudioFilesList();
             }
+        }
+    }
+
+    /**
+     * The Schedule Timer fired while this activity is alive: play the song
+     * through the NORMAL playback path (prepareMediaPlayer + service) instead
+     * of the service's fallback player — that keeps the seekbar, mixer state,
+     * notification and play/pause wiring all consistent. The scheduled song
+     * takes over exclusively: any second (mixer) track is stopped.
+     */
+    private void playScheduledSong(Uri uri, String title) {
+        // Stop the mixer's second track — the scheduled song plays alone.
+        if (secondMediaPlayer != null) {
+            try {
+                PlaybackRegistry.unregister(secondMediaPlayer);
+                secondMediaPlayer.release();
+            } catch (Exception ignored) {
+                PlaybackRegistry.unregister(secondMediaPlayer);
+            }
+            secondMediaPlayer = null;
+        }
+        if (secondAudioActive && serviceBound && audioService != null) {
+            audioService.setSecondAudioActive(false);
+        }
+        secondAudioActive = false;
+
+        // Same switch flow as onAudioFileSelected(), minus the list context.
+        saveNowPlayingPrefs();
+        selectedAudioUri = uri;
+        fileNameText.setText(title);
+        updateMiniPlayer();
+        shouldAutoPlay = true;
+        pendingRestoreSeekMs = 0; // a scheduled play always starts fresh
+        prepareMediaPlayer();
+        Toast.makeText(this, "⏰ Scheduled: " + title, Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * Schedule Timer "resume": behave exactly like pressing the player's
+     * play button — main song continues from its paused position, and the
+     * mixer's second track resumes with it if it was active. Works for both
+     * single and mixer playback; does nothing when there is no loaded song.
+     */
+    private void resumePlaybackLikePlayButton() {
+        if (mediaPlayer == null || selectedAudioUri == null) {
+            Toast.makeText(this, "Nothing is paused to resume", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            // Kill any orphaned players before resuming, same as the button
+            if (!mixerModeActive || !secondAudioActive) {
+                PlaybackRegistry.stopAllExcept(mediaPlayer, null);
+            } else {
+                PlaybackRegistry.stopAllExcept(mediaPlayer, secondMediaPlayer);
+            }
+            mediaPlayer.start();
+            startSecondTrackIfNotFinished(); // mixer second track, if active
+            safeSetImageResource(playPauseButton, R.drawable.ic_pause_improved);
+            isPlaying = true;
+            updateSeekBar();
+            updateMiniPlayer();
+            startPlaybackService("ACTION_PLAY");
+            if (serviceBound && audioService != null) {
+                audioService.setMediaPlayers(mediaPlayer,
+                        secondAudioActive ? secondMediaPlayer : null,
+                        fileNameText.getText().toString());
+            }
+            Toast.makeText(this, "⏰ Resuming playback", Toast.LENGTH_SHORT).show();
+        } catch (IllegalStateException e) {
+            // Player died while paused (e.g. process was killed) — rebuild
+            // from the last persisted position, like the play button does.
+            Log.w(TAG, "Scheduled resume: player dead, re-preparing", e);
+            try {
+                SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                if (selectedAudioUri.toString().equals(prefs.getString(PREF_NOW_PLAYING_URI, null))) {
+                    pendingRestoreSeekMs = prefs.getInt(PREF_NOW_PLAYING_POSITION, 0);
+                }
+            } catch (Exception ignored) {}
+            shouldAutoPlay = true;
+            initMediaPlayer();
+            prepareMediaPlayer();
         }
     }
 

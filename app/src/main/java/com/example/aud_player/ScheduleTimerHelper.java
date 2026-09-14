@@ -38,6 +38,8 @@ public final class ScheduleTimerHelper {
     /** "at" = clock time (can repeat daily), "after" = one-shot delay. */
     public static final String MODE_AT = "at";
     public static final String MODE_AFTER = "after";
+    /** Resume the player's paused playback (main + mixer second track) instead of a picked song. */
+    public static final String KEY_RESUME = "resume";
 
     private ScheduleTimerHelper() {}
 
@@ -59,7 +61,8 @@ public final class ScheduleTimerHelper {
             if (left < 0) left = 0;
             long h = left / 3600000L, m = (left % 3600000L) / 60000L, s = (left % 60000L) / 1000L;
             return String.format(java.util.Locale.getDefault(), "in %02d:%02d:%02d", h, m, s)
-                    + " • " + p.getString(KEY_TITLE, "");
+                    + " • " + (p.getBoolean(KEY_RESUME, false)
+                        ? "resume playback" : p.getString(KEY_TITLE, ""));
         }
         return String.format(java.util.Locale.getDefault(), "%02d:%02d",
                 p.getInt(KEY_HOUR, 0), p.getInt(KEY_MINUTE, 0))
@@ -89,6 +92,7 @@ public final class ScheduleTimerHelper {
                 .putInt(KEY_HOUR, hour)
                 .putInt(KEY_MINUTE, minute)
                 .putBoolean(KEY_DAILY, daily)
+                .putBoolean(KEY_RESUME, false)
                 .putString(KEY_URI, uri != null ? uri.toString() : null)
                 .putString(KEY_TITLE, title != null ? title : "")
                 .putLong(KEY_TRIGGER_AT, triggerAt)
@@ -107,8 +111,27 @@ public final class ScheduleTimerHelper {
         prefs(context).edit()
                 .putString(KEY_MODE, MODE_AFTER)
                 .putBoolean(KEY_DAILY, false)
+                .putBoolean(KEY_RESUME, false)
                 .putString(KEY_URI, uri != null ? uri.toString() : null)
                 .putString(KEY_TITLE, title != null ? title : "")
+                .putLong(KEY_TRIGGER_AT, triggerAt)
+                .apply();
+        armAlarm(context, triggerAt);
+    }
+
+    /**
+     * Arm a one-shot "resume playback" schedule: at fire time the player's
+     * paused position resumes — the main song and, if the mixer was active,
+     * its second track along with it. No song is picked; null uri.
+     */
+    public static void scheduleResume(Context context, long delayMs) {
+        long triggerAt = System.currentTimeMillis() + Math.max(1000L, delayMs);
+        prefs(context).edit()
+                .putString(KEY_MODE, MODE_AFTER)
+                .putBoolean(KEY_DAILY, false)
+                .putBoolean(KEY_RESUME, true)
+                .putString(KEY_URI, (String) null)
+                .putString(KEY_TITLE, "Resume playback")
                 .putLong(KEY_TRIGGER_AT, triggerAt)
                 .apply();
         armAlarm(context, triggerAt);

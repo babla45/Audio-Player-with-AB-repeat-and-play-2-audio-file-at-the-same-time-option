@@ -186,16 +186,17 @@ public class TimerBottomSheet extends BottomSheetDialogFragment {
             songPicker.launch(intent);
         });
 
-        // Use the song currently open in the player
+        // "▶ Current" = resume the CURRENTLY OPEN song from its paused
+        // position (main + mixer second track together). Only meaningful in
+        // After mode — a clock time can't know what is paused now.
         view.findViewById(R.id.schedule_current_song_btn).setOnClickListener(v -> {
-            if (currentSongProvider == null) return;
-            Uri uri = currentSongProvider.getCurrentSongUri();
-            if (uri == null) {
+            if (currentSongProvider == null
+                    || currentSongProvider.getCurrentSongUri() == null) {
                 Toast.makeText(getContext(), "No song is currently open", Toast.LENGTH_SHORT).show();
                 return;
             }
-            scheduledSongUri = uri;
-            scheduledSongTitle = currentSongProvider.getCurrentSongTitle();
+            scheduledSongUri = null; // resume mode: no song picked
+            scheduledSongTitle = "Resume: " + currentSongProvider.getCurrentSongTitle();
             scheduleSongTitle.setText("▶ " + scheduledSongTitle);
         });
 
@@ -207,12 +208,7 @@ public class TimerBottomSheet extends BottomSheetDialogFragment {
         }
 
         view.findViewById(R.id.schedule_set_btn).setOnClickListener(v -> {
-            if (scheduledSongUri == null) {
-                Toast.makeText(getContext(), "Choose a song first (or tap ▶ Current)", Toast.LENGTH_SHORT).show();
-                return;
-            }
             boolean atTime = modeGroup.getCheckedRadioButtonId() == R.id.schedule_mode_at;
-            boolean daily = ((android.widget.CheckBox) view.findViewById(R.id.schedule_daily_check)).isChecked();
 
             if (atTime) {
                 Integer hour = parse(hourInput, 0, 23);
@@ -221,6 +217,11 @@ public class TimerBottomSheet extends BottomSheetDialogFragment {
                     Toast.makeText(getContext(), "Enter a valid time (00:00–23:59)", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                if (scheduledSongUri == null) {
+                    Toast.makeText(getContext(), "Choose a song first (🎵)", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                boolean daily = ((android.widget.CheckBox) view.findViewById(R.id.schedule_daily_check)).isChecked();
                 ScheduleTimerHelper.schedule(requireContext(), hour, minute,
                         daily, scheduledSongUri, scheduledSongTitle);
                 Toast.makeText(getContext(), "Scheduled " + String.format("%02d:%02d", hour, minute)
@@ -234,11 +235,20 @@ public class TimerBottomSheet extends BottomSheetDialogFragment {
                     return;
                 }
                 long delayMs = (h * 3600L + m * 60L + s) * 1000L;
-                ScheduleTimerHelper.scheduleAfter(requireContext(), delayMs,
-                        scheduledSongUri, scheduledSongTitle);
-                Toast.makeText(getContext(), "Plays in "
-                        + String.format("%02d:%02d:%02d", h, m, s)
-                        + " • " + scheduledSongTitle, Toast.LENGTH_LONG).show();
+                if (scheduledSongUri == null) {
+                    // ▶ Current was tapped: resume the paused playback
+                    ScheduleTimerHelper.scheduleResume(requireContext(), delayMs);
+                    Toast.makeText(getContext(), "Resume in "
+                            + String.format("%02d:%02d:%02d", h, m, s)
+                            + " • " + scheduledSongTitle.replaceFirst("^Resume: ", ""),
+                            Toast.LENGTH_LONG).show();
+                } else {
+                    ScheduleTimerHelper.scheduleAfter(requireContext(), delayMs,
+                            scheduledSongUri, scheduledSongTitle);
+                    Toast.makeText(getContext(), "Plays in "
+                            + String.format("%02d:%02d:%02d", h, m, s)
+                            + " • " + scheduledSongTitle, Toast.LENGTH_LONG).show();
+                }
             }
             dismiss();
         });

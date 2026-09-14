@@ -3,6 +3,7 @@ package com.example.aud_player;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.util.Log;
@@ -34,20 +35,31 @@ public class ScheduleReceiver extends BroadcastReceiver {
         }
         if (!ACTION_SCHEDULE_FIRE.equals(action)) return;
 
-        String uriStr = context.getSharedPreferences(
-                        ScheduleTimerHelper.PREFS, Context.MODE_PRIVATE)
-                .getString("uri", null);
-        String title = context.getSharedPreferences(
-                        ScheduleTimerHelper.PREFS, Context.MODE_PRIVATE)
-                .getString("title", "");
-        boolean daily = context.getSharedPreferences(
-                        ScheduleTimerHelper.PREFS, Context.MODE_PRIVATE)
-                .getBoolean("daily", false);
+        SharedPreferences p = context.getSharedPreferences(
+                ScheduleTimerHelper.PREFS, Context.MODE_PRIVATE);
+        boolean resume = p.getBoolean("resume", false);
+        String uriStr = p.getString("uri", null);
+        String title = p.getString("title", "");
+        boolean daily = p.getBoolean("daily", false);
         if (daily) {
             ScheduleTimerHelper.rescheduleFromBoot(context); // re-arm tomorrow
         } else {
-            context.getSharedPreferences(ScheduleTimerHelper.PREFS, Context.MODE_PRIVATE)
-                    .edit().remove("trigger_at").apply(); // one-shot consumed
+            p.edit().remove("trigger_at").apply(); // one-shot consumed
+        }
+        if (resume) {
+            // Resume the player's paused position (main + mixer second track).
+            try {
+                Intent svc = new Intent(context, AudioPlaybackService.class);
+                svc.setAction(AudioPlaybackService.ACTION_SCHEDULED_RESUME);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(svc);
+                } else {
+                    context.startService(svc);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to start scheduled resume", e);
+            }
+            return;
         }
         if (uriStr == null) {
             Log.w(TAG, "Schedule fired with no song — cancelled");

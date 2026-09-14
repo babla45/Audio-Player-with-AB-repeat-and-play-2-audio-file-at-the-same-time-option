@@ -49,6 +49,8 @@ public class AudioPlaybackService extends Service {
     private static final String ACTION_PREV = "ACTION_PREV";
     /** Schedule Timer: play the given Uri on a service-owned player. */
     public static final String ACTION_SCHEDULED_PLAY = "ACTION_SCHEDULED_PLAY";
+    /** Schedule Timer: resume the player's paused playback. */
+    public static final String ACTION_SCHEDULED_RESUME = "ACTION_SCHEDULED_RESUME";
 
     // Shared boost range — must match MainActivity's BOOST_MIN / BOOST_MAX
     // so the slider, service, presets and voice-changer all agree.
@@ -369,6 +371,9 @@ public class AudioPlaybackService extends Service {
                     break;
                 case ACTION_SCHEDULED_PLAY:
                     playScheduled(intent);
+                    break;
+                case ACTION_SCHEDULED_RESUME:
+                    resumeScheduled();
                     break;
                 case ACTION_STOP:
                     try {
@@ -1064,6 +1069,10 @@ public class AudioPlaybackService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (scheduledFallback != null) {
+            scheduleHandler.removeCallbacks(scheduledFallback);
+            scheduledFallback = null;
+        }
         try {
             // The activity owns these player instances (they are passed in via
             // setMediaPlayers). Releasing them here would leave a still-open
@@ -1321,14 +1330,65 @@ public class AudioPlaybackService extends Service {
     /** Player owned by the service itself (schedule fires with no activity). */
     private MediaPlayer scheduledPlayer;
     private MediaPlayer.OnCompletionListener scheduledCompletion;
+    // Scheduled-fire handoff to a live activity (see playScheduled)
+    private final Handler scheduleHandler = new Handler(Looper.getMainLooper());
+    private Runnable scheduledFallback;
 
     /**
-     * Play the scheduled song on a service-owned MediaPlayer. Works with the
-     * app closed/backgrounded: the alarm started this service via
-     * startForegroundService, so we are already foreground with the mini-
-     * player notification. If the activity happens to be alive and playing,
-     * its playback is stopped first (PlaybackRegistry) so two songs never
-     * overlap.
+     * Schedule Timer "resume" fired: continue playback from the paused
+     * position — the main song and, if it was active, the mixer's second
+     * track together. A live activity is preferred (it owns the players and
+     * all UI wiring); it claims via claimScheduledPlayback(). With the app
+     * closed, this service's own player references are resumed instead
+     * (they were only paused, never released, while the notification sat in
+     * the shade).
+     */
+    private void resumeScheduled() {
+        if (scheduledFallback != null) scheduleHandler.removeCallbacks(scheduledFallback);
+        scheduledFallback = () -> {
+            scheduledFallback = null;
+            // No live activity claimed it — resume this service's players.
+            try {
+                if (mediaPlayer != null && requestAudioFocus()) {
+                    if (!mediaPlayer.isPlaying()) {
+                        mediaPlayer.start();
+                    }
+                    isPlaying = true;
+                    registerBecomingNoisy();
+                    updateMediaSessionMetadata();
+                    startForeground(NOTIFICATION_ID, createNotification());
+                    updatePlaybackState();
+                    sendLocalBroadcast(new Intent("PLAYBACK_RESUMED"));
+                    Log.i(TAG, "Scheduled resume (service): " + currentTitle);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Scheduled resume failed", e);
+            }
+        };
+        scheduleHandler.postDelayed(scheduledFallback, 1500);
+        sendLocalBroadcast(new Intent("SCHEDULED_RESUME"));
+    }
+
+    /**
+     * A live activity claims the scheduled song — cancel the service-owned
+     * fallback; the activity plays it through its normal playback path
+     * (which keeps the mixer, seekbar and notification consistent).
+     */
+    public void claimScheduledPlayback() {
+        if (scheduledFallback != null) {
+            scheduleHandler.removeCallbacks(scheduledFallback);
+            scheduledFallback = null;
+        }
+    }
+
+    /**
+     * Play the scheduled song. A live activity is preferred (it owns the
+     * primary player, mixer state and all UI wiring): we broadcast
+     * SCHEDULED_PLAY and give it ~1.5s to claim the request. Only when no
+     * activity claims it (app closed/killed) do we fall back to a
+     * service-owned MediaPlayer — the alarm started this service via
+     * startForegroundService, so we are already foreground with the
+     * mini-player notification either way.
      */
     private void playScheduled(Intent intent) {
         android.net.Uri uri = intent.getData();
@@ -1336,6 +1396,23 @@ public class AudioPlaybackService extends Service {
         String title = intent.getStringExtra("title");
         if (title == null || title.isEmpty()) title = "Scheduled song";
         final String songTitle = title;
+        final android.net.Uri songUri = uri;
+
+        // Offer the song to a live activity first.
+        if (scheduledFallback != null) scheduleHandler.removeCallbacks(scheduledFallback);
+        scheduledFallback = () -> {
+            scheduledFallback = null;
+            playScheduledOnServicePlayer(songUri, songTitle);
+        };
+        scheduleHandler.postDelayed(scheduledFallback, 1500);
+        Intent req = new Intent("SCHEDULED_PLAY");
+        req.putExtra("uri", uri.toString());
+        req.putExtra("title", songTitle);
+        sendLocalBroadcast(req);
+    }
+
+    /** No live activity — play on a player the service owns itself. */
+    private void playScheduledOnServicePlayer(android.net.Uri uri, String songTitle) {
 
         // Stop everything else — the scheduled song takes over exclusively.
         try { PlaybackRegistry.stopAll(); } catch (Exception ignored) {}
