@@ -66,6 +66,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
 
     private static final int TAB_MERGE = 0;
     private static final int TAB_SPLIT = 1;
+    private static final int TAB_COMPRESS = 2;
     private static final long PLAYHEAD_UPDATE_MS = 33;
     private static final int MAX_HISTORY = 50;
     private static final float DEFAULT_SPLIT_ZOOM = 10f;
@@ -120,6 +121,12 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         boolean keyframesRequested;
         /** True once the probe has answered (even if it found nothing). */
         boolean probeDone;
+        /**
+         * Size of the original file in bytes, or 0 when it could not be read.
+         * Only the Compress tab needs it (it is what the "before" side of the
+         * savings summary weighs); Merge and Split leave it alone.
+         */
+        long sizeBytes;
 
         Source(Uri uri, String title, long durationMs) {
             this.uri = uri;
@@ -135,6 +142,41 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private final List<Source> mergeSources = new ArrayList<>();
     private long mergeDurationMs;
 
+    // ---------------------------------------------------------------
+    // Compress tab: a third, independent list (like mergeSources). It is an
+    // encoder job - each video is decoded, scaled and re-written with libx264
+    // - so nothing here is shared with the lossless split/merge paths.
+    // ---------------------------------------------------------------
+    private final List<Source> compressSources = new ArrayList<>();
+    private final List<ProgressBar> compressRowBars = new ArrayList<>();
+    private final List<TextView> compressRowTexts = new ArrayList<>();
+    private FFmpegVideoEditor.CompressOptions compressOptions =
+            new FFmpegVideoEditor.CompressOptions();
+    /** chips of each option group, so the picked one can be re-coloured */
+    private final List<TextView> resolutionChips = new ArrayList<>();
+    private final List<TextView> fpsChips = new ArrayList<>();
+    private final List<TextView> qualityChips = new ArrayList<>();
+    private int resolutionChoice = DEFAULT_RES_CHOICE;
+    private int fpsChoice = DEFAULT_FPS_CHOICE;
+    private int qualityChoice = DEFAULT_QUALITY_CHOICE;
+    /** when the file now encoding started, for its ETA readout */
+    private int compressFileIndex = -1;
+    private long compressFileStartMs;
+
+    /** Resolution chips: height cap (0 = keep the source's). */
+    private static final int[] RES_VALUES = {0, 1080, 720, 480};
+    private static final String[] RES_LABELS = {"Original", "1080p", "720p", "480p"};
+    /** Frame-rate chips: 0 = keep the source's. */
+    private static final int[] FPS_VALUES = {0, 30, 24};
+    private static final String[] FPS_LABELS = {"Original", "30", "24"};
+    /** Quality chips: x264 CRF - lower is better and bigger. */
+    private static final int[] CRF_VALUES = {23, 28, 33};
+    private static final String[] QUALITY_LABELS = {"High", "Balanced", "Small"};
+    // the bash script's own defaults: 1280x720, 30 fps, CRF 28 veryfast
+    private static final int DEFAULT_RES_CHOICE = 2;
+    private static final int DEFAULT_FPS_CHOICE = 1;
+    private static final int DEFAULT_QUALITY_CHOICE = 1;
+
     private FrameLayout videoPreviewContainer;
     private TextureView videoTextureView;
     private Surface videoSurface;
@@ -145,6 +187,9 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private HorizontalScrollView timelineScroll;
     private TextView rangeText, durationText, hintText, currentTimeText, zoomText;
     private TextView tabMerge, tabSplit, addSplitBtn, saveBtn, clearBtn;
+    private TextView tabCompress, compressInfoText;
+    private View compressRow, compressOptionsScroll;
+    private LinearLayout compressOptionsBar;
     private TextView zoomOutBtn, zoomInBtn, undoBtn, redoBtn, seqPreviewBtn, songNameText;
     private TextView mergeInfoText;
     private ImageButton playBtn, addSongBtn, deleteSplitBtn, mergeAddSongBtn;
@@ -231,6 +276,21 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                     uris.add(single);
                 }
                 addMergeVideos(uris);
+            });
+
+    private final ActivityResultLauncher<Intent> compressPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() != RESULT_OK || result.getData() == null) return;
+                Intent data = result.getData();
+                ArrayList<Uri> uris = data.getParcelableArrayListExtra(VideoListActivity.EXTRA_PICKED_URIS);
+                if (uris == null || uris.isEmpty()) {
+                    Uri single = data.getData();
+                    if (single == null) return;
+                    uris = new ArrayList<>();
+                    uris.add(single);
+                }
+                addCompressVideos(uris);
             });
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -426,10 +486,19 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
 
         tabMerge = findViewById(R.id.editorTabMerge);
         tabSplit = findViewById(R.id.editorTabSplit);
+        tabCompress = findViewById(R.id.editorTabCompress);
 
         mergeActionRow = findViewById(R.id.editorMergeActionRow);
         mergeAddSongBtn = findViewById(R.id.editorMergeAddSongBtn);
         mergeInfoText = findViewById(R.id.editorMergeInfoText);
+
+        compressRow = findViewById(R.id.editorCompressRow);
+        compressInfoText = findViewById(R.id.editorCompressInfoText);
+        compressOptionsScroll = findViewById(R.id.editorCompressOptionsScroll);
+        compressOptionsBar = findViewById(R.id.editorCompressOptions);
+        compressRow.findViewById(R.id.editorCompressAddBtn)
+                .setOnClickListener(v -> pickVideosToCompress());
+        buildCompressOptionChips();
 
         controlBarScroll = findViewById(R.id.editorControlBarScroll);
         controlBar = findViewById(R.id.editorControlBar);
@@ -529,6 +598,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private void setupTabs() {
         tabMerge.setOnClickListener(v -> selectTab(TAB_MERGE));
         tabSplit.setOnClickListener(v -> selectTab(TAB_SPLIT));
+        tabCompress.setOnClickListener(v -> selectTab(TAB_COMPRESS));
     }
 
     private void selectTab(int tab) {
@@ -544,23 +614,29 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         // a list the Split tab knows nothing about)
         stopPreview();
         boolean isMerge = currentTab == TAB_MERGE;
+        boolean isSplit = currentTab == TAB_SPLIT;
+        boolean isCompress = currentTab == TAB_COMPRESS;
 
         tabMerge.setTextColor(isMerge ? 0xFFFFFFFF : 0x88FFFFFF);
-        tabSplit.setTextColor(!isMerge ? 0xFFFFFFFF : 0x88FFFFFF);
+        tabSplit.setTextColor(isSplit ? 0xFFFFFFFF : 0x88FFFFFF);
+        tabCompress.setTextColor(isCompress ? 0xFFFFFFFF : 0x88FFFFFF);
 
-        timelinePanel.setVisibility(isMerge ? View.GONE : View.VISIBLE);
+        timelinePanel.setVisibility(isSplit ? View.VISIBLE : View.GONE);
         // the bar lives inside a HorizontalScrollView — show/hide the wrapper
         // (the inner bar itself always stays visible)
-        controlBarScroll.setVisibility(isMerge ? View.GONE : View.VISIBLE);
-        undoRedoRow.setVisibility(isMerge ? View.GONE : View.VISIBLE);
+        controlBarScroll.setVisibility(isSplit ? View.VISIBLE : View.GONE);
+        undoRedoRow.setVisibility(isSplit ? View.VISIBLE : View.GONE);
         mergeActionRow.setVisibility(isMerge ? View.VISIBLE : View.GONE);
-        // Preview stays available on both tabs: on Merge it plays the merge
-        // list in order, i.e. exactly what Merge writes out.
-        seqPreviewBtn.setVisibility(View.VISIBLE);
+        compressRow.setVisibility(isCompress ? View.VISIBLE : View.GONE);
+        compressOptionsScroll.setVisibility(isCompress ? View.VISIBLE : View.GONE);
+        // Preview stays available on Merge and Split: on Merge it plays the
+        // merge list in order, i.e. exactly what Merge writes out. Compressing
+        // does not change the running order, so there is nothing to preview.
+        seqPreviewBtn.setVisibility(isCompress ? View.GONE : View.VISIBLE);
 
-        saveBtn.setText(isMerge ? "Merge" : "Save");
+        saveBtn.setText(isMerge ? "Merge" : (isCompress ? "Compress" : "Save"));
 
-        if (!isMerge && sources.isEmpty()) {
+        if (isSplit && sources.isEmpty()) {
             videoEmptyContainer.setVisibility(View.VISIBLE);
         } else {
             videoEmptyContainer.setVisibility(View.GONE);
@@ -570,6 +646,8 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         updateSaveButtonState();
         if (isMerge) {
             updateMergeInfoText();
+        } else if (isCompress) {
+            updateCompressInfoText();
         } else {
             // first entry into split mode: 10x default (fast first paint)
             applyDefaultSplitZoom();
@@ -904,6 +982,554 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         renderSegmentList();
     }
 
+    // ------------------------------------------------------------------
+    // Compress tab
+    //
+    // Unlike Merge and Split, this is a real encode (libx264), so nothing on
+    // this path is shared with the stream-copy engine: its own list, its own
+    // rows, its own options. Merge and Split are untouched by it.
+    // ------------------------------------------------------------------
+
+    private void pickVideosToCompress() {
+        Intent intent = new Intent(this, VideoListActivity.class);
+        intent.putExtra(VideoListActivity.EXTRA_MULTI_SELECT, true);
+        compressPickerLauncher.launch(intent);
+    }
+
+    /**
+     * Add videos to the compress list. Same shape as {@link #addMergeVideos},
+     * plus the original file size - that is what the savings summary at the end
+     * weighs the results against.
+     *
+     * <p>No keyframe probe here: compressing re-encodes every frame, so where
+     * the cuts could be is irrelevant and the probe would be wasted work.
+     */
+    private void addCompressVideos(List<Uri> uris) {
+        if (uris == null || uris.isEmpty() || isFinishing()) return;
+        stopPreview();
+        int added = 0;
+        long addedBytes = 0;
+        for (Uri u : uris) {
+            if (u == null) continue;
+            Source s = new Source(u, displayNameOf(u), Math.max(1000, probeDuration(u)));
+            s.sizeBytes = sizeOf(u);
+            compressSources.add(s);
+            addedBytes += s.sizeBytes;
+            added++;
+        }
+        if (added == 0) return;
+        updateCompressInfoText();
+        updateSongNameLabel();
+        updateSaveButtonState();
+        renderSegmentList();
+        Toast.makeText(this, "Added " + added + (added == 1 ? " video" : " videos")
+                        + (addedBytes > 0 ? "  •  " + FFmpegVideoEditor.human(addedBytes) : ""),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Ask before dropping a video from the compress list (same idiom as Merge). */
+    private void confirmRemoveCompressSource(int index) {
+        if (index < 0 || index >= compressSources.size()) return;
+        String title = compressSources.get(index).title;
+        new AlertDialog.Builder(this)
+                .setTitle("Remove this video?")
+                .setMessage(title + " will be removed from the compress list.\n\n"
+                        + "The original file is not modified.")
+                .setPositiveButton("Remove", (d, w) -> removeCompressSource(index))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void removeCompressSource(int index) {
+        if (index < 0 || index >= compressSources.size()) return;
+        compressSources.remove(index);
+        updateCompressInfoText();
+        updateSongNameLabel();
+        updateSaveButtonState();
+        renderSegmentList();
+    }
+
+    private long compressTotalBytes() {
+        long total = 0;
+        for (Source s : compressSources) total += Math.max(0, s.sizeBytes);
+        return total;
+    }
+
+    /** "3 videos • 1.2 GB • 720p • 30 fps • Balanced (CRF 28)". */
+    private void updateCompressInfoText() {
+        if (compressInfoText == null) return;
+        int n = compressSources.size();
+        if (n == 0) {
+            compressInfoText.setText("No videos yet  •  tap the ＋ button to add some");
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(n).append(n == 1 ? " video" : " videos");
+        long bytes = compressTotalBytes();
+        if (bytes > 0) sb.append("  •  ").append(FFmpegVideoEditor.human(bytes));
+        sb.append("  •  ").append(compressSettingLabel());
+        compressInfoText.setText(sb);
+    }
+
+    /** The picked chips in one line, e.g. "720p • 30 fps • Balanced (CRF 28)". */
+    private String compressSettingLabel() {
+        return RES_LABELS[resolutionChoice]
+                + "  •  " + (fpsChoice == 0 ? "source fps" : FPS_VALUES[fpsChoice] + " fps")
+                + "  •  " + QUALITY_LABELS[qualityChoice] + " (CRF " + CRF_VALUES[qualityChoice] + ")";
+    }
+
+    private interface ChipPick {
+        void onPick(int index);
+    }
+
+    /**
+     * Builds the Resolution / FPS / Quality chips once, at bind time. They live
+     * inside a HorizontalScrollView so a narrow screen scrolls them instead of
+     * squeezing the labels.
+     */
+    private void buildCompressOptionChips() {
+        if (compressOptionsBar == null) return;
+        compressOptionsBar.removeAllViews();
+        resolutionChips.clear();
+        fpsChips.clear();
+        qualityChips.clear();
+
+        addChipGroup("Resolution", resolutionChips, RES_LABELS, resolutionChoice, i -> {
+            resolutionChoice = i;
+            selectChip(resolutionChips, i);
+            applyCompressOptions();
+        });
+        addChipGroup("FPS", fpsChips, FPS_LABELS, fpsChoice, i -> {
+            fpsChoice = i;
+            selectChip(fpsChips, i);
+            applyCompressOptions();
+        });
+        addChipGroup("Quality", qualityChips, QUALITY_LABELS, qualityChoice, i -> {
+            qualityChoice = i;
+            selectChip(qualityChips, i);
+            applyCompressOptions();
+        });
+
+        TextView reset = makeChip("Reset", false);
+        reset.setContentDescription("Back to the default 720p, 30 fps, CRF 28");
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.leftMargin = dp(14);
+        reset.setLayoutParams(rlp);
+        reset.setOnClickListener(v -> {
+            resolutionChoice = DEFAULT_RES_CHOICE;
+            fpsChoice = DEFAULT_FPS_CHOICE;
+            qualityChoice = DEFAULT_QUALITY_CHOICE;
+            selectChip(resolutionChips, resolutionChoice);
+            selectChip(fpsChips, fpsChoice);
+            selectChip(qualityChips, qualityChoice);
+            applyCompressOptions();
+        });
+        compressOptionsBar.addView(reset);
+
+        applyCompressOptions();
+    }
+
+    private void addChipGroup(String caption, final List<TextView> chips, String[] texts,
+                              int selected, final ChipPick pick) {
+        TextView label = new TextView(this);
+        label.setText(caption);
+        label.setTextColor(0x66FFFFFF);
+        label.setTextSize(10f);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        llp.leftMargin = dp(10);
+        label.setLayoutParams(llp);
+        compressOptionsBar.addView(label);
+
+        for (int i = 0; i < texts.length; i++) {
+            final int index = i;
+            TextView chip = makeChip(texts[i], i == selected);
+            chip.setOnClickListener(v -> pick.onPick(index));
+            compressOptionsBar.addView(chip);
+            chips.add(chip);
+        }
+    }
+
+    /** A chip styled exactly like the tab row's own chips. */
+    private TextView makeChip(String text, boolean selected) {
+        TextView chip = new TextView(this);
+        chip.setText(text);
+        chip.setTextSize(12f);
+        chip.setTypeface(null, android.graphics.Typeface.BOLD);
+        chip.setTextColor(selected ? 0xFFFFFFFF : 0x88FFFFFF);
+        chip.setBackgroundResource(R.drawable.bg_editor_chip);
+        chip.setPadding(dp(12), dp(5), dp(12), dp(5));
+        chip.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return chip;
+    }
+
+    private void selectChip(List<TextView> chips, int index) {
+        for (int i = 0; i < chips.size(); i++) {
+            chips.get(i).setTextColor(i == index ? 0xFFFFFFFF : 0x88FFFFFF);
+        }
+    }
+
+    /** Copy the picked chips into the engine's options holder. */
+    private void applyCompressOptions() {
+        compressOptions.maxHeight = RES_VALUES[resolutionChoice];
+        compressOptions.fps = FPS_VALUES[fpsChoice];
+        compressOptions.crf = CRF_VALUES[qualityChoice];
+        compressOptions.preset = "veryfast";   // the script's own preset
+        updateCompressInfoText();
+    }
+
+    private void renderCompressList() {
+        if (compressSources.isEmpty()) {
+            // the Merge tab's empty-state card, worded for this list
+            LinearLayout emptyCard = new LinearLayout(this);
+            emptyCard.setOrientation(LinearLayout.VERTICAL);
+            emptyCard.setGravity(Gravity.CENTER);
+            emptyCard.setBackgroundResource(R.drawable.bg_editor_segment_item);
+            int ep = dp(24);
+            emptyCard.setPadding(ep, ep, ep, ep);
+            LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            elp.topMargin = dp(8);
+            emptyCard.setLayoutParams(elp);
+
+            TextView emptyIcon = new TextView(this);
+            emptyIcon.setText("🗜");
+            emptyIcon.setTextSize(36);
+            emptyIcon.setGravity(Gravity.CENTER);
+            emptyCard.addView(emptyIcon);
+
+            TextView emptyMsg = new TextView(this);
+            emptyMsg.setText("কোনো ভিডিও যোগ করা হয়নি");
+            emptyMsg.setTextColor(0xCCFFFFFF);
+            emptyMsg.setTextSize(14);
+            emptyMsg.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            msgLp.topMargin = dp(8);
+            emptyMsg.setLayoutParams(msgLp);
+            emptyCard.addView(emptyMsg);
+
+            TextView addBtn = new TextView(this);
+            addBtn.setText("＋  ভিডিও যোগ করুন");
+            addBtn.setTextColor(0xFFFFFFFF);
+            addBtn.setTextSize(15);
+            addBtn.setGravity(Gravity.CENTER);
+            addBtn.setBackgroundResource(R.drawable.bg_editor_btn_primary);
+            int bph = dp(14);
+            int bpv = dp(10);
+            addBtn.setPadding(bph, bpv, bph, bpv);
+            LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            btnLp.topMargin = dp(16);
+            btnLp.gravity = Gravity.CENTER_HORIZONTAL;
+            addBtn.setLayoutParams(btnLp);
+            addBtn.setOnClickListener(v -> pickVideosToCompress());
+            emptyCard.addView(addBtn);
+
+            segmentList.addView(emptyCard);
+            return;
+        }
+
+        for (int i = 0; i < compressSources.size(); i++) {
+            segmentList.addView(buildCompressRow(i, compressSources.get(i)));
+        }
+    }
+
+    /**
+     * One compress row: name, "size • length", the file's own progress bar and
+     * a remove button. No drag handle and no ▶ - the encode does not reorder
+     * anything and there is nothing to preview.
+     */
+    private View buildCompressRow(final int index, final Source src) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackgroundResource(R.drawable.bg_editor_segment_item);
+        int pad = dp(8);
+        row.setPadding(pad, dp(4), pad, dp(4));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(3);
+        row.setLayoutParams(lp);
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        textCol.setLayoutParams(new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView title = new TextView(this);
+        title.setText((index + 1) + ".  " + src.title);
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(12f);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(title);
+
+        TextView info = new TextView(this);
+        info.setText(compressRowInfo(src));
+        info.setTextColor(0xAAFFFFFF);
+        info.setTextSize(11f);
+        info.setSingleLine(true);
+        info.setEllipsize(TextUtils.TruncateAt.END);
+        textCol.addView(info);
+        compressRowTexts.add(info);
+
+        ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        bar.setProgress(0);
+        bar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF6C63FF));
+        bar.setProgressBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(0x33FFFFFF));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(5));
+        blp.topMargin = dp(3);
+        bar.setLayoutParams(blp);
+        textCol.addView(bar);
+        compressRowBars.add(bar);
+
+        row.addView(textCol);
+
+        android.util.TypedValue tv = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true);
+
+        ImageButton delete = new ImageButton(this);
+        delete.setImageResource(R.drawable.ic_delete);
+        delete.setColorFilter(0xFFFFFFFF);
+        delete.setBackgroundResource(tv.resourceId != 0 ? tv.resourceId : 0);
+        LinearLayout.LayoutParams dbLp = new LinearLayout.LayoutParams(dp(28), dp(28));
+        dbLp.leftMargin = dp(6);
+        delete.setLayoutParams(dbLp);
+        delete.setContentDescription("Remove this video from the compress list");
+        delete.setOnClickListener(v -> confirmRemoveCompressSource(index));
+        row.addView(delete);
+
+        return row;
+    }
+
+    private String compressRowInfo(Source src) {
+        String size = src.sizeBytes > 0 ? FFmpegVideoEditor.human(src.sizeBytes) : "size unknown";
+        return size + "  •  " + msToTime(src.durationMs);
+    }
+
+    /**
+     * Fill one row's bar while its file encodes, and put that file's own
+     * percentage and ETA on its line. The ETA is this file's elapsed time
+     * scaled by how far it has got, so it settles after the first few percent.
+     */
+    private void updateCompressRowProgress(int index, int percent) {
+        if (index != compressFileIndex) {
+            compressFileIndex = index;
+            compressFileStartMs = SystemClock.uptimeMillis();
+        }
+        if (index >= 0 && index < compressRowBars.size()) {
+            compressRowBars.get(index).setProgress(percent * 10);
+        }
+        if (index < 0 || index >= compressRowTexts.size() || index >= compressSources.size()) return;
+        Source src = compressSources.get(index);
+        TextView info = compressRowTexts.get(index);
+        if (percent <= 0) {
+            info.setText(compressRowInfo(src));
+        } else if (percent >= 100) {
+            info.setText("Done  •  " + compressRowInfo(src));
+        } else {
+            long elapsed = SystemClock.uptimeMillis() - compressFileStartMs;
+            long eta = elapsed > 0 ? elapsed * (100 - percent) / percent : 0;
+            info.setText(percent + "%  •  ETA " + msToTime(eta));
+        }
+    }
+
+    /** Size of a picked video in bytes, or 0 when the provider will not say. */
+    private long sizeOf(Uri uri) {
+        if (uri == null) return 0;
+        try (Cursor c = getContentResolver().query(uri,
+                new String[]{OpenableColumns.SIZE}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int idx = c.getColumnIndex(OpenableColumns.SIZE);
+                if (idx >= 0 && !c.isNull(idx)) return Math.max(0, c.getLong(idx));
+            }
+        } catch (Exception ignored) {}
+        if ("file".equals(uri.getScheme())) {
+            try {
+                File f = new File(uri.getPath());
+                if (f.isFile()) return f.length();
+            } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    private static String stemOf(String name) {
+        if (name == null) return "";
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    /**
+     * Weighs the written files against the originals they came from, as
+     * {before, after}. Only a pair whose original size is known counts, so a
+     * file the engine skipped or failed cannot skew the figure. The engine
+     * names each output after its source, which is what the match uses.
+     */
+    private long[] savingsOf(List<File> outputs, List<Source> originals) {
+        long before = 0;
+        long after = 0;
+        boolean[] used = new boolean[originals.size()];
+        for (File f : outputs) {
+            String name = f.getName();
+            for (int i = 0; i < originals.size(); i++) {
+                if (used[i]) continue;
+                String stem = stemOf(originals.get(i).title);
+                if (stem.isEmpty() || !name.startsWith(stem + "_compressed")) continue;
+                used[i] = true;
+                if (originals.get(i).sizeBytes > 0) {
+                    before += originals.get(i).sizeBytes;
+                    after += f.length();
+                }
+                break;
+            }
+        }
+        return new long[]{before, after};
+    }
+
+    /** Confirm before the encoder starts (same idiom as the other confirms). */
+    private void confirmCompressJob() {
+        if (compressSources.isEmpty()) return;
+        long bytes = compressTotalBytes();
+        int n = compressSources.size();
+        new AlertDialog.Builder(this)
+                .setTitle("Compress " + n + (n == 1 ? " video?" : " videos?"))
+                .setMessage(n + (n == 1 ? " video" : " videos")
+                        + (bytes > 0 ? " (" + FFmpegVideoEditor.human(bytes) + ")" : "")
+                        + " will be re-encoded to " + compressSettingLabel() + ".\n\n"
+                        + "Unlike a split or a merge this really re-encodes the video, so it "
+                        + "takes about as long as the videos last to run. Your originals are "
+                        + "not modified.")
+                .setPositiveButton("Compress", (d, w) -> startCompressJob())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void startCompressJob() {
+        if (jobRunning || compressSources.isEmpty()) return;
+        stopPreview();
+        jobRunning = true;
+        jobWarnings = Collections.emptyList();
+        updateSaveButtonState();
+        progressTitle.setText("Compressing…");
+        progressBar.setIndeterminate(true);
+        progressBar.setProgress(0);
+        progressText.setText("Preparing…");
+        progressOverlay.setVisibility(View.VISIBLE);
+        compressFileIndex = -1;
+        compressFileStartMs = SystemClock.uptimeMillis();
+
+        // the list as it is now: what the results are weighed against at the end
+        final List<Source> originals = new ArrayList<>(compressSources);
+        final List<Uri> uris = new ArrayList<>(compressSources.size());
+        for (Source s : compressSources) uris.add(s.uri);
+
+        editor.compressFromUri(this, uris, compressOptions.copy(),
+                new FFmpegVideoEditor.EditListener() {
+                    // these callbacks come from the engine's worker thread
+                    @Override
+                    public void onFileProgress(final int index, final int percent) {
+                        runOnUiThread(() -> updateCompressRowProgress(index, percent));
+                    }
+
+                    @Override
+                    public void onWarnings(List<String> notes) {
+                        jobWarnings = notes;
+                    }
+
+                    @Override
+                    public void onProgress(final int percent) {
+                        runOnUiThread(() -> {
+                            if (percent < 0) {
+                                progressBar.setIndeterminate(true);
+                                progressText.setText("Preparing videos…");
+                            } else {
+                                progressBar.setIndeterminate(false);
+                                progressBar.setProgress(percent);
+                                progressText.setText(percent + "%");
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onSuccess(final List<File> outputs) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            jobRunning = false;
+                            progressOverlay.setVisibility(View.GONE);
+                            updateSaveButtonState();
+                            renderSegmentList();     // clears the per-file bars
+                            showCompressResultDialog(outputs, jobWarnings, originals);
+                        });
+                    }
+
+                    @Override
+                    public void onError(final String message, final boolean cancelled) {
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            jobRunning = false;
+                            progressOverlay.setVisibility(View.GONE);
+                            updateSaveButtonState();
+                            renderSegmentList();
+                            if (cancelled) {
+                                Toast.makeText(VideoEditorActivity.this,
+                                        "Cancelled", Toast.LENGTH_SHORT).show();
+                            } else {
+                                new AlertDialog.Builder(VideoEditorActivity.this)
+                                        .setTitle("Compress Failed")
+                                        .setMessage(message)
+                                        .setPositiveButton("OK", null)
+                                        .show();
+                            }
+                        });
+                    }
+                });
+    }
+
+    /**
+     * Where the compressed files went, with what they saved. The engine reports
+     * the files it wrote, so the originals are matched to them by name; the
+     * notes list anything it had to compromise on (a skipped file, a sound that
+     * had to be re-encoded).
+     */
+    private void showCompressResultDialog(List<File> outputs, List<String> notes,
+                                          List<Source> originals) {
+        if (outputs == null || outputs.isEmpty()) return;
+        StringBuilder sb = new StringBuilder();
+        for (File f : outputs) sb.append(f.getName()).append("\n");
+
+        long[] saved = savingsOf(outputs, originals);
+        long before = saved[0];
+        long after = saved[1];
+
+        File dir = outputs.get(0).getParentFile();
+        if (dir != null) sb.append("\nFolder: ").append(dir.getAbsolutePath());
+        if (before > 0 && after > 0) {
+            long delta = before - after;
+            int pct = (int) Math.round(Math.abs(delta) * 100.0 / before);
+            sb.append("\n\nBefore ").append(FFmpegVideoEditor.human(before))
+                    .append("  →  After ").append(FFmpegVideoEditor.human(after))
+                    .append("  •  ").append(delta >= 0 ? "Saved " : "Bigger by ")
+                    .append(pct).append("%");
+        }
+        if (notes != null && !notes.isEmpty()) {
+            sb.append("\n\nNotes:");
+            for (String n : notes) sb.append("\n• ").append(n);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(outputs.size() == 1
+                        ? "Compressed" : "Compressed " + outputs.size() + " files")
+                .setMessage(sb)
+                .setPositiveButton("Done", null)
+                .show();
+    }
+
     /**
      * Move the video at {@code from} to the WITH-item insertion position
      * {@code to} in the merge order. Returns false when the move is a no-op.
@@ -980,6 +1606,14 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                     + "  •  " + msToTime(mergeDurationMs));
             return;
         }
+        if (currentTab == TAB_COMPRESS) {
+            long bytes = compressTotalBytes();
+            songNameText.setText(compressSources.isEmpty()
+                    ? "No videos selected"
+                    : compressSources.size() + " video" + (compressSources.size() == 1 ? "" : "s")
+                    + (bytes > 0 ? "  •  " + FFmpegVideoEditor.human(bytes) : ""));
+            return;
+        }
         if (sources.isEmpty()) {
             songNameText.setText("No video loaded");
         } else if (sources.size() == 1) {
@@ -1032,6 +1666,11 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
             boolean canMerge = mergeSources.size() >= 2 && !jobRunning;
             saveBtn.setEnabled(canMerge);
             saveBtn.setAlpha(canMerge ? 1.0f : 0.45f);
+        } else if (currentTab == TAB_COMPRESS) {
+            // one video is enough: compressing is a per-file job
+            boolean canCompress = !compressSources.isEmpty() && !jobRunning;
+            saveBtn.setEnabled(canCompress);
+            saveBtn.setAlpha(canCompress ? 1.0f : 0.45f);
         } else {
             boolean canSave = !sources.isEmpty() && !jobRunning;
             saveBtn.setEnabled(canSave);
@@ -1667,8 +2306,14 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         mergeRowButtons.clear();
         partRowButtons.clear();
         partRowRanges.clear();
+        compressRowBars.clear();
+        compressRowTexts.clear();
         if (currentTab == TAB_MERGE) {
             renderSourceList();
+            return;
+        }
+        if (currentTab == TAB_COMPRESS) {
+            renderCompressList();
             return;
         }
         List<EditorTimelineView.SegmentInfo> segs = timeline.getKeptSegments();
@@ -2119,6 +2764,10 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         if (jobRunning) return;
         if (currentTab == TAB_MERGE) {
             confirmMergeJob();
+            return;
+        }
+        if (currentTab == TAB_COMPRESS) {
+            confirmCompressJob();
             return;
         }
         new AlertDialog.Builder(this)

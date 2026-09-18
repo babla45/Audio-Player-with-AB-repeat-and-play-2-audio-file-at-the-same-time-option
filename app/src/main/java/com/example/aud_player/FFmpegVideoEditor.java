@@ -100,6 +100,16 @@ public class FFmpegVideoEditor {
         default void onWarnings(List<String> warnings) {
         }
 
+        /**
+         * Per-file progress in a multi-file job (Compress): how far file
+         * number {@code index} of the list has got, 0..100. {@code index} is
+         * the position in the list handed to
+         * {@link #compressFromUri(Context, List, CompressOptions, EditListener)}.
+         * The default does nothing, so split/merge callers are unaffected.
+         */
+        default void onFileProgress(int index, int percent) {
+        }
+
         void onSuccess(List<File> outputs);
 
         void onError(String message, boolean cancelled);
@@ -127,6 +137,40 @@ public class FFmpegVideoEditor {
 
     /** Any part shorter than this is refused by the timeline anyway. */
     public static final long MIN_SEGMENT_MS = 1000L;
+
+    /**
+     * What the Compress tab lets the user choose. The values a fresh instance
+     * carries are exactly the ones the original Termux compressor used
+     * (1280x720, 30 fps, libx264 CRF 28 veryfast), so leaving the chips alone
+     * reproduces that script's output.
+     */
+    public static final class CompressOptions {
+        /** Target height in pixels; the width follows the source aspect ratio. 0 = keep the source's. */
+        public int maxHeight = 720;
+        /** Output frame rate. 0 = keep the source's. */
+        public int fps = 30;
+        /** x264 quality: lower is better and bigger. */
+        public int crf = 28;
+        /** x264 speed preset. */
+        public String preset = "veryfast";
+
+        public CompressOptions() {
+        }
+
+        public CompressOptions(int maxHeight, int fps, int crf, String preset) {
+            this.maxHeight = maxHeight;
+            this.fps = fps;
+            this.crf = crf;
+            this.preset = preset;
+        }
+
+        public CompressOptions copy() {
+            return new CompressOptions(maxHeight, fps, crf, preset);
+        }
+    }
+
+    /** Audio bitrate for the AAC fallback (the encoder the compressor defaulted to). */
+    private static final String FALLBACK_AUDIO_BITRATE = "128k";
 
     private static final String TAG = "FFmpegVideoEditor";
 
@@ -211,6 +255,48 @@ public class FFmpegVideoEditor {
             } catch (Throwable t) {
                 Log.e(TAG, "job failed", t);
                 postError(listener, "The edit failed: " + t.getMessage(), false);
+            }
+        });
+    }
+
+    /**
+     * Re-encodes each video to a smaller file — the Compress tab.
+     *
+     * <p>Unlike the split/merge engine, which never decodes a frame, this one
+     * is an encoder job: every source is decoded, scaled and written with
+     * libx264. The videos are processed one at a time, in list order, because
+     * encoding is CPU-bound and running several at once heats the device and
+     * usually ends up slower overall.
+     *
+     * @param sources  the videos to compress, in list order
+     * @param options  the chips the user picked (null = the script's defaults)
+     * @param listener progress/result callbacks; {@link EditListener#onFileProgress}
+     *                 reports the per-file bar, {@code onProgress} the whole job
+     */
+    public void compressFromUri(final Context context, final List<Uri> sources,
+                                final CompressOptions options, final EditListener listener) {
+        if (context == null || sources == null || sources.isEmpty()) {
+            postError(listener, "Nothing to compress", false);
+            return;
+        }
+        cancelled.set(false);
+        finished.set(false);
+        jobSucceeded.set(false);
+        this.listener = listener;
+        final Context app = context.getApplicationContext() != null
+                ? context.getApplicationContext() : context;
+        final CompressOptions opts = options != null ? options.copy() : new CompressOptions();
+        executor.execute(() -> {
+            try {
+                doCompress(app, sources, opts);
+            } catch (Throwable t) {
+                if (cancelled.get()) {
+                    postError(this.listener, "Cancelled", true);
+                } else {
+                    Log.e(TAG, "compress failed", t);
+                    postError(this.listener, t instanceof IOException ? t.getMessage()
+                            : "The compression failed: " + t.getMessage(), false);
+                }
             }
         });
     }
@@ -954,6 +1040,239 @@ public class FFmpegVideoEditor {
     }
 
     // ------------------------------------------------------------------
+    // Compressing (the one place this engine decodes and re-encodes)
+    // ------------------------------------------------------------------
+
+    /**
+     * The whole Compress job. Videos are done one at a time and each source's
+     * local copy is deleted as soon as its output is written, so peak disk use
+     * stays at roughly one video plus its output rather than the whole list.
+     *
+     * <p>A file that fails is reported as a note and the rest still run - the
+     * point of a batch compressor is that one bad file does not lose the work
+     * of the others.
+     */
+    private void doCompress(Context context, List<Uri> sources, CompressOptions opts) {
+        postProgress(-1);
+        File workDir = null;
+        List<File> outputs = new ArrayList<>();
+        List<String> notes = Collections.synchronizedList(new ArrayList<>());
+        try {
+            File cache = context.getCacheDir();
+            if (cache == null) throw new IOException("No cache folder");
+            workDir = new File(cache, "video_edit_" + System.nanoTime());
+            if (!workDir.mkdirs() && !workDir.isDirectory()) {
+                throw new IOException("Cannot create a working folder");
+            }
+
+            step[0] = 0;
+            step[1] = Math.max(1, sources.size());
+
+            for (int i = 0; i < sources.size(); i++) {
+                checkCancelled();
+                Uri uri = sources.get(i);
+                // the loop counter moves on, the callbacks must not
+                final int fileIndex = i;
+                if (uri == null) {
+                    step[0]++;
+                    postStepProgress(0);
+                    continue;
+                }
+
+                String title = displayName(context, uri);
+                if (title.toLowerCase(Locale.ROOT).endsWith("_compressed.mp4")) {
+                    addWarning(notes, "\"" + title + "\" is already a compressed copy - skipped.");
+                    step[0]++;
+                    postFileProgress(fileIndex, 100);
+                    continue;
+                }
+
+                // room for the copy and the file being written next to it
+                long expected = expectedSize(context, uri);
+                if (expected > 0) requireFreeSpace(context, expected * 2);
+
+                File local = null;
+                File target = null;
+                try {
+                    local = copySourceToLocal(context, uri, workDir);
+                    long durationMs = durationMs(local);
+                    target = uniqueOutput(context, stemOf(title) + "_compressed", "mp4");
+                    postFileProgress(fileIndex, 0);
+
+                    boolean ok = exec(compressArgs(local, target, opts, true), durationMs,
+                            p -> postFileProgress(fileIndex, p));
+                    if (!ok) {
+                        checkCancelled();
+                        // The source's audio cannot live in an MP4 (Opus, Vorbis,
+                        // PCM from an MKV/WebM...). Re-encode just the sound and
+                        // keep the video exactly as the first pass would have it.
+                        safeDelete(target);
+                        postFileProgress(fileIndex, 0);
+                        ok = exec(compressArgs(local, target, opts, false), durationMs,
+                                p -> postFileProgress(fileIndex, p));
+                        if (ok) {
+                            addWarning(notes, "\"" + title + "\" has an audio track that MP4 cannot "
+                                    + "hold, so its sound was re-encoded to AAC.");
+                        }
+                    }
+
+                    if (!ok || target == null || !target.isFile() || target.length() == 0) {
+                        safeDelete(target);
+                        addWarning(notes, "\"" + title + "\" could not be compressed and was left out.");
+                        step[0]++;
+                        postStepProgress(0);
+                        continue;
+                    }
+
+                    try {
+                        MediaScannerConnection.scanFile(context,
+                                new String[]{target.getAbsolutePath()}, null, null);
+                    } catch (Throwable ignored) {
+                    }
+                    outputs.add(target);
+                    step[0]++;
+                    postFileProgress(fileIndex, 100);
+                } finally {
+                    // the source copy is dead weight once this file is written
+                    if (local != null) safeDelete(local);
+                }
+            }
+
+            if (outputs.isEmpty()) {
+                postError(listener, "Nothing could be compressed. Your originals are untouched.", false);
+                return;
+            }
+            jobSucceeded.set(true);        // the finished files belong to the user now
+            if (!notes.isEmpty()) {
+                try {
+                    listener.onWarnings(new ArrayList<>(notes));
+                } catch (Throwable t) {
+                    Log.w(TAG, "warning callback failed", t);
+                }
+            }
+            if (finished.compareAndSet(false, true)) {
+                listener.onSuccess(outputs);
+            }
+        } catch (Throwable t) {
+            if (cancelled.get()) {
+                postError(listener, "Cancelled", true);
+            } else {
+                Log.e(TAG, "compress failed", t);
+                postError(listener, t instanceof IOException ? t.getMessage()
+                        : "The compression failed: " + t.getMessage(), false);
+            }
+        } finally {
+            if (!jobSucceeded.get()) {
+                for (File f : outputs) safeDelete(f);
+            }
+            if (workDir != null) deleteTree(workDir);
+        }
+    }
+
+    /**
+     * The arguments for one compression run.
+     *
+     * <p>{@code scale=-2:min(ih,H)} keeps the source's aspect ratio and only
+     * ever shrinks: forcing the script's literal {@code 1280:720} would stretch
+     * a 4:3 video and would blow a 480p one up. {@code -2} keeps the width even,
+     * which yuv420p requires.
+     *
+     * <p>Unlike the cut/merge commands this one does NOT pass
+     * {@code -hide_banner}/{@code -loglevel}, because ffmpeg-kit builds its
+     * progress statistics out of ffmpeg's own log output - silencing it would
+     * freeze the progress bar at 0.
+     *
+     * @param copyAudio true to keep the source's audio stream untouched; false
+     *                  to re-encode it to AAC (the fallback for audio MP4
+     *                  cannot carry)
+     */
+    static String[] compressArgs(File in, File out, CompressOptions opts, boolean copyAudio) {
+        CompressOptions o = opts != null ? opts : new CompressOptions();
+        List<String> a = new ArrayList<>();
+        a.add("-y");
+        a.add("-i");
+        a.add(in.getAbsolutePath());
+
+        List<String> filters = new ArrayList<>();
+        if (o.maxHeight > 0) {
+            filters.add("scale=-2:'min(ih," + o.maxHeight + ")'");
+        }
+        if (o.fps > 0) {
+            filters.add("fps=" + o.fps);
+        }
+        if (!filters.isEmpty()) {
+            filters.add("format=yuv420p");
+            a.add("-vf");
+            a.add(android.text.TextUtils.join(",", filters));
+        }
+
+        // explicit maps: the same guard the cuts use, so a timecode or data
+        // track cannot make the encoder refuse the file
+        a.add("-map");
+        a.add("0:v:0?");
+        a.add("-map");
+        a.add("0:a?");
+        a.add("-c:v");
+        a.add("libx264");
+        a.add("-preset");
+        a.add(o.preset != null && !o.preset.isEmpty() ? o.preset : "veryfast");
+        a.add("-crf");
+        a.add(String.valueOf(o.crf));
+        a.add("-pix_fmt");
+        a.add("yuv420p");
+        if (copyAudio) {
+            a.add("-c:a");
+            a.add("copy");
+        } else {
+            a.add("-c:a");
+            a.add("aac");
+            a.add("-b:a");
+            a.add(FALLBACK_AUDIO_BITRATE);
+        }
+        a.add("-movflags");
+        a.add("+faststart");
+        a.add(out.getAbsolutePath());
+        return a.toArray(new String[0]);
+    }
+
+    /** The file's name without its extension; the output is named after it. */
+    private static String stemOf(String name) {
+        if (name == null || name.isEmpty()) return "video";
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    /** The provider's display name for a Uri, falling back to the path's last segment. */
+    private static String displayName(Context context, Uri uri) {
+        try (Cursor c = context.getContentResolver().query(uri, null, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                int idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) {
+                    String n = c.getString(idx);
+                    if (n != null && !n.isEmpty()) return n;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        String last = uri != null ? uri.getLastPathSegment() : null;
+        return last != null && !last.isEmpty() ? last : "video";
+    }
+
+    /** Per-file progress: the row's bar, then the job's own bar. */
+    private void postFileProgress(int index, int percent) {
+        int p = Math.max(0, Math.min(100, percent));
+        EditListener l = listener;
+        if (l != null) {
+            try {
+                l.onFileProgress(index, p);
+            } catch (Throwable t) {
+                Log.w(TAG, "file progress callback failed", t);
+            }
+        }
+        postStepProgress(p);
+    }
+
+    // ------------------------------------------------------------------
     // Running ffmpeg
     // ------------------------------------------------------------------
 
@@ -1133,6 +1452,11 @@ public class FFmpegVideoEditor {
         for (Source s : items) {
             needed += s.local != null && s.local.isFile() ? s.local.length() : 0;
         }
+        requireFreeSpace(context, needed);
+    }
+
+    /** The cache must hold {@code needed} bytes plus the usual margin. */
+    private void requireFreeSpace(Context context, long needed) throws IOException {
         try {
             StatFs stat = new StatFs(context.getCacheDir().getAbsolutePath());
             long free = stat.getAvailableBytes();
@@ -1192,7 +1516,8 @@ public class FFmpegVideoEditor {
         safeDelete(dir);
     }
 
-    private static String human(long bytes) {
+    /** Bytes as a short human string ("1.2 GB" / "48 MB" / "900 kB"). */
+    public static String human(long bytes) {
         if (bytes >= 1024L * 1024 * 1024) return String.format(Locale.US, "%.1f GB", bytes / 1073741824.0);
         if (bytes >= 1024L * 1024) return String.format(Locale.US, "%.0f MB", bytes / 1048576.0);
         return String.format(Locale.US, "%.0f kB", bytes / 1024.0);

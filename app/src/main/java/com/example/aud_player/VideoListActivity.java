@@ -106,7 +106,7 @@ public class VideoListActivity extends AppCompatActivity {
 
         if (browseBtn != null) {
             browseBtn.setOnClickListener(v -> {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
                 intent.setType("video/*");
                 if (multiSelect) {

@@ -95,6 +95,21 @@
                 android:textColor="#88FFFFFF"
                 android:textSize="12sp"
                 android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/editorTabCompress"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_editor_chip"
+                android:gravity="center"
+                android:paddingHorizontal="16dp"
+                android:paddingVertical="5dp"
+                android:text="Compress"
+                android:textColor="#88FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <!-- Video Preview Viewport -->
@@ -266,6 +281,59 @@
                 android:textStyle="bold"
                 tools:text="3 videos  •  Total 09:41" />
         </LinearLayout>
+
+        <!-- Compress mode action row: add videos + count / total size -->
+        <LinearLayout
+            android:id="@+id/editorCompressRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="6dp"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/editorCompressAddBtn"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_editor_btn_secondary"
+                android:contentDescription="Add videos to compress"
+                android:src="@drawable/ic_video_edit"
+                app:tint="#FFFFFFFF" />
+
+            <TextView
+                android:id="@+id/editorCompressInfoText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:textColor="#FFFFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                tools:text="2 videos  •  512 MB" />
+        </LinearLayout>
+
+        <!-- Compress options: resolution / frame rate / quality chips. Filled
+             from the activity; only shown on the Compress tab.
+             Horizontally scrollable so every chip stays reachable at any width
+             (same idiom as the Split control bar below). -->
+        <HorizontalScrollView
+            android:id="@+id/editorCompressOptionsScroll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/editorCompressOptions"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="10dp"
+                android:paddingTop="4dp" />
+        </HorizontalScrollView>
 
         <!-- Split mode control bar: Play/Pause | Auto-scroll | Split | Delete | Add video | Clear | Zoom- | Zoom+
              Horizontally scrollable so every button stays reachable on any width.

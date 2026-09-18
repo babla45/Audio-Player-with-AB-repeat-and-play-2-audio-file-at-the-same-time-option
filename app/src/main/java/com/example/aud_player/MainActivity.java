@@ -1528,14 +1528,14 @@ public class MainActivity extends AppCompatActivity {
     private void pickAudioFile() {
         // ACTION_GET_CONTENT lets any app that can supply audio participate,
         // including third-party file managers (which don't need to implement
-        // the SAF document-provider API that ACTION_OPEN_DOCUMENT requires).
+        // the SAF document-provider API that ACTION_GET_CONTENT requires).
         Intent getContent = new Intent(Intent.ACTION_GET_CONTENT);
         getContent.addCategory(Intent.CATEGORY_OPENABLE);
         getContent.setType("audio/*");
 
         // Also offer the system document picker explicitly, since it supports
         // persistable URI grants that survive restarts.
-        Intent openDocument = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        Intent openDocument = new Intent(Intent.ACTION_GET_CONTENT);
         openDocument.addCategory(Intent.CATEGORY_OPENABLE);
         openDocument.setType("audio/*");
         openDocument.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -6715,7 +6715,7 @@ public class MainActivity extends AppCompatActivity {
                         return;
                     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         // Use SAF to request write permission then delete
-                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                         intent.addCategory(Intent.CATEGORY_OPENABLE);
                         intent.setDataAndType(audioFile.getUri(), "audio/*");
                         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -10394,7 +10394,7 @@ public class MainActivity extends AppCompatActivity {
             getContent.addCategory(Intent.CATEGORY_OPENABLE);
             getContent.setType("audio/*");
 
-            Intent openDocument = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            Intent openDocument = new Intent(Intent.ACTION_GET_CONTENT);
             openDocument.addCategory(Intent.CATEGORY_OPENABLE);
             openDocument.setType("audio/*");
 
