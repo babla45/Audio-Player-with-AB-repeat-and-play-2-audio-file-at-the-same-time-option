@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -42,6 +43,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
@@ -102,13 +104,22 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         boolean waveformRequested;
         /**
          * Keyframe times of this video (ms from its own start), or null while
-         * the probe is still running. A lossless cut can only start on one of
-         * these, so the timeline snaps its markers to them.
+         * the probe is still running. A lossless stream copy can only START a
+         * cut on a keyframe, so the timeline snaps its markers onto these -
+         * that is what makes the drawn cut line and the written cut agree, and
+         * what keeps a split-then-merged video exactly as long as the source.
          */
         long[] keyframesMs;
-        /** Video track MIME (e.g. "video/hevc"); used to pick the smart-cut encoder. */
-        String videoMime;
+        /**
+         * Full probe result: keyframes plus the stream signature (codec,
+         * picture size, audio format). A merge cannot change those, so they
+         * are checked before a job starts instead of writing a file that plays
+         * wrong.
+         */
+        FFmpegVideoEditor.MediaInfo media;
         boolean keyframesRequested;
+        /** True once the probe has answered (even if it found nothing). */
+        boolean probeDone;
 
         Source(Uri uri, String title, long durationMs) {
             this.uri = uri;
@@ -167,6 +178,14 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private List<long[]> previewQueue;
     private int previewQueueIndex = -1;
     private long lastQueueAdvanceEnd = Long.MIN_VALUE;
+
+    /** How long to wait for keyframe probes before starting the job anyway. */
+    private static final long PROBE_WAIT_MS = 12000L;
+    private static final long PROBE_POLL_MS = 120L;
+
+    private Runnable pendingJob;
+    private long pendingJobDeadline;
+    private List<String> jobWarnings = Collections.emptyList();
 
     private final FFmpegVideoEditor editor = new FFmpegVideoEditor();
     private final WaveformExtractor waveformExtractor = new WaveformExtractor();
@@ -556,11 +575,12 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
             applyDefaultSplitZoom();
             updateRangeText();
             updateZoomText();
-            hintText.setText("Smart cut: only the few seconds around each cut are re-encoded — "
-                    + "the rest is copied losslessly, so the file stays near the original size "
-                    + "and quality. Tap to place the pointer, then ✂ Split. Long-press a part "
-                    + "to delete it; drag a row's ⠿ handle to reorder. Preview plays the parts "
-                    + "in list order.");
+            hintText.setText("Lossless split: every part is a stream copy, so nothing is "
+                    + "re-encoded and the parts together are exactly the original file. Splits "
+                    + "snap to the nearest keyframe (the tick marks) - a copy can only start "
+                    + "there. Tap to place the pointer, then ✂ Split. Long-press a part to "
+                    + "delete it; drag a row's ⠿ handle to reorder. Preview plays the parts in "
+                    + "list order.");
         }
         renderSegmentList();
         updateCurrentTimeText(timeline.getPlayheadMs());
@@ -846,6 +866,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         }
         if (added == 0) return;
         rebuildMergeMap();
+        requestKeyframes();     // signature + keyframe probe for the new files
         updateMergeInfoText();
         updateSongNameLabel();
         updateSaveButtonState();
@@ -978,8 +999,32 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         } else if (n == 1) {
             mergeInfoText.setText("1 video  •  add one more to merge");
         } else {
-            mergeInfoText.setText(n + " videos  •  Total " + msToTime(mergeDurationMs));
+            String clash = mergeClash();
+            if (clash != null) {
+                mergeInfoText.setText(n + " videos  •  " + clash);
+            } else {
+                mergeInfoText.setText(n + " videos  •  Total " + msToTime(mergeDurationMs));
+            }
         }
+    }
+
+    /**
+     * A merge is a stream copy, so it cannot change the codec, the picture
+     * size or the audio format. When the list holds videos that differ in
+     * those, say it here - the engine would otherwise refuse the export, and
+     * saying it early is friendlier than a dialog after the work.
+     */
+    private String mergeClash() {
+        for (int i = 0; i < mergeSources.size(); i++) {
+            for (int j = i + 1; j < mergeSources.size(); j++) {
+                FFmpegVideoEditor.MediaInfo a = mergeSources.get(i).media;
+                FFmpegVideoEditor.MediaInfo b = mergeSources.get(j).media;
+                if (a == null || b == null) continue;      // not probed yet
+                String reason = a.incompatibleWith(b);
+                if (reason != null) return "Cannot merge: " + reason;
+            }
+        }
+        return null;
     }
 
     private void updateSaveButtonState() {
@@ -2245,11 +2290,13 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
 
         List<Uri> uris = new ArrayList<>();
         long[] boundaries = new long[sources.size() + 1];
-        boundaries[0] = 0;
         for (int i = 0; i < sources.size(); i++) {
             Source s = sources.get(i);
             uris.add(s.uri);
-            boundaries[i + 1] = boundaries[i] + s.durationMs;
+            // the same time axis the timeline draws in: offsetMs is where this
+            // source starts in the edited timeline
+            boundaries[i] = s.offsetMs;
+            boundaries[i + 1] = s.offsetMs + s.durationMs;
         }
 
         startJob(mode, uris, boundaries, ordered, baseNameOf(sources));
@@ -2266,17 +2313,64 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         progressText.setText("Preparing…");
         progressOverlay.setVisibility(View.VISIBLE);
 
-        // keyframes per source (may contain nulls — the editor falls back to
-        // a plain stream-copy cut for those)
-        List<long[]> keyframes = new ArrayList<>(uris.size());
+        // A lossless cut can only start on a keyframe, so the probe's answers
+        // decide where the parts are actually cut. Exporting before they are
+        // in would cut off-grid - ffmpeg would then start each part at the
+        // previous keyframe and the parts would repeat video at every seam.
+        // The probe is a quick demux pass, so the job waits for it.
+        requestKeyframes();
+        pendingJob = () -> launchEditorJob(mode, uris, boundaries, segs, baseName);
+        pendingJobDeadline = SystemClock.uptimeMillis() + PROBE_WAIT_MS;
+        if (probesPending()) {
+            progressText.setText("Reading keyframe positions…");
+            mainHandler.postDelayed(probeWaiter, PROBE_POLL_MS);
+        } else {
+            Runnable job = pendingJob;
+            pendingJob = null;
+            job.run();
+        }
+    }
+
+    /** True while a loaded video is still waiting for its probe answer. */
+    private boolean probesPending() {
+        for (Source s : sources) if (!s.probeDone) return true;
+        for (Source s : mergeSources) if (!s.probeDone) return true;
+        return false;
+    }
+
+    /**
+     * Starts the export as soon as every probe has answered. The deadline is
+     * only a safety net for a file whose probe never returns: the engine then
+     * reads the keyframes itself and, if it cannot, says so in the result.
+     */
+    private final Runnable probeWaiter = new Runnable() {
+        @Override
+        public void run() {
+            if (!jobRunning || pendingJob == null) return;
+            if (!probesPending() || SystemClock.uptimeMillis() > pendingJobDeadline) {
+                Runnable job = pendingJob;
+                pendingJob = null;
+                job.run();
+                return;
+            }
+            progressText.setText("Reading keyframe positions…");
+            mainHandler.postDelayed(this, PROBE_POLL_MS);
+        }
+    };
+
+    private void launchEditorJob(int mode, List<Uri> uris, long[] boundaries,
+                                 List<FFmpegVideoEditor.Segment> segs, String baseName) {
+        // what the engine needs to know about each file: keyframes (cuts) and
+        // the stream signature (whether a merge is possible at all)
+        List<FFmpegVideoEditor.MediaInfo> infos = new ArrayList<>(uris.size());
         for (Uri u : uris) {
             Source match = null;
             for (Source s : sources) if (s.uri.equals(u)) { match = s; break; }
             for (Source s : mergeSources) if (s.uri.equals(u) && match == null) match = s;
-            keyframes.add(match != null ? match.keyframesMs : null);
+            infos.add(match != null ? match.media : null);
         }
 
-        editor.runJobFromUri(this, uris, keyframes, boundaries, mode, segs, baseName,
+        editor.runJobFromUri(this, uris, infos, boundaries, mode, segs, baseName,
                 new FFmpegVideoEditor.EditListener() {
                     @Override
                     public void onProgress(int percent) {
@@ -2291,16 +2385,24 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                     }
 
                     @Override
+                    public void onWarnings(List<String> notes) {
+                        // collected while the job runs; shown with the result
+                        jobWarnings = notes;
+                    }
+
+                    @Override
                     public void onSuccess(List<File> outputs) {
                         jobRunning = false;
+                        pendingJob = null;
                         progressOverlay.setVisibility(View.GONE);
                         updateSaveButtonState();
-                        showResultDialog(outputs);
+                        showResultDialog(outputs, jobWarnings);
                     }
 
                     @Override
                     public void onError(String message, boolean cancelled) {
                         jobRunning = false;
+                        pendingJob = null;
                         progressOverlay.setVisibility(View.GONE);
                         updateSaveButtonState();
                         if (cancelled) {
@@ -2317,8 +2419,17 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                 });
     }
 
-    /** Where the outputs went — the same recap the audio editor shows. */
+    /**
+     * Where the outputs went - the same recap the audio editor shows. Any
+     * compromise the engine had to make (a file re-wrapped, a cut moved onto a
+     * keyframe, keyframes unavailable) is listed here instead of being hidden:
+     * the user should know why a part boundary moved.
+     */
     private void showResultDialog(List<File> outputs) {
+        showResultDialog(outputs, jobWarnings);
+    }
+
+    private void showResultDialog(List<File> outputs, List<String> notes) {
         if (outputs == null || outputs.isEmpty()) return;
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < outputs.size(); i++) {
@@ -2326,39 +2437,76 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
             sb.append(outputs.get(i).getName());
         }
         File dir = outputs.get(0).getParentFile();
+        if (dir != null) sb.append("\n\nFolder: ").append(dir.getAbsolutePath());
+        if (notes != null && !notes.isEmpty()) {
+            sb.append("\n\nNotes:");
+            for (String n : notes) sb.append("\n• ").append(n);
+        }
         new AlertDialog.Builder(this)
                 .setTitle(outputs.size() == 1 ? "Saved" : "Saved " + outputs.size() + " files")
-                .setMessage(sb + (dir != null ? "\n\nFolder: " + dir.getAbsolutePath() : ""))
+                .setMessage(sb)
                 .setPositiveButton("Done", null)
                 .show();
     }
 
     /**
-     * Ask every loaded video for its keyframes. Until all of them have
-     * answered, snapping stays off (see {@link #refreshSnapPoints}).
+     * Ask every loaded video about its keyframes (the cut positions a
+     * lossless copy can actually use) and its stream signature (what a merge
+     * cannot change). Each answer refreshes the snap grid, and an export waits
+     * for the answers before it starts.
      */
     private void requestKeyframes() {
-        for (Source s : sources) {
-            if (s.keyframesMs != null || s.keyframesRequested) continue;
+        List<Source> all = new ArrayList<>(sources);
+        for (Source s : mergeSources) {
+            boolean dup = false;
+            for (Source o : sources) if (o == s) { dup = true; break; }
+            if (!dup) all.add(s);
+        }
+        for (Source s : all) {
+            if (s.probeDone || s.keyframesRequested) continue;
             s.keyframesRequested = true;
-            KeyframeProbe.probe(this, s.uri, (times, videoMime) -> {
-                s.keyframesMs = times;
-                s.videoMime = videoMime;
+            KeyframeProbe.probeInfo(this, s.uri, info -> {
+                s.keyframesMs = info.keyframesMs;
+                s.media = FFmpegVideoEditor.MediaInfo.from(info, s.title);
+                s.probeDone = true;
                 refreshSnapPoints();
+                if (currentTab == TAB_MERGE) {
+                    updateMergeInfoText();      // may reveal a mismatch now known
+                    updateSaveButtonState();
+                }
             });
         }
     }
 
     /**
-     * Snapping is OFF now: the smart cut re-encodes only the few seconds
-     * around a cut point, so a cut is frame-accurate at ANY position and the
-     * pointer can stay exactly where the user put it. The keyframes are still
-     * probed (the exporter needs them to plan each smart cut), they just no
-     * longer constrain the timeline.
+     * Hand the timeline the keyframe grid of the whole edited timeline: every
+     * source's keyframes, shifted by that source's offset. Markers can then
+     * only be placed where the sources can really be cut, so a split line is
+     * where the cut lands - and a split followed by a merge reproduces the
+     * original length. Sources whose probe has not answered yet contribute
+     * nothing (their stretch of timeline stays free until it does).
      */
     private void refreshSnapPoints() {
         if (timeline == null) return;
-        timeline.setSnapPoints(null);
+        int total = 0;
+        for (Source s : sources) {
+            if (s.keyframesMs != null) total += s.keyframesMs.length;
+        }
+        if (total == 0) {
+            timeline.setSnapPoints(null);
+            return;
+        }
+        long[] grid = new long[total];
+        int n = 0;
+        for (Source s : sources) {
+            long[] kfs = s.keyframesMs;
+            if (kfs == null) continue;
+            for (long k : kfs) {
+                long global = s.offsetMs + k;
+                if (global < s.offsetMs + s.durationMs) grid[n++] = global;
+            }
+        }
+        timeline.setSnapPoints(n > 0 ? (n == grid.length ? grid : Arrays.copyOf(grid, n)) : null);
     }
 
     private void extractWaveforms() {
@@ -2445,6 +2593,8 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                 editor.cancel();
             } catch (Exception ignored) {}
         }
+        pendingJob = null;
+        mainHandler.removeCallbacks(probeWaiter);
         super.finish();
     }
 
@@ -2457,6 +2607,8 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        pendingJob = null;
+        mainHandler.removeCallbacks(probeWaiter);
         stopPreview();
         editor.release();
         waveformExtractor.release();

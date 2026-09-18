@@ -14,29 +14,60 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Lists the keyframe (sync sample) times of a video file, in milliseconds.
+ * Reads what the editor needs to know about a video before touching it:
  *
- * A lossless (-c copy) cut can only start on a keyframe — that is a property
- * of the container, not a limitation of ffmpeg — so these times are the only
- * places the video splitter can actually cut. The timeline snaps its split
- * points to them, which is what makes a cut land where the split line is
- * drawn instead of a little earlier.
+ * <ul>
+ * <li><b>Keyframe (sync sample) times.</b> A lossless {@code -c copy} cut can
+ *     only start on a keyframe - that is a property of the container, not a
+ *     limitation of ffmpeg - so these times are the only positions the
+ *     splitter may cut at. The timeline snaps its markers onto them, which is
+ *     what makes the drawn cut line and the written cut agree; without it a
+ *     part carries the previous GOP along and a re-joined video repeats a
+ *     second of video and audio at every seam.</li>
+ * <li><b>The stream signature</b> (codec, picture size, audio format). A copy
+ *     cannot change any of these, so two videos may only end up in one output
+ *     file when they match; the editor checks this before it starts writing
+ *     instead of producing a file that plays wrong.</li>
+ * </ul>
  *
- * Android's own MediaExtractor is used rather than ffprobe: it needs no extra
- * native package (the ffmpeg-kit "min" build ships no ffprobe binary) and it
- * reports the sync samples from the same container index ffmpeg reads when it
- * seeks, so the two agree.
+ * <p>Android's own MediaExtractor is used rather than ffprobe: it needs no
+ * extra native package (the ffmpeg-kit "min" build ships no ffprobe binary)
+ * and it reports the sync samples from the same container index ffmpeg reads
+ * when it seeks, so the two agree.
  */
 final class KeyframeProbe {
 
     interface Callback {
         /**
-         * Keyframe times in ms, ascending — empty when the file has no video
-         * track or could not be read. {@code videoMime} is the video track's
-         * MIME type (e.g. "video/hevc") or null, used by the smart cut to
-         * pick a matching encoder.
+         * @param timesMs   keyframe times in ms, ascending - empty when the
+         *                  file has no video track or could not be read
+         * @param videoMime the video track's MIME type (e.g. "video/hevc") or null
          */
         void onKeyframes(long[] timesMs, String videoMime);
+    }
+
+    /** Everything the probe can tell about one file. */
+    static final class Info {
+        long[] keyframesMs = new long[0];
+        String videoMime;
+        String audioMime;
+        int width;
+        int height;
+        int rotationDegrees;
+        int sampleRate;
+        int channelCount;
+        boolean hasVideo;
+        boolean hasAudio;
+        /** True when the file could be opened at all. */
+        boolean readable;
+
+        boolean hasKeyframes() {
+            return keyframesMs != null && keyframesMs.length > 0;
+        }
+    }
+
+    interface InfoCallback {
+        void onInfo(Info info);
     }
 
     private static final String TAG = "KeyframeProbe";
@@ -48,30 +79,48 @@ final class KeyframeProbe {
         return t;
     });
 
-    private KeyframeProbe() {}
+    private KeyframeProbe() {
+    }
 
-    /** Probe off the main thread; the callback is delivered on the main thread. */
+    /** Probes off the main thread; the callback is delivered on the main thread. */
     static void probe(Context context, Uri uri, Callback callback) {
+        if (callback == null) return;
+        probeInfo(context, uri, info -> callback.onKeyframes(info.keyframesMs, info.videoMime));
+    }
+
+    /** Full probe: keyframes plus the stream signature. */
+    static void probeInfo(Context context, Uri uri, InfoCallback callback) {
         if (context == null || uri == null || callback == null) return;
-        final Context app = context.getApplicationContext();
+        final Context app = context.getApplicationContext() != null
+                ? context.getApplicationContext() : context;
         final Handler main = new Handler(Looper.getMainLooper());
         IO.execute(() -> {
-            long[] times = new long[0];
-            String mime = null;
+            final Info info = new Info();
             MediaExtractor extractor = new MediaExtractor();
             try {
                 extractor.setDataSource(app, uri, null);
-                int track = -1;
+                info.readable = true;
+                int videoTrack = -1;
                 for (int i = 0; i < extractor.getTrackCount(); i++) {
-                    String m = extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME);
-                    if (m != null && m.startsWith("video/")) {
-                        track = i;
-                        mime = m;
-                        break;
+                    MediaFormat fmt = extractor.getTrackFormat(i);
+                    String mime = fmt.getString(MediaFormat.KEY_MIME);
+                    if (mime == null) continue;
+                    if (mime.startsWith("video/") && videoTrack < 0) {
+                        videoTrack = i;
+                        info.hasVideo = true;
+                        info.videoMime = mime;
+                        info.width = intOr(fmt, MediaFormat.KEY_WIDTH, 0);
+                        info.height = intOr(fmt, MediaFormat.KEY_HEIGHT, 0);
+                        info.rotationDegrees = intOr(fmt, MediaFormat.KEY_ROTATION, 0);
+                    } else if (mime.startsWith("audio/") && info.audioMime == null) {
+                        info.hasAudio = true;
+                        info.audioMime = mime;
+                        info.sampleRate = intOr(fmt, MediaFormat.KEY_SAMPLE_RATE, 0);
+                        info.channelCount = intOr(fmt, MediaFormat.KEY_CHANNEL_COUNT, 0);
                     }
                 }
-                if (track >= 0) {
-                    extractor.selectTrack(track);
+                if (videoTrack >= 0) {
+                    extractor.selectTrack(videoTrack);
                     List<Long> list = new ArrayList<>();
                     while (true) {
                         long timeUs = extractor.getSampleTime();
@@ -82,29 +131,39 @@ final class KeyframeProbe {
                             // with -c copy seeks to the keyframe at-or-BEFORE the
                             // seek point. A truncated time can sit a fraction of
                             // a ms before the very keyframe it came from, which
-                            // made the cut start at the PREVIOUS keyframe — a
+                            // made the cut start at the PREVIOUS keyframe - a
                             // whole GOP earlier than the pointer.
                             list.add((timeUs + 999) / 1000);
                         }
                         if (!extractor.advance()) break;
                     }
-                    times = new long[list.size()];
-                    for (int i = 0; i < times.length; i++) times[i] = list.get(i);
+                    info.keyframesMs = new long[list.size()];
+                    for (int i = 0; i < info.keyframesMs.length; i++) {
+                        info.keyframesMs[i] = list.get(i);
+                    }
                 }
-                Log.i(TAG, "keyframes=" + times.length + " mime=" + mime
-                        + (times.length > 0 ? " first=" + times[0] + "ms last="
-                        + times[times.length - 1] + "ms" : ""));
+                Log.i(TAG, "probe " + uri.getLastPathSegment() + ": keyframes="
+                        + info.keyframesMs.length + " video=" + info.videoMime
+                        + " audio=" + info.audioMime + " " + info.width + "x" + info.height
+                        + (info.keyframesMs.length > 0 ? " first=" + info.keyframesMs[0]
+                        + " last=" + info.keyframesMs[info.keyframesMs.length - 1] : ""));
             } catch (Throwable t) {
-                Log.w(TAG, "keyframe probe failed for " + uri, t);
+                Log.w(TAG, "probe failed for " + uri, t);
             } finally {
                 try {
                     extractor.release();
                 } catch (Exception ignored) {
                 }
             }
-            final long[] resultTimes = times;
-            final String resultMime = mime;
-            main.post(() -> callback.onKeyframes(resultTimes, resultMime));
+            main.post(() -> callback.onInfo(info));
         });
+    }
+
+    private static int intOr(MediaFormat fmt, String key, int fallback) {
+        try {
+            return fmt.containsKey(key) ? fmt.getInteger(key) : fallback;
+        } catch (Throwable t) {
+            return fallback;
+        }
     }
 }

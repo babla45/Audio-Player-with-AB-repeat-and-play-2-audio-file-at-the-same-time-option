@@ -407,8 +407,13 @@ public class EditorTimelineView extends View {
             boolean hasLast = false;
             for (Long p : copy) {
                 if (p == null) continue;
-                if (p > minGapMs && p < durationMs - minGapMs
-                        && (!hasLast || p - last > minGapMs)) {
+                // Exactly the bounds the live rules use: a part that is
+                // exactly minGapMs long is legal (keptMsBetween() rejects only
+                // "shorter than"), so a marker that could be placed must also
+                // survive a snapshot restore. With the old strict ">" tests a
+                // legal marker disappeared on the first undo.
+                if (p >= minGapMs && p <= durationMs - minGapMs
+                        && (!hasLast || p - last >= minGapMs)) {
                     splitPoints.add(p);
                     last = p;
                     hasLast = true;
