@@ -36,6 +36,15 @@
 
     <style name="Theme.Aud_player" parent="Base.Theme.Aud_player" />
 
+    <!-- Share-sheet entries (ShareEntryActivity): they forward to an editor and
+         finish immediately, so they must never paint or animate anything. -->
+    <style name="Theme.Aud_player.ShareEntry" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
+
     <!-- Bottom Sheet Theme -->
     <style name="ThemeOverlay.App.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
         <item name="bottomSheetStyle">@style/Widget.App.BottomSheet</item>

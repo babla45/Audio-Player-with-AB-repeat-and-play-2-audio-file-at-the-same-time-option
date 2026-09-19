@@ -70,9 +70,21 @@
             android:name=".AudioEditorActivity"
             android:exported="true"
             android:label="Audio Editor"
-            android:parentActivityName=".MainActivity">
-            <!-- Share target: one shared song opens the Split tab, several
-                 shared songs open the Merge tab with all of them loaded -->
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Share-sheet entries. The chooser used to offer one generic
+             "Audio Editor" target that guessed the task from the file count
+             (one file = Split, several = Merge). It now offers one entry per
+             task — Android de-duplicates the chooser by activity, so each
+             entry is its own invisible activity that forwards to the editor's
+             tab (ShareEntryActivity). -->
+        <activity
+            android:name=".ShareAudioMergeActivity"
+            android:exported="true"
+            android:label="@string/share_merge_audio"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Aud_player.ShareEntry">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -84,7 +96,26 @@
                 <data android:mimeType="audio/*" />
             </intent-filter>
         </activity>
- 
+
+        <activity
+            android:name=".ShareAudioSplitActivity"
+            android:exported="true"
+            android:label="@string/share_split_audio"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Aud_player.ShareEntry">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".VideoListActivity"
             android:label="Video Files"
@@ -94,8 +125,54 @@
             android:name=".VideoEditorActivity"
             android:exported="true"
             android:label="Video Editor"
-            android:parentActivityName=".MainActivity">
-            <!-- Share target: one shared video opens Split, several open Merge -->
+            android:parentActivityName=".MainActivity" />
+
+        <!-- Share-sheet entries for video: Merge, Split and Compress -->
+        <activity
+            android:name=".ShareVideoMergeActivity"
+            android:exported="true"
+            android:label="@string/share_merge_video"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Aud_player.ShareEntry">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ShareVideoSplitActivity"
+            android:exported="true"
+            android:label="@string/share_split_video"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Aud_player.ShareEntry">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ShareVideoCompressActivity"
+            android:exported="true"
+            android:label="@string/share_compress_video"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@style/Theme.Aud_player.ShareEntry">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />

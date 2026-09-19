@@ -381,12 +381,20 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         Intent intent = getIntent();
         List<Uri> shared = sharedVideoUris(intent);
         boolean fromShare = !shared.isEmpty();
+        // The share-sheet entry that launched us names the task ("Merge videos"
+        // / "Split video" / "Compress video"). Without one the old rule stands:
+        // one shared video is a split request, several are a merge request.
+        currentTab = startTabFor(intent, fromShare, shared.size());
+        boolean compressShare = fromShare && currentTab == TAB_COMPRESS;
 
-        if (fromShare) {
+        if (fromShare && !compressShare) {
             Uri firstUri = shared.get(0);
             videoTitle = displayNameOf(firstUri);
             sources.add(new Source(firstUri, videoTitle, Math.max(1000, probeDuration(firstUri))));
-            if (shared.size() > 1) {
+            // Every shared video goes into the Merge tab's list for the "Merge
+            // videos" entry (one belongs there too, the tab asks for one more)
+            // and for any other multi-video share, as before.
+            if (currentTab == TAB_MERGE || shared.size() > 1) {
                 Source first = sources.get(0);
                 mergeSources.add(new Source(first.uri, first.title, first.durationMs));
                 for (int i = 1; i < shared.size(); i++) {
@@ -395,7 +403,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                 }
                 rebuildMergeMap();
             }
-        } else {
+        } else if (!fromShare) {
             String uriStr = intent.getStringExtra(EXTRA_URI);
             if (uriStr != null) {
                 Uri firstUri = Uri.parse(uriStr);
@@ -429,11 +437,30 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         extractWaveforms();
         requestKeyframes();
 
-        currentTab = fromShare
-                ? (shared.size() > 1 ? TAB_MERGE : TAB_SPLIT)
-                : getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_LAST_TAB, TAB_MERGE);
+        // "Compress video": the shared videos go straight into the Compress
+        // tab's own list. The Split timeline stays empty on purpose — its
+        // waveform and the keyframe probe are wasted work for a re-encode, and
+        // the Compress tab never reads them. Runs after bindViews(), because
+        // the list renders itself as it fills.
+        if (compressShare) addCompressVideos(shared, false);
 
         updateUiForTab();
+    }
+
+    /**
+     * The tab to open on. The share-sheet entries state the task outright
+     * ("Merge videos" / "Split video" / "Compress video"); without one the old
+     * share rule stands — one video is a split request, several are a merge
+     * request — and a launch from inside the app reopens the tab last worked on.
+     */
+    private int startTabFor(Intent intent, boolean fromShare, int sharedCount) {
+        String mode = intent != null
+                ? intent.getStringExtra(ShareEntryActivity.EXTRA_START_MODE) : null;
+        if (ShareEntryActivity.MODE_MERGE.equals(mode)) return TAB_MERGE;
+        if (ShareEntryActivity.MODE_SPLIT.equals(mode)) return TAB_SPLIT;
+        if (ShareEntryActivity.MODE_COMPRESS.equals(mode)) return TAB_COMPRESS;
+        if (fromShare) return sharedCount > 1 ? TAB_MERGE : TAB_SPLIT;
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_LAST_TAB, TAB_MERGE);
     }
 
     private List<Uri> sharedVideoUris(Intent intent) {
@@ -996,6 +1023,10 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         compressPickerLauncher.launch(intent);
     }
 
+    private void addCompressVideos(List<Uri> uris) {
+        addCompressVideos(uris, true);
+    }
+
     /**
      * Add videos to the compress list. Same shape as {@link #addMergeVideos},
      * plus the original file size - that is what the savings summary at the end
@@ -1003,8 +1034,12 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
      *
      * <p>No keyframe probe here: compressing re-encodes every frame, so where
      * the cuts could be is irrelevant and the probe would be wasted work.
+     *
+     * @param announce show the "Added N videos" toast — suppressed when the list
+     *                 is filled by a share, where the user already picked these
+     *                 files and the list appearing is the answer.
      */
-    private void addCompressVideos(List<Uri> uris) {
+    private void addCompressVideos(List<Uri> uris, boolean announce) {
         if (uris == null || uris.isEmpty() || isFinishing()) return;
         stopPreview();
         int added = 0;
@@ -1022,9 +1057,11 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         updateSongNameLabel();
         updateSaveButtonState();
         renderSegmentList();
-        Toast.makeText(this, "Added " + added + (added == 1 ? " video" : " videos")
-                        + (addedBytes > 0 ? "  •  " + FFmpegVideoEditor.human(addedBytes) : ""),
-                Toast.LENGTH_SHORT).show();
+        if (announce) {
+            Toast.makeText(this, "Added " + added + (added == 1 ? " video" : " videos")
+                            + (addedBytes > 0 ? "  •  " + FFmpegVideoEditor.human(addedBytes) : ""),
+                    Toast.LENGTH_SHORT).show();
+        }
     }
 
     /** Ask before dropping a video from the compress list (same idiom as Merge). */

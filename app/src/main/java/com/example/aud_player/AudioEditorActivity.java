@@ -52,8 +52,9 @@ import java.util.List;
  * - Save options: separately (one file per segment) or merged — sequential
  *   order by default, manual reorder (▲/▼) before merging.
  * - Entry points: the app's own Menu → Audio Edit, and the system SHARE
- *   sheet — one shared audio file opens the Split tab, several open the
- *   Merge tab with all of them already loaded.
+ *   sheet — which now offers a "Merge audio" and a "Split audio" entry
+ *   (ShareEntryActivity), each opening this editor on that tab with the
+ *   shared songs loaded.
  * - Preview uses an independent MediaPlayer, leaving the main app
  *   playback untouched.
  */
@@ -333,6 +334,10 @@ public class AudioEditorActivity extends AppCompatActivity {
         // launched from the system share sheet ("Share" on audio files)?
         List<Uri> shared = sharedAudioUris(intent);
         boolean fromShare = !shared.isEmpty();
+        // The share-sheet entry that launched us names the task ("Merge audio"
+        // / "Split audio"). Without one the old rule stands: one shared song is
+        // a split request, several are a merge request.
+        currentTab = startTabFor(intent, fromShare, shared.size());
 
         Uri firstUri;
         if (fromShare) {
@@ -358,11 +363,12 @@ public class AudioEditorActivity extends AppCompatActivity {
         }
         rebuildTimeMap();
 
-        // Sharing several songs is a merge request: pre-load the Merge tab
-        // with all of them, in the order the share sheet handed them over.
-        // (The Split timeline keeps the first song as its baseline, exactly
-        // as if the editor had been opened on it.)
-        if (fromShare && shared.size() > 1) {
+        // Load every shared song into the Merge tab's list, in the order the
+        // share sheet handed them over — always for the "Merge audio" entry
+        // (one song belongs there too, the tab asks for one more), and for any
+        // other multi-song share as before. (The Split timeline keeps the first
+        // song as its baseline, exactly as if the editor had been opened on it.)
+        if (fromShare && (currentTab == TAB_MERGE || shared.size() > 1)) {
             Source first = sources.get(0);
             mergeSources.add(new Source(first.uri, first.title, first.durationMs));
             for (int i = 1; i < shared.size(); i++) {
@@ -393,14 +399,22 @@ public class AudioEditorActivity extends AppCompatActivity {
         // Waveform (null result falls back to placeholder bars)
         extractWaveforms();
 
-        // reopen on the tab the user last worked on — but a share decides
-        // the tab: one song is a split request, several are a merge request
-        currentTab = fromShare
-                ? (shared.size() > 1 ? TAB_MERGE : TAB_SPLIT)
-                : getSharedPreferences(PREFS, MODE_PRIVATE)
-                        .getInt(KEY_LAST_TAB, TAB_MERGE);
-
         updateUiForTab();
+    }
+
+    /**
+     * The tab to open on. The share-sheet entries state the task outright
+     * ("Merge audio" / "Split audio"); without one the old share rule stands —
+     * one song is a split request, several are a merge request — and a launch
+     * from inside the app reopens the tab last worked on.
+     */
+    private int startTabFor(Intent intent, boolean fromShare, int sharedCount) {
+        String mode = intent != null
+                ? intent.getStringExtra(ShareEntryActivity.EXTRA_START_MODE) : null;
+        if (ShareEntryActivity.MODE_MERGE.equals(mode)) return TAB_MERGE;
+        if (ShareEntryActivity.MODE_SPLIT.equals(mode)) return TAB_SPLIT;
+        if (fromShare) return sharedCount > 1 ? TAB_MERGE : TAB_SPLIT;
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getInt(KEY_LAST_TAB, TAB_MERGE);
     }
 
     /**
