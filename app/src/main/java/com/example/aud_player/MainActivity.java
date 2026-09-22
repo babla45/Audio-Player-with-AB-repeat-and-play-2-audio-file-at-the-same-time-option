@@ -1723,8 +1723,7 @@ public class MainActivity extends AppCompatActivity {
                         }
 
                         // Reset the flag after use
-                        shouldAutoPlay = false;
-                    } else {
+                        
                         // Standard behavior - don't auto-play
                         safeSetImageResource(playPauseButton, R.drawable.ic_play_improved);
                         isPlaying = false;

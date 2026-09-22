@@ -580,18 +580,47 @@
                 android:textColor="#AAFFFFFF"
                 android:textSize="12sp" />
 
-            <TextView
-                android:id="@+id/editorCancelBtn"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_gravity="end"
                 android:layout_marginTop="16dp"
-                android:background="@drawable/bg_editor_btn_secondary"
-                android:paddingHorizontal="22dp"
-                android:paddingVertical="9dp"
-                android:text="Cancel"
-                android:textColor="#FFFFFFFF"
-                android:textSize="13sp" />
+                android:gravity="end"
+                android:orientation="horizontal">
+
+                <!-- Compress only: let the encode carry on after this screen
+                     is left. Hidden for the split/merge jobs, which have no
+                     service behind them. -->
+                <TextView
+                    android:id="@+id/editorBackgroundBtn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:autoSizeMaxTextSize="13sp"
+                    android:autoSizeMinTextSize="10sp"
+                    android:autoSizeTextType="uniform"
+                    android:background="@drawable/bg_editor_btn_secondary"
+                    android:gravity="center"
+                    android:maxLines="1"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="9dp"
+                    android:text="Background process"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <TextView
+                    android:id="@+id/editorCancelBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_editor_btn_secondary"
+                    android:paddingHorizontal="22dp"
+                    android:paddingVertical="9dp"
+                    android:text="Cancel"
+                    android:textColor="#FFFFFFFF"
+                    android:textSize="13sp" />
+            </LinearLayout>
         </LinearLayout>
     </FrameLayout>
 </FrameLayout>

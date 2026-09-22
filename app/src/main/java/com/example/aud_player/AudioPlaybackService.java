@@ -73,6 +73,10 @@ public class AudioPlaybackService extends Service {
     private boolean pausedByAudioFocusLoss = false;
     private boolean noisyReceiverRegistered = false;
     private boolean isForegroundStarted = false;
+    // True once this instance has been told to stop (ACTION_STOP, or the sleep
+    // timer's close-app action). A stopped instance is on its way out, so it
+    // must never post its notification again — see updateNotification().
+    private boolean serviceStopped = false;
     private float currentPitch = 1.0f;
     private float currentBoost = 1.0f;
     private LoudnessEnhancer loudnessEnhancerMain;
@@ -241,6 +245,14 @@ public class AudioPlaybackService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // A stop command silences this service's notification for good; every
+        // other command (play/pause/next/…) revives it. The stop path below
+        // still calls startForeground() once more and then removes what it
+        // posted (stopForeground) — but from that point on updateNotification()
+        // must not post anything again, or the mini-player outlives the
+        // service and nothing can ever remove it (see updateNotification).
+        serviceStopped = intent != null && ACTION_STOP.equals(intent.getAction());
+
         // CRITICAL: Call startForeground IMMEDIATELY before doing any work.
         // On Android 11 and below, delaying this call can cause the notification
         // to never appear (the system silently drops it). On Android 12+ it can
@@ -424,7 +436,11 @@ public class AudioPlaybackService extends Service {
                             PlaybackRegistry.stopAll();
                         } catch (Exception ignored) {}
 
-                        // Stop the service directly - don't use handler delay
+                        // Stop the service directly - don't use handler delay.
+                        // serviceStopped (set on entry to onStartCommand) keeps
+                        // the notification from being re-posted while the
+                        // activity finishes and unbinds.
+                        serviceStopped = true;
                         stopSelf();
                         abandonAudioFocus();
                         unregisterBecomingNoisy();
@@ -927,9 +943,17 @@ public class AudioPlaybackService extends Service {
     }
 
     private void updateNotification() {
-        NotificationManager notificationManager = 
-            (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        notificationManager.notify(NOTIFICATION_ID, createNotification());
+        // A stopped service owns no notification. Posting here is what used to
+        // resurrect the mini-player during app exit: ACTION_STOP removes the
+        // notification, MainActivity then finishes and its onDestroy() calls
+        // setMediaPlayers(null, null, null) — which lands on this method, and
+        // re-posted a notification whose service was already gone. Nothing
+        // could dismiss it afterwards, so it sat in the shade forever.
+        if (!serviceStopped) {
+            NotificationManager notificationManager =
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            notificationManager.notify(NOTIFICATION_ID, createNotification());
+        }
         updatePlaybackState();
     }
 
@@ -1069,6 +1093,26 @@ public class AudioPlaybackService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        // The mini-player notification belongs to this service and must never
+        // outlive it, however this instance ended (stop command, stopService()
+        // fallback, system kill, low memory). An orphaned notification can
+        // neither be dismissed by its buttons nor removed by anything else.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE);
+            } else {
+                stopForeground(true);
+            }
+            isForegroundStarted = false;
+            serviceStopped = true;
+            NotificationManager notificationManager =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (notificationManager != null) {
+                notificationManager.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error removing notification in onDestroy", e);
+        }
         if (scheduledFallback != null) {
             scheduleHandler.removeCallbacks(scheduledFallback);
             scheduledFallback = null;
@@ -1250,7 +1294,10 @@ public class AudioPlaybackService extends Service {
                             finishedIntent.putExtra("TIMER_ACTION", timerAction);
                             sendLocalBroadcast(finishedIntent);
 
-                            // Stop service and remove notification
+                            // Stop service and remove notification. Marked
+                            // stopped first so nothing can re-post it while
+                            // the app tears down (see updateNotification).
+                            serviceStopped = true;
                             stopForeground(true);
                             stopSelf();
                         } catch (Exception e) {

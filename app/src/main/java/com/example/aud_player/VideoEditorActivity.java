@@ -201,6 +201,16 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private ProgressBar progressBar;
     private TextView progressText, progressTitle;
     private View cancelBtn;
+    /** Compress only: sends the encode to the background service and closes the overlay. */
+    private View backgroundBtn;
+    /**
+     * True while the Compress tab's job is running. That job lives in
+     * {@link VideoCompressService}, not on this activity's engine, so it is
+     * tracked apart from the split/merge jobs that set {@link #jobRunning}.
+     */
+    private boolean compressJobRunning = false;
+    /** True once the user pressed "Background process" for the running job. */
+    private boolean compressInBackground = false;
 
     private static final String PREFS = "video_editor_prefs";
     private static final String KEY_LAST_TAB = "last_tab";
@@ -553,6 +563,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         progressText = findViewById(R.id.editorProgressText);
         progressTitle = findViewById(R.id.editorProgressTitle);
         cancelBtn = findViewById(R.id.editorCancelBtn);
+        backgroundBtn = findViewById(R.id.editorBackgroundBtn);
 
         findViewById(R.id.editorBackBtn).setOnClickListener(v -> finish());
         if (videoEmptyPickBtn != null) {
@@ -795,10 +806,34 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         saveBtn.setOnClickListener(v -> confirmSave());
         cancelBtn.setOnClickListener(v -> {
             if (jobRunning) {
-                editor.cancel();
+                // the compress job belongs to the service, so cancel it there
+                if (compressJobRunning) {
+                    compressInBackground = false;
+                    VideoCompressService.cancel();
+                } else {
+                    editor.cancel();
+                }
                 progressTitle.setText("Cancelling…");
             }
         });
+        backgroundBtn.setOnClickListener(v -> moveCompressToBackground());
+    }
+
+    /**
+     * "Background process": let the encode carry on after this screen is left.
+     *
+     * <p>The job already runs in a foreground service, so nothing has to be
+     * moved — this only drops the blocking overlay and tells the service to
+     * post a notification when it finishes. It is also what lets the screen be
+     * closed without the job being cancelled (see {@link #finish()}).
+     */
+    private void moveCompressToBackground() {
+        if (!compressJobRunning) return;
+        compressInBackground = true;
+        VideoCompressService.setBackgroundMode(true);
+        progressOverlay.setVisibility(View.GONE);
+        Toast.makeText(this, "Compressing in the background — you can leave the app.\n"
+                + "Progress and the result are in the notification.", Toast.LENGTH_LONG).show();
     }
 
     private void addSplitAtPlayhead() {
@@ -1408,20 +1443,28 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
      * {before, after}. Only a pair whose original size is known counts, so a
      * file the engine skipped or failed cannot skew the figure. The engine
      * names each output after its source, which is what the match uses.
+     *
+     * <p>The originals arrive as parallel arrays rather than as the list's
+     * {@link Source} objects, because the compress job finishes in a service
+     * and its result can outlive the screen that started it.
      */
-    private long[] savingsOf(List<File> outputs, List<Source> originals) {
+    private long[] savingsOf(List<File> outputs, List<String> originalTitles,
+                             long[] originalSizes) {
         long before = 0;
         long after = 0;
-        boolean[] used = new boolean[originals.size()];
+        int count = originalTitles != null ? originalTitles.size() : 0;
+        boolean[] used = new boolean[count];
         for (File f : outputs) {
             String name = f.getName();
-            for (int i = 0; i < originals.size(); i++) {
+            for (int i = 0; i < count; i++) {
                 if (used[i]) continue;
-                String stem = stemOf(originals.get(i).title);
+                String stem = stemOf(originalTitles.get(i));
                 if (stem.isEmpty() || !name.startsWith(stem + "_compressed")) continue;
                 used[i] = true;
-                if (originals.get(i).sizeBytes > 0) {
-                    before += originals.get(i).sizeBytes;
+                long size = originalSizes != null && i < originalSizes.length
+                        ? originalSizes[i] : 0;
+                if (size > 0) {
+                    before += size;
                     after += f.length();
                 }
                 break;
@@ -1452,81 +1495,102 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         if (jobRunning || compressSources.isEmpty()) return;
         stopPreview();
         jobRunning = true;
+        compressJobRunning = true;
+        compressInBackground = false;
         jobWarnings = Collections.emptyList();
         updateSaveButtonState();
         progressTitle.setText("Compressing…");
         progressBar.setIndeterminate(true);
         progressBar.setProgress(0);
         progressText.setText("Preparing…");
+        // only this job can be sent to the background: the split/merge engine
+        // still runs on this activity and dies with it
+        if (backgroundBtn != null) backgroundBtn.setVisibility(View.VISIBLE);
         progressOverlay.setVisibility(View.VISIBLE);
         compressFileIndex = -1;
         compressFileStartMs = SystemClock.uptimeMillis();
 
-        // the list as it is now: what the results are weighed against at the end
-        final List<Source> originals = new ArrayList<>(compressSources);
-        final List<Uri> uris = new ArrayList<>(compressSources.size());
-        for (Source s : compressSources) uris.add(s.uri);
+        // The list as it is now. The titles and sizes travel with the job so
+        // the savings summary still adds up if the result arrives after this
+        // screen has been rebuilt.
+        final int n = compressSources.size();
+        final List<Uri> uris = new ArrayList<>(n);
+        final List<String> titles = new ArrayList<>(n);
+        final long[] sizes = new long[n];
+        for (int i = 0; i < n; i++) {
+            Source s = compressSources.get(i);
+            uris.add(s.uri);
+            titles.add(s.title);
+            sizes[i] = s.sizeBytes;
+        }
 
-        editor.compressFromUri(this, uris, compressOptions.copy(),
-                new FFmpegVideoEditor.EditListener() {
-                    // these callbacks come from the engine's worker thread
-                    @Override
-                    public void onFileProgress(final int index, final int percent) {
-                        runOnUiThread(() -> updateCompressRowProgress(index, percent));
-                    }
+        // The encode runs in a foreground service, so pressing Home (or the
+        // "Background process" button) no longer puts it at the mercy of the
+        // low-memory killer.
+        VideoCompressService.setObserver(compressObserver);
+        VideoCompressService.start(this, uris, compressOptions.copy(), titles, sizes);
+    }
 
-                    @Override
-                    public void onWarnings(List<String> notes) {
-                        jobWarnings = notes;
-                    }
+    /**
+     * The service's callbacks: all of them arrive on the main thread.
+     */
+    private final VideoCompressService.Observer compressObserver =
+            new VideoCompressService.Observer() {
+                @Override
+                public void onProgress(int percent) {
+                    applyCompressProgress(percent);
+                }
 
-                    @Override
-                    public void onProgress(final int percent) {
-                        runOnUiThread(() -> {
-                            if (percent < 0) {
-                                progressBar.setIndeterminate(true);
-                                progressText.setText("Preparing videos…");
-                            } else {
-                                progressBar.setIndeterminate(false);
-                                progressBar.setProgress(percent);
-                                progressText.setText(percent + "%");
-                            }
-                        });
-                    }
+                @Override
+                public void onFileProgress(int index, int percent) {
+                    updateCompressRowProgress(index, percent);
+                }
 
-                    @Override
-                    public void onSuccess(final List<File> outputs) {
-                        runOnUiThread(() -> {
-                            if (isFinishing() || isDestroyed()) return;
-                            jobRunning = false;
-                            progressOverlay.setVisibility(View.GONE);
-                            updateSaveButtonState();
-                            renderSegmentList();     // clears the per-file bars
-                            showCompressResultDialog(outputs, jobWarnings, originals);
-                        });
-                    }
+                @Override
+                public void onFinished(VideoCompressService.Result result) {
+                    onCompressJobFinished(result);
+                }
+            };
 
-                    @Override
-                    public void onError(final String message, final boolean cancelled) {
-                        runOnUiThread(() -> {
-                            if (isFinishing() || isDestroyed()) return;
-                            jobRunning = false;
-                            progressOverlay.setVisibility(View.GONE);
-                            updateSaveButtonState();
-                            renderSegmentList();
-                            if (cancelled) {
-                                Toast.makeText(VideoEditorActivity.this,
-                                        "Cancelled", Toast.LENGTH_SHORT).show();
-                            } else {
-                                new AlertDialog.Builder(VideoEditorActivity.this)
-                                        .setTitle("Compress Failed")
-                                        .setMessage(message)
-                                        .setPositiveButton("OK", null)
-                                        .show();
-                            }
-                        });
-                    }
-                });
+    /** Whole-job progress on the overlay's bar (same readout the engine used). */
+    private void applyCompressProgress(int percent) {
+        if (percent < 0) {
+            progressBar.setIndeterminate(true);
+            progressText.setText("Preparing videos…");
+        } else {
+            progressBar.setIndeterminate(false);
+            progressBar.setProgress(percent);
+            progressText.setText(percent + "%");
+        }
+    }
+
+    /**
+     * The compress job ended, whether this screen was on top, in the background
+     * or already torn down (in which case the service has notified the user).
+     */
+    private void onCompressJobFinished(VideoCompressService.Result result) {
+        compressJobRunning = false;
+        compressInBackground = false;
+        VideoCompressService.setObserver(null);
+        VideoCompressService.peekResult();     // the dialog below is the consumer
+        if (isFinishing() || isDestroyed()) return;
+        jobRunning = false;
+        jobWarnings = result.warnings;
+        progressOverlay.setVisibility(View.GONE);
+        updateSaveButtonState();
+        renderSegmentList();     // clears the per-file bars
+        if (result.cancelled) {
+            Toast.makeText(VideoEditorActivity.this, "Cancelled", Toast.LENGTH_SHORT).show();
+        } else if (result.error != null) {
+            new AlertDialog.Builder(VideoEditorActivity.this)
+                    .setTitle("Compress Failed")
+                    .setMessage(result.error)
+                    .setPositiveButton("OK", null)
+                    .show();
+        } else {
+            showCompressResultDialog(result.outputs, result.warnings,
+                    result.originalTitles, result.originalSizes);
+        }
     }
 
     /**
@@ -1536,12 +1600,12 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
      * had to be re-encoded).
      */
     private void showCompressResultDialog(List<File> outputs, List<String> notes,
-                                          List<Source> originals) {
+                                          List<String> originalTitles, long[] originalSizes) {
         if (outputs == null || outputs.isEmpty()) return;
         StringBuilder sb = new StringBuilder();
         for (File f : outputs) sb.append(f.getName()).append("\n");
 
-        long[] saved = savingsOf(outputs, originals);
+        long[] saved = savingsOf(outputs, originalTitles, originalSizes);
         long before = saved[0];
         long after = saved[1];
 
@@ -2992,11 +3056,15 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
                           List<FFmpegVideoEditor.Segment> segs, String baseName) {
         stopPreview();
         jobRunning = true;
+        compressJobRunning = false;
         updateSaveButtonState();
         progressTitle.setText("Saving Video…");
         progressBar.setIndeterminate(true);
         progressBar.setProgress(0);
         progressText.setText("Preparing…");
+        // a split or a merge runs on this activity's engine and cannot outlive
+        // it, so it gets no "Background process" button
+        if (backgroundBtn != null) backgroundBtn.setVisibility(View.GONE);
         progressOverlay.setVisibility(View.VISIBLE);
 
         // A lossless cut can only start on a keyframe, so the probe's answers
@@ -3273,15 +3341,39 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
 
     @Override
     public void finish() {
-        // never leave an FFmpeg job running behind a closing screen
-        if (jobRunning) {
+        // never leave an FFmpeg job running behind a closing screen - unless
+        // the user sent the compress job to the background, which is exactly
+        // the promise that button makes
+        if (jobRunning && !compressInBackground) {
             try {
-                editor.cancel();
+                if (compressJobRunning) VideoCompressService.cancel();
+                else editor.cancel();
             } catch (Exception ignored) {}
         }
         pendingJob = null;
         mainHandler.removeCallbacks(probeWaiter);
         super.finish();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Coming back (from Home, from the recents card, or after the screen
+        // was rebuilt) to a job the service is still running: pick the
+        // progress back up. A job the user sent to the background stays out of
+        // the way - the notification is watching it.
+        if (!VideoCompressService.isRunning()) return;
+        compressJobRunning = true;
+        jobRunning = true;
+        compressInBackground = VideoCompressService.isBackgroundMode();
+        VideoCompressService.setObserver(compressObserver);
+        if (!compressInBackground) {
+            progressTitle.setText("Compressing…");
+            progressBar.setIndeterminate(false);
+            progressOverlay.setVisibility(View.VISIBLE);
+            if (backgroundBtn != null) backgroundBtn.setVisibility(View.VISIBLE);
+        }
+        updateSaveButtonState();
     }
 
     @Override
@@ -3296,6 +3388,9 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         pendingJob = null;
         mainHandler.removeCallbacks(probeWaiter);
         stopPreview();
+        // the compress job lives in its own foreground service: detaching the
+        // observer is all that is needed, it keeps running and notifies
+        VideoCompressService.setObserver(null);
         editor.release();
         waveformExtractor.release();
     }
