@@ -135,6 +135,18 @@ public class FFmpegVideoEditor {
     /** Write one file holding every segment in order (the merge tab). */
     public static final int MODE_MERGE = 2;
 
+    /**
+     * Subfolders inside <shared storage>/aud_player/ for each kind of job.
+     * Keeps Merge / Split / Compress results separate on disk without touching
+     * filenames, naming conventions, the fallback chain, or the scan-after-write
+     * flow.
+     */
+    public static final String SUBFOLDER_MERGE = "merged";
+    public static final String SUBFOLDER_SPLIT = "split";
+    public static final String SUBFOLDER_COMPRESS = "compressed";
+    /** Kept as the default when no subfolder is supplied (backward compatible). */
+    private static final String SUBFOLDER_DEFAULT = "edited";
+
     /** Any part shorter than this is refused by the timeline anyway. */
     public static final long MIN_SEGMENT_MS = 1000L;
 
@@ -458,10 +470,13 @@ public class FFmpegVideoEditor {
 
     private static final class Output {
         final String name;
+        /** Subfolder under aud_player/ where this output should be written. */
+        final String subfolder;
         final List<Piece> pieces = new ArrayList<>();
 
-        Output(String name) {
+        Output(String name, String subfolder) {
             this.name = name;
+            this.subfolder = subfolder;
         }
     }
 
@@ -701,13 +716,13 @@ public class FFmpegVideoEditor {
         List<Output> plan = new ArrayList<>();
         if (mode == MODE_MERGE) {
             if (!perSegment.isEmpty()) {
-                Output out = new Output(stem + "_merged");
+                Output out = new Output(stem + "_merged", SUBFOLDER_MERGE);
                 for (List<Piece> pieces : perSegment) out.pieces.addAll(pieces);
                 plan.add(out);
             }
         } else {
             for (int i = 0; i < perSegment.size(); i++) {
-                Output out = new Output(stem + "_part" + (i + 1));
+                Output out = new Output(stem + "_part" + (i + 1), SUBFOLDER_SPLIT);
                 out.pieces.addAll(perSegment.get(i));
                 plan.add(out);
             }
@@ -764,12 +779,12 @@ public class FFmpegVideoEditor {
             if (startMs <= 0 && src.durationMs > 0 && endMs >= src.durationMs) {
                 // the whole source, so the answer is the source itself: the
                 // fastest and the most faithful output there is
-                File target = uniqueOutput(context, out.name, extOf(src.local));
+                File target = uniqueOutput(context, out.subfolder, out.name, extOf(src.local));
                 copyFile(src.local, target);
                 step[0]++;
                 return target;
             }
-            File target = uniqueOutput(context, out.name, ext);
+            File target = uniqueOutput(context, out.subfolder, out.name, ext);
             if (cutPiece(src, target, startMs, Math.max(1, endMs - startMs), warnings)) {
                 step[0]++;
                 return target;
@@ -804,12 +819,12 @@ public class FFmpegVideoEditor {
         }
         if (parts.isEmpty()) return null;
         if (parts.size() == 1) {
-            File target = uniqueOutput(context, out.name, ext);
+            File target = uniqueOutput(context, out.subfolder, out.name, ext);
             copyFile(parts.get(0), target);
             return target;
         }
         String outExt = MOV_FAMILY.contains(ext) ? ext : "mkv";
-        File target = uniqueOutput(context, out.name, outExt);
+        File target = uniqueOutput(context, out.subfolder, out.name, outExt);
         if (!concat(workDir, parts, target, warnings)) {
             safeDelete(target);
             return null;
@@ -1096,7 +1111,8 @@ public class FFmpegVideoEditor {
                 try {
                     local = copySourceToLocal(context, uri, workDir);
                     long durationMs = durationMs(local);
-                    target = uniqueOutput(context, stemOf(title) + "_compressed", "mp4");
+                    target = uniqueOutput(context, SUBFOLDER_COMPRESS,
+                            stemOf(title) + "_compressed", "mp4");
                     postFileProgress(fileIndex, 0);
 
                     boolean ok = exec(compressArgs(local, target, opts, true), durationMs,
@@ -1370,19 +1386,36 @@ public class FFmpegVideoEditor {
     // Files
     // ------------------------------------------------------------------
 
-    /** The folder the parts are written to. */
+    /**
+     * The folder the parts are written to.
+     * <p>Routes into {@code <shared>/aud_player/<subfolder>} where the
+     * subfolder depends on the job: {@link #SUBFOLDER_MERGE} for the Merge
+     * tab, {@link #SUBFOLDER_SPLIT} for Split, {@link #SUBFOLDER_COMPRESS}
+     * for Compress. The no-arg overload keeps the legacy
+     * {@link #SUBFOLDER_DEFAULT} target so any external caller is unaffected.
+     */
     public static File getOutputDir(Context context) {
+        return getOutputDir(context, SUBFOLDER_DEFAULT);
+    }
+
+    /**
+     * Output dir for a job in the named subfolder inside aud_player/ — the
+     * shared-storage folder is preferred, with the same fallback chain as the
+     * no-arg overload.
+     */
+    public static File getOutputDir(Context context, String subfolder) {
+        String sf = sanitizeSubfolder(subfolder);
         try {
-            File primary = new File(Environment.getExternalStorageDirectory(), "aud_player/edited");
+            File primary = new File(Environment.getExternalStorageDirectory(), "aud_player/" + sf);
             if ((primary.exists() || primary.mkdirs()) && primary.canWrite()) return primary;
         } catch (Throwable ignored) {
         }
         try {
-            File external = context.getExternalFilesDir("edited");
+            File external = context.getExternalFilesDir(sf);
             if (external != null && (external.exists() || external.mkdirs())) return external;
         } catch (Throwable ignored) {
         }
-        File internal = new File(context.getFilesDir(), "edited");
+        File internal = new File(context.getFilesDir(), sf);
         //noinspection ResultOfMethodCallIgnored
         internal.mkdirs();
         return internal;
@@ -1390,7 +1423,13 @@ public class FFmpegVideoEditor {
 
     /** Never overwrite an existing file: name.mp4, name_2.mp4, name_3.mp4 ... */
     public static File uniqueOutput(Context context, String baseName, String ext) {
-        File dir = getOutputDir(context);
+        return uniqueOutput(context, SUBFOLDER_DEFAULT, baseName, ext);
+    }
+
+    /** Same deduplication rule, but writing into the named subfolder. */
+    public static File uniqueOutput(Context context, String subfolder,
+                                    String baseName, String ext) {
+        File dir = getOutputDir(context, subfolder);
         String name = sanitize(baseName);
         String suffix = (ext == null || ext.isEmpty()) ? "mp4" : ext.toLowerCase(Locale.ROOT);
         File f = new File(dir, name + "." + suffix);
@@ -1400,6 +1439,20 @@ public class FFmpegVideoEditor {
             n++;
         }
         return f;
+    }
+
+    /**
+     * Subfolder name sanitiser: empty / null falls back to the default; the
+     * value is treated as a single path segment so traversal characters are
+     * collapsed to '_' just like a base filename.
+     */
+    private static String sanitizeSubfolder(String name) {
+        if (name == null) return SUBFOLDER_DEFAULT;
+        String s = name.trim();
+        if (s.isEmpty()) return SUBFOLDER_DEFAULT;
+        s = s.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (s.length() > 40) s = s.substring(0, 40);
+        return s;
     }
 
     private static String sanitize(String name) {

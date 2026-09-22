@@ -74,6 +74,16 @@ public final class FFmpegAudioEditor {
     public static final int MODE_SEPARATE = 1;   // N segments -> N outputs
     public static final int MODE_MERGE = 2;      // N segments -> 1 merged output
 
+    /**
+     * Subfolders inside <shared storage>/aud_player/ for each kind of job.
+     * Keeps Merge / Split results separate on disk without touching filenames,
+     * naming conventions, the fallback chain, or the scan-after-write flow.
+     */
+    public static final String SUBFOLDER_MERGE = "merged";
+    public static final String SUBFOLDER_SPLIT = "split";
+    /** Kept as the default when no subfolder is supplied (backward compatible). */
+    private static final String SUBFOLDER_DEFAULT = "edited";
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -215,24 +225,37 @@ public final class FFmpegAudioEditor {
     // ------------------------------------------------------------------
 
     /**
-     * Output dir for edited audio: <shared storage>/aud_player/edited when
-     * writable (visible folder, per user requirement), falling back to the
-     * app-specific external files dir.
+     * Output dir for edited audio: <shared storage>/aud_player/<subfolder>
+     * when writable (visible folder, per user requirement), falling back to
+     * the app-specific external files dir.
+     * <p>The default subfolder is {@link #SUBFOLDER_DEFAULT}; the merge and
+     * split jobs route their files to {@link #SUBFOLDER_MERGE} and
+     * {@link #SUBFOLDER_SPLIT} respectively.
      */
     public static File getOutputDir(Context context) {
+        return getOutputDir(context, SUBFOLDER_DEFAULT);
+    }
+
+    /**
+     * Output dir for a job in the named subfolder inside aud_player/ — the
+     * shared-storage folder is preferred, with the same fallback chain as the
+     * no-arg overload.
+     */
+    public static File getOutputDir(Context context, String subfolder) {
+        String sf = sanitizeSubfolder(subfolder);
         try {
             File primary = new File(Environment.getExternalStorageDirectory(),
-                    "aud_player/edited");
+                    "aud_player/" + sf);
             if ((primary.exists() || primary.mkdirs()) && primary.canWrite()) {
                 return primary;
             }
         } catch (Exception ignored) {
         }
-        File fallback = context.getExternalFilesDir("edited");
+        File fallback = context.getExternalFilesDir(sf);
         if (fallback != null && (fallback.exists() || fallback.mkdirs())) {
             return fallback;
         }
-        File internal = new File(context.getFilesDir(), "edited");
+        File internal = new File(context.getFilesDir(), sf);
         //noinspection ResultOfMethodCallIgnored
         internal.mkdirs();
         return internal;
@@ -240,7 +263,13 @@ public final class FFmpegAudioEditor {
 
     /** Generate a non-clobbering output file inside the output dir. */
     public static File uniqueOutput(Context context, String baseName, String ext) {
-        File dir = getOutputDir(context);
+        return uniqueOutput(context, SUBFOLDER_DEFAULT, baseName, ext);
+    }
+
+    /** Generate a non-clobbering output file inside the named subfolder. */
+    public static File uniqueOutput(Context context, String subfolder,
+                                    String baseName, String ext) {
+        File dir = getOutputDir(context, subfolder);
         String sanitized = sanitize(baseName);
         File f = new File(dir, sanitized + "." + ext);
         int n = 2;
@@ -249,6 +278,20 @@ public final class FFmpegAudioEditor {
             n++;
         }
         return f;
+    }
+
+    /**
+     * Subfolder name sanitiser: empty / null falls back to the default; the
+     * value is treated as a single path segment so traversal characters are
+     * collapsed to '_' just like a base filename.
+     */
+    private static String sanitizeSubfolder(String name) {
+        if (name == null) return SUBFOLDER_DEFAULT;
+        String s = name.trim();
+        if (s.isEmpty()) return SUBFOLDER_DEFAULT;
+        s = s.replaceAll("[\\\\/:*?\"<>|]", "_");
+        if (s.length() > 40) s = s.substring(0, 40);
+        return s;
     }
 
     private static String sanitize(String name) {
@@ -517,7 +560,7 @@ public final class FFmpegAudioEditor {
                 if (pieceCount == 1) {
                     // fast path: the single piece IS the result
                     Piece p = perSegment.get(0).get(0);
-                    File target = uniqueOutput(context, name, inputExt[p.inputIndex]);
+                    File target = uniqueOutput(context, SUBFOLDER_MERGE, name, inputExt[p.inputIndex]);
                     File result = runFfmpegCut(inputs.get(p.inputIndex), target,
                             p.startMs, p.endMs, sink);
                     step[0]++;
@@ -534,7 +577,8 @@ public final class FFmpegAudioEditor {
                         }
                         seq += pieces.size();
                     }
-                    File merged = concatParts(workDir, parts, uniqueOutput(context, name, ext),
+                    File merged = concatParts(workDir, parts,
+                            uniqueOutput(context, SUBFOLDER_MERGE, name, ext),
                             totalMs, sink, listener);
                     deleteAll(parts);
                     if (merged == null) {
@@ -550,7 +594,7 @@ public final class FFmpegAudioEditor {
                     String name = baseName + "_part" + (i + 1);
                     if (pieces.size() == 1) {
                         Piece p = pieces.get(0);
-                        File target = uniqueOutput(context, name, inputExt[p.inputIndex]);
+                        File target = uniqueOutput(context, SUBFOLDER_SPLIT, name, inputExt[p.inputIndex]);
                         File result = runFfmpegCut(inputs.get(p.inputIndex), target,
                                 p.startMs, p.endMs, sink);
                         step[0]++;
@@ -567,7 +611,8 @@ public final class FFmpegAudioEditor {
                         seq += pieces.size();
                         long partMs = 0;
                         for (Piece p : pieces) partMs += Math.max(1, p.durationMs());
-                        File merged = concatParts(workDir, parts, uniqueOutput(context, name, ext),
+                        File merged = concatParts(workDir, parts,
+                                uniqueOutput(context, SUBFOLDER_SPLIT, name, ext),
                                 partMs, sink, listener);
                         deleteAll(parts);
                         if (merged == null) {
