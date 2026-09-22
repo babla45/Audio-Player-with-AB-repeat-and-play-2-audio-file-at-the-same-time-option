@@ -143,7 +143,7 @@ public class AudioEditorActivity extends AppCompatActivity {
     private EditorTimelineView timeline;
     private HorizontalScrollView timelineScroll;
     private TextView rangeText, durationText, hintText, currentTimeText, zoomText;
-    private TextView tabMerge, tabSplit, addSplitBtn, saveBtn;
+    private TextView tabMerge, tabSplit, tabProcessed, addSplitBtn, saveBtn;
     private TextView zoomOutBtn, zoomInBtn, undoBtn, redoBtn, seqPreviewBtn, songNameText;
     /** Merge tab: "N songs • Total mm:ss" (doubles as the add-a-song hint). */
     private TextView mergeInfoText;
@@ -471,6 +471,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         hintText = findViewById(R.id.editorHintText);
         tabMerge = findViewById(R.id.editorTabMerge);
         tabSplit = findViewById(R.id.editorTabSplit);
+        tabProcessed = findViewById(R.id.editorTabProcessed);
         addSplitBtn = findViewById(R.id.editorAddSplitBtn);
         deleteSplitBtn = findViewById(R.id.editorDeleteSplitBtn);
         saveBtn = findViewById(R.id.editorSaveBtn);
@@ -511,6 +512,11 @@ public class AudioEditorActivity extends AppCompatActivity {
             saveLastTab();
             updateUiForTab();
         });
+        // Processed opens the finished-files list on its own screen (mirrors
+        // the Video Editor's Processed tab); it never becomes the active tab,
+        // so the editor's own state is left exactly as it was.
+        tabProcessed.setOnClickListener(v ->
+                startActivity(new Intent(this, ProcessedAudioActivity.class)));
     }
 
     /** Persist the active tab so the editor reopens on it. */

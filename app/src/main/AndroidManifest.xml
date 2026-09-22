@@ -74,6 +74,17 @@
             android:label="Audio Editor"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".ProcessedAudioActivity"
+            android:label="Processed Audio"
+            android:parentActivityName=".AudioEditorActivity" />
+
+        <!-- Plays a processed audio file from its path (in-app, no chooser) -->
+        <activity
+            android:name=".AudioPlayerActivity"
+            android:label="Audio"
+            android:parentActivityName=".ProcessedAudioActivity" />
+
         <!-- Share-sheet entries. The chooser used to offer one generic
              "Audio Editor" target that guessed the task from the file count
              (one file = Split, several = Merge). It now offers one entry per

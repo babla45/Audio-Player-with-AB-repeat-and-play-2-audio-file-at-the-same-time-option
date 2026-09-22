@@ -143,9 +143,37 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         void onAddToPlaylistClick(AudioFile audioFile);
     }
 
+    /**
+     * Optional row long-press. Unset (the default) keeps every existing list
+     * exactly as it was — nothing consumed, nothing shown.
+     */
+    public interface OnItemLongClickListener {
+        void onItemLongClick(AudioFile audioFile);
+    }
+
+    /**
+     * Optional replacement for the row's three-dot menu. When set, the button
+     * hands the file to the host instead of opening the built-in popup (the
+     * Processed Audio list uses this for its Play / Rename / Delete menu).
+     */
+    public interface OnOptionsClickListener {
+        void onOptionsClick(AudioFile audioFile);
+    }
+
     public void setOnItemClickListener(OnItemClickListener listener) {
         this.listener = listener;
     }
+
+    public void setOnItemLongClickListener(OnItemLongClickListener listener) {
+        this.longClickListener = listener;
+    }
+
+    public void setOnOptionsClickListener(OnOptionsClickListener listener) {
+        this.rowOptionsListener = listener;
+    }
+
+    private OnItemLongClickListener longClickListener;
+    private OnOptionsClickListener rowOptionsListener;
 
     public void setOnSelectionChangedListener(OnSelectionChangedListener l) {
         this.selectionListener = l;
@@ -318,7 +346,13 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         } else {
             holder.optionsMenu.setImageResource(R.drawable.ic_more_vert);
             holder.optionsMenu.setContentDescription("File options");
-            holder.optionsMenu.setOnClickListener(v -> showPopupMenu(v, audioFile));
+            holder.optionsMenu.setOnClickListener(v -> {
+                if (rowOptionsListener != null) {
+                    rowOptionsListener.onOptionsClick(audioFile);
+                } else {
+                    showPopupMenu(v, audioFile);
+                }
+            });
         }
 
         holder.itemContainer.setOnClickListener(v -> {
@@ -330,6 +364,14 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
             if (listener != null) {
                 listener.onItemClick(audioFile);
             }
+        });
+
+        holder.itemContainer.setOnLongClickListener(v -> {
+            // multi-select owns the row gesture; without a long-press listener
+            // the event is left unconsumed, exactly as before.
+            if (selectionMode || longClickListener == null) return false;
+            longClickListener.onItemLongClick(audioFile);
+            return true;
         });
     }
 
