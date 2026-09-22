@@ -19,7 +19,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,6 +35,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *  - Cut/trim, multi-split and merge operations using stream copy
  *    (-c copy) so audio quality is preserved and no re-encoding happens
  *    whenever possible.
+ *  - Mixed-format merge: {@link #planFormats} reports which container most of
+ *    the sources already use, and a merge may name it as its target. Only the
+ *    sources in the OTHER containers are then converted — once, up front — so
+ *    the merge itself stays a stream copy instead of the whole job being
+ *    re-encoded.
  *  - Re-encode fallback (native AAC into .m4a) if stream copy fails.
  *  - Per-job progress reporting and cancellation.
  *  - Temp file cleanup on success, failure or cancellation.
@@ -187,6 +194,85 @@ public final class FFmpegAudioEditor {
         return "mp3";
     }
 
+    /**
+     * What a merge's sources are made of, by file name: the extension the most
+     * sources already use — {@link #dominantExt}, i.e. the target the user is
+     * offered — and the full breakdown in first-seen order.
+     */
+    public static final class FormatPlan {
+        /** Extension the largest number of sources use; null for an empty list. */
+        public final String dominantExt;
+        /** How many sources carry {@link #dominantExt}. */
+        public final int dominantCount;
+        /** ext -> how many sources use it, in the order the sources appear. */
+        public final LinkedHashMap<String, Integer> counts;
+        /** Every source's own extension, in source order (parallel to the input). */
+        public final List<String> exts;
+
+        FormatPlan(String dominantExt, int dominantCount,
+                   LinkedHashMap<String, Integer> counts, List<String> exts) {
+            this.dominantExt = dominantExt;
+            this.dominantCount = dominantCount;
+            this.counts = counts;
+            this.exts = exts;
+        }
+
+        public int totalCount() {
+            int n = 0;
+            for (int v : counts.values()) n += v;
+            return n;
+        }
+
+        /** True when the sources are not all in one single format. */
+        public boolean isMixed() {
+            return counts.size() > 1;
+        }
+
+        /** How many sources a conversion to {@link #dominantExt} would touch. */
+        public int convertCount() {
+            return totalCount() - dominantCount;
+        }
+
+        /** "2 × .mp3, 1 × .m4a" — a breakdown a dialog can show verbatim. */
+        public String describe() {
+            StringBuilder sb = new StringBuilder();
+            for (Map.Entry<String, Integer> e : counts.entrySet()) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(e.getValue()).append(" × .").append(e.getKey());
+            }
+            return sb.toString();
+        }
+    }
+
+    /**
+     * Group the sources by the format their file name declares. Name based on
+     * purpose: probing each file would mean copying it into the cache first,
+     * and the file name is what the user's "convert these?" question is about.
+     * A tie between two formats keeps the one that appears first.
+     */
+    public static FormatPlan planFormats(Context context, List<Uri> sources) {
+        LinkedHashMap<String, Integer> counts = new LinkedHashMap<>();
+        List<String> exts = new ArrayList<>();
+        if (sources != null) {
+            for (Uri u : sources) {
+                if (u == null) continue;
+                String ext = guessExtension(context, u);
+                exts.add(ext);
+                Integer n = counts.get(ext);
+                counts.put(ext, n == null ? 1 : n + 1);
+            }
+        }
+        String dominant = null;
+        int best = 0;
+        for (Map.Entry<String, Integer> e : counts.entrySet()) {
+            if (e.getValue() > best) { // strict: a tie keeps the first format
+                best = e.getValue();
+                dominant = e.getKey();
+            }
+        }
+        return new FormatPlan(dominant, best, counts, exts);
+    }
+
     /** Delete the temp source file (and folder) after processing. */
     public void cleanupTemp(File temp) {
         if (temp != null) {
@@ -323,7 +409,8 @@ public final class FFmpegAudioEditor {
         cancelled.set(false);
         List<File> inputs = new ArrayList<>(1);
         inputs.add(input);
-        executor.execute(() -> doJob(context, inputs, null, mode, segments, baseName, listener));
+        executor.execute(() -> doJob(context, inputs, null, mode, segments, baseName,
+                null, listener));
     }
 
     /**
@@ -354,6 +441,23 @@ public final class FFmpegAudioEditor {
                               final long[] boundariesMs, final int mode,
                               final List<Segment> segments, final String baseName,
                               final EditListener listener) {
+        runJobFromUri(context, sources, boundariesMs, mode, segments, baseName,
+                null, listener);
+    }
+
+    /**
+     * As above, with `mergeTargetExt` naming the container a MERGE should end
+     * up in. When it is set, only the sources held in the other containers are
+     * converted — once, before anything is cut — so the cuts, the concat and
+     * the merged file itself all stay stream copies, instead of the whole job
+     * being re-encoded because one source did not fit.
+     * <p>Null is the original behaviour and is what a split always uses: its
+     * outputs never mix containers, so there is nothing to reconcile.
+     */
+    public void runJobFromUri(final Context context, final List<Uri> sources,
+                              final long[] boundariesMs, final int mode,
+                              final List<Segment> segments, final String baseName,
+                              final String mergeTargetExt, final EditListener listener) {
         if (sources == null || sources.isEmpty() || segments == null || segments.isEmpty()) {
             postError(listener, "Nothing to process", false);
             return;
@@ -367,7 +471,8 @@ public final class FFmpegAudioEditor {
                 for (Uri source : sources) {
                     temps.add(copySourceToTemp(context, source, tempDir));
                 }
-                doJob(context, temps, boundariesMs, mode, segments, baseName, listener);
+                doJob(context, temps, boundariesMs, mode, segments, baseName,
+                        mergeTargetExt, listener);
             } catch (Throwable e) {
                 // Throwable (not Exception): a NoClassDefFoundError or other
                 // linkage error must surface as onError, never crash the app
@@ -509,17 +614,21 @@ public final class FFmpegAudioEditor {
     }
 
     private void doJob(Context context, List<File> inputs, long[] boundaries, int mode,
-                       List<Segment> segments, String baseName,
+                       List<Segment> segments, String baseName, String mergeTargetExt,
                        EditListener listener) {
         File workDir = new File(inputs.get(0).getParentFile(), "parts");
         //noinspection ResultOfMethodCallIgnored
         workDir.mkdirs();
         List<File> produced = new ArrayList<>();
+        // Working copy of the source list: a format conversion swaps entries
+        // here, while the caller's own list — whose cleanup deletes the copied
+        // sources — must keep pointing at the files that really exist.
+        List<File> src = new ArrayList<>(inputs);
         try {
             // Each input keeps its OWN container extension: stream-copying an
             // m4a source into a ".mp3" target would fail outright.
-            String[] inputExt = new String[inputs.size()];
-            for (int i = 0; i < inputs.size(); i++) inputExt[i] = extOf(inputs.get(i));
+            String[] inputExt = new String[src.size()];
+            for (int i = 0; i < src.size(); i++) inputExt[i] = extOf(src.get(i));
             String ext = inputExt[0];
 
             // Every timeline segment, expressed as per-input pieces.
@@ -528,7 +637,7 @@ public final class FFmpegAudioEditor {
             int pieceCount = 0;
             for (Segment s : segments) {
                 List<Piece> pieces = new ArrayList<>();
-                splitIntoSources(s.startMs, s.endMs, boundaries, inputs.size(), pieces);
+                splitIntoSources(s.startMs, s.endMs, boundaries, src.size(), pieces);
                 if (pieces.isEmpty()) continue; // zero-length segment
                 perSegment.add(pieces);
                 pieceCount += pieces.size();
@@ -539,6 +648,17 @@ public final class FFmpegAudioEditor {
                 return;
             }
 
+            // ---- Mixed-format merge: how many sources must change format ----
+            // A target only ever comes from a MERGE (a split writes one file
+            // per segment, so its containers never mix). Counting them up front
+            // lets the progress bar account for the work exactly.
+            int conversions = 0;
+            if (mergeTargetExt != null && mode == MODE_MERGE) {
+                for (File f : src) {
+                    if (!mergeTargetExt.equals(extOf(f))) conversions++;
+                }
+            }
+
             // One concat per multi-piece output: a single run for the
             // single-output modes, one per part for MODE_SEPARATE.
             int concatRuns = 0;
@@ -547,11 +667,29 @@ public final class FFmpegAudioEditor {
             } else if (pieceCount > 1) {
                 concatRuns = 1;
             }
-            int stepCount = Math.max(1, pieceCount + concatRuns);
+            int stepCount = Math.max(1, pieceCount + concatRuns + conversions);
             final int[] step = {0};
             // one ffmpeg run's 0..100 folded into the job's overall progress
             ProgressSink sink = percent -> postProgress(listener,
                     (int) (100f * (step[0] + percent / 100f) / stepCount));
+
+            // Convert the minority containers first: with every source in one
+            // container the cuts below, the concat, and therefore the merged
+            // file itself are all plain stream copies.
+            if (conversions > 0) {
+                int done = convertMismatched(src, inputExt, mergeTargetExt, workDir,
+                        boundaries, sink, step, listener);
+                if (done < 0) { // cancelled / errored — already posted
+                    deleteAll(produced);
+                    return;
+                }
+                if (done > 0) {
+                    for (int i = 0; i < inputExt.length; i++) inputExt[i] = mergeTargetExt;
+                    ext = mergeTargetExt;
+                }
+                // done == 0: the conversion was impossible, the originals are
+                // back in place and the merge runs exactly as it did before.
+            }
 
             int seq = 0;
             if (mode != MODE_SEPARATE) {
@@ -561,7 +699,7 @@ public final class FFmpegAudioEditor {
                     // fast path: the single piece IS the result
                     Piece p = perSegment.get(0).get(0);
                     File target = uniqueOutput(context, SUBFOLDER_MERGE, name, inputExt[p.inputIndex]);
-                    File result = runFfmpegCut(inputs.get(p.inputIndex), target,
+                    File result = runFfmpegCut(src.get(p.inputIndex), target,
                             p.startMs, p.endMs, sink);
                     step[0]++;
                     if (!isOk(result, target, produced, listener)) return;
@@ -569,7 +707,7 @@ public final class FFmpegAudioEditor {
                 } else {
                     List<File> parts = new ArrayList<>();
                     for (List<Piece> pieces : perSegment) {
-                        if (!cutPieces(inputs, pieces, seq, inputExt, workDir, parts,
+                        if (!cutPieces(src, pieces, seq, inputExt, workDir, parts,
                                 sink, step, listener)) {
                             deleteAll(parts);
                             deleteAll(produced);
@@ -595,14 +733,14 @@ public final class FFmpegAudioEditor {
                     if (pieces.size() == 1) {
                         Piece p = pieces.get(0);
                         File target = uniqueOutput(context, SUBFOLDER_SPLIT, name, inputExt[p.inputIndex]);
-                        File result = runFfmpegCut(inputs.get(p.inputIndex), target,
+                        File result = runFfmpegCut(src.get(p.inputIndex), target,
                                 p.startMs, p.endMs, sink);
                         step[0]++;
                         if (!isOk(result, target, produced, listener)) return;
                         produced.add(result);
                     } else {
                         List<File> parts = new ArrayList<>();
-                        if (!cutPieces(inputs, pieces, seq, inputExt, workDir, parts,
+                        if (!cutPieces(src, pieces, seq, inputExt, workDir, parts,
                                 sink, step, listener)) {
                             deleteAll(parts);
                             deleteAll(produced);
@@ -648,6 +786,68 @@ public final class FFmpegAudioEditor {
         String n = f.getName();
         int dot = n.lastIndexOf('.');
         return dot >= 0 ? n.substring(dot + 1) : "mp3";
+    }
+
+    /**
+     * Convert every source whose container is not `targetExt` into a temp file
+     * of that container, swapped into `src` in its place. `ext` is deliberately
+     * left alone — the caller rewrites it only once the whole swap succeeded,
+     * so a half-done conversion can never reach the cutting stage.
+     * <p>Counts one progress step per attempted conversion, which is what the
+     * caller reserved for this phase.
+     *
+     * @return how many sources were converted; 0 when the conversion turned out
+     *         to be impossible (every swap is undone, so the merge simply runs
+     *         the way it did before); -1 when the job was cancelled or errored,
+     *         already posted — the caller must stop.
+     */
+    private int convertMismatched(List<File> src, String[] ext, String targetExt,
+                                  File workDir, long[] boundaries,
+                                  ProgressSink sink, int[] step, EditListener listener) {
+        List<Integer> swapped = new ArrayList<>();
+        List<File> originals = new ArrayList<>();
+        List<File> made = new ArrayList<>();
+        for (int i = 0; i < src.size(); i++) {
+            File in = src.get(i);
+            if (targetExt.equals(ext[i])) continue;
+            if (cancelled.get()) {
+                deleteAll(made);
+                postError(listener, "Cancelled", true);
+                return -1;
+            }
+            // The source's own length is a close enough total for the
+            // conversion's 0..100 readout (unknown for a single-source job,
+            // which can never reach here).
+            long expectedMs = 0;
+            if (boundaries != null && i + 1 < boundaries.length) {
+                expectedMs = Math.max(0, boundaries[i + 1] - boundaries[i]);
+            }
+            File out = new File(workDir, "conv" + i + "_" + System.nanoTime()
+                    + "." + targetExt);
+            File converted = runFfmpegConvert(in, out, targetExt, expectedMs, sink);
+            step[0]++;
+            if (converted == null) {
+                if (cancelled.get()) {
+                    deleteAll(made);
+                    postError(listener, "Cancelled", true);
+                    return -1;
+                }
+                // No encoder for that container, or a file FFmpeg cannot read:
+                // put the originals back and let the merge take the old route.
+                Log.w(TAG, "cannot convert " + in.getName() + " to ." + targetExt);
+                for (int k = made.size() - 1; k >= 0; k--) {
+                    src.set(swapped.get(k), originals.get(k));
+                    //noinspection ResultOfMethodCallIgnored
+                    made.get(k).delete();
+                }
+                return 0;
+            }
+            swapped.add(i);
+            originals.add(in);
+            made.add(converted);
+            src.set(i, converted);
+        }
+        return made.size();
     }
 
     /** Write a small text file. */
@@ -703,6 +903,63 @@ public final class FFmpegAudioEditor {
             return output;
         }
         return new File(output.getAbsolutePath().replaceAll("\\.[^.]+$", "") + ".m4a");
+    }
+
+    /**
+     * Re-encode one whole file into `output`, a container named by `targetExt`.
+     * Only the minority formats of a mixed-format merge ever come through here,
+     * which is what keeps the merge itself a stream copy. Null when FFmpeg
+     * cannot write that container.
+     */
+    private File runFfmpegConvert(File input, File output, String targetExt,
+                                  long expectedMs, ProgressSink sink) {
+        String[] enc = encoderFor(targetExt);
+        List<String> args = new ArrayList<>();
+        args.add("-i");
+        args.add(input.getAbsolutePath());
+        args.add("-vn"); // cover art / video streams are not the audio being joined
+        args.add("-c:a");
+        args.add(enc[0]);
+        if (enc[1] != null) {
+            args.add("-b:a");
+            args.add(enc[1]);
+        }
+        args.add("-y");
+        args.add(output.getAbsolutePath());
+        if (exec(args.toArray(new String[0]), expectedMs, sink)) return output;
+        //noinspection ResultOfMethodCallIgnored
+        output.delete();
+        return null;
+    }
+
+    /**
+     * Encoder for a target container, with its bitrate (null for the lossless
+     * ones). The GPL build carries libmp3lame, libvorbis and libopus, and AAC
+     * is FFmpeg's own encoder, so every mapping here is available.
+     */
+    private static String[] encoderFor(String ext) {
+        switch (ext == null ? "" : ext) {
+            case "mp3":
+                return new String[]{"libmp3lame", "192k"};
+            case "ogg":
+            case "oga":
+                return new String[]{"libvorbis", "192k"};
+            case "opus":
+                return new String[]{"libopus", "128k"};
+            case "flac":
+                return new String[]{"flac", null};
+            case "wav":
+                return new String[]{"pcm_s16le", null};
+            case "aif":
+            case "aiff":
+            case "aifc":
+                return new String[]{"pcm_s16be", null};
+            // m4a / mp4 / aac / 3gp / caf, and any unexpected extension: AAC is
+            // the encoder FFmpeg always has, and those are the containers it
+            // belongs in.
+            default:
+                return new String[]{"aac", "192k"};
+        }
     }
 
     /** Concat demuxer merge, stream copy with re-encode fallback. */

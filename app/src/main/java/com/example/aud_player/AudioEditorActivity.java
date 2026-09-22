@@ -1924,13 +1924,70 @@ public class AudioEditorActivity extends AppCompatActivity {
         return n;
     }
 
+    /** Runs the merge once the format question (if any) has been answered. */
+    private interface MergeStarter {
+        /** `targetExt` names the container to convert to, or null for as-is. */
+        void start(String targetExt);
+    }
+
     /**
-     * Merge tab: join every song of the merge list, in list order, into one
-     * file. The list is one global segment on ITS OWN axis, so
-     * FFmpegAudioEditor copies each song (stream copy) and concatenates the
-     * pieces — falling back to the AAC re-encode automatically when a copy
-     * is impossible.
+     * A merge is a stream copy for as long as every song shares one container.
+     * When they don't, the old route re-encoded the WHOLE result; instead this
+     * names the format most of the songs already use, spells out which files
+     * would have to change, and asks first — so at most the odd ones out are
+     * converted and the merge itself stays lossless.
+     * <p>Same-format merges never see a dialog: they go straight through, so
+     * the ordinary merge and every split are untouched.
      */
+    private void withMergeFormatCheck(List<Uri> uris, List<String> titles,
+                                      MergeStarter starter) {
+        FFmpegAudioEditor.FormatPlan plan = FFmpegAudioEditor.planFormats(this, uris);
+        if (plan == null || plan.dominantExt == null || !plan.isMixed()) {
+            starter.start(null); // one format throughout — plain stream copy
+            return;
+        }
+
+        int converts = plan.convertCount();
+        StringBuilder msg = new StringBuilder();
+        msg.append("These songs are in different formats, so they cannot be "
+                + "joined into one file without converting some of them.\n\n");
+        msg.append("Formats: ").append(plan.describe()).append("\n");
+        msg.append("Target format: .").append(plan.dominantExt).append("  (")
+                .append(plan.dominantCount).append(" of ").append(plan.totalCount())
+                .append(" songs)\n\n");
+        msg.append("Convert ").append(converts).append(converts == 1 ? " file" : " files")
+                .append(" to .").append(plan.dominantExt).append(" and merge?");
+
+        // Name the files that would change, so the choice is never a guess.
+        StringBuilder names = new StringBuilder();
+        int listed = 0;
+        for (int i = 0; i < plan.exts.size(); i++) {
+            if (plan.exts.get(i).equals(plan.dominantExt)) continue;
+            if (listed >= 6) break;
+            String title = titles != null && i < titles.size() ? titles.get(i) : null;
+            names.append("\n     • ").append(title == null ? ("." + plan.exts.get(i)) : title);
+            listed++;
+        }
+        if (listed > 0) {
+            msg.append("\n").append(names);
+            if (converts > listed) msg.append("\n     • …and ").append(converts - listed).append(" more");
+        }
+        msg.append("\n\nOnly the converted ").append(converts == 1 ? "file" : "files")
+                .append(" ").append(converts == 1 ? "is" : "are").append(" re-encoded — the .")
+                .append(plan.dominantExt).append(" songs are joined as they are."
+                        + "\n\nMerge as-is instead joins the originals, which "
+                        + "re-encodes the whole result when the formats cannot be combined.");
+
+        new AlertDialog.Builder(this)
+                .setTitle("Different audio formats")
+                .setMessage(msg.toString())
+                .setPositiveButton("Convert & merge",
+                        (d, w) -> starter.start(plan.dominantExt))
+                .setNeutralButton("Merge as-is", (d, w) -> starter.start(null))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     /** Confirm before the export actually starts (same idiom as the other confirms). */
     private void confirmMergeJob() {
         if (mergeSources.size() < 2) {
@@ -1947,26 +2004,41 @@ public class AudioEditorActivity extends AppCompatActivity {
                 .show();
     }
 
+    /**
+     * Merge tab: join every song of the merge list, in list order, into one
+     * file. The list is one global segment on ITS OWN axis, so
+     * FFmpegAudioEditor copies each song (stream copy) and concatenates the
+     * pieces. When the songs are not all in one format the user is first asked
+     * which format to convert the odd ones out to (withMergeFormatCheck), so
+     * the merge stays a stream copy; merging as-is keeps the old route,
+     * re-encoding only if a copy of the mixed sources proves impossible.
+     */
     private void runMergeJob() {
         if (mergeSources.size() < 2) {
             Toast.makeText(this, "Add at least one more song to merge",
                     Toast.LENGTH_SHORT).show();
             return;
         }
-        List<FFmpegAudioEditor.Segment> segs = new ArrayList<>();
+        final List<FFmpegAudioEditor.Segment> segs = new ArrayList<>();
         segs.add(new FFmpegAudioEditor.Segment(0, mergeDurationMs));
 
-        List<Uri> uris = new ArrayList<>(mergeSources.size());
-        for (Source s : mergeSources) uris.add(s.uri);
-        long[] boundaries = new long[mergeSources.size() + 1];
+        final List<Uri> uris = new ArrayList<>(mergeSources.size());
+        final List<String> titles = new ArrayList<>(mergeSources.size());
+        for (Source s : mergeSources) {
+            uris.add(s.uri);
+            titles.add(s.title);
+        }
+        final long[] boundaries = new long[mergeSources.size() + 1];
         for (int i = 0; i < mergeSources.size(); i++) {
             boundaries[i] = mergeSources.get(i).offsetMs;
         }
         boundaries[mergeSources.size()] = mergeDurationMs;
 
         // doJob names a MODE_MERGE output "<base>_merged"
-        startJob(FFmpegAudioEditor.MODE_MERGE, uris, boundaries, segs,
-                baseNameOf(mergeSources));
+        final String name = baseNameOf(mergeSources);
+        withMergeFormatCheck(uris, titles, targetExt ->
+                startJob(FFmpegAudioEditor.MODE_MERGE, uris, boundaries, segs,
+                        name, targetExt));
     }
 
     private void runSplitJob(boolean merge, List<Integer> customOrder) {
@@ -1982,8 +2054,22 @@ public class AudioEditorActivity extends AppCompatActivity {
                 ordered.add(new FFmpegAudioEditor.Segment(s[0], s[1]));
             }
         }
-        int mode = merge ? FFmpegAudioEditor.MODE_MERGE : FFmpegAudioEditor.MODE_SEPARATE;
-        startJob(mode, ordered, baseName());
+        if (merge) {
+            // The timeline can hold songs of several formats too: its merged
+            // output goes through the same question, while "save separately"
+            // (one file per segment, each in its own source's format) does not.
+            final List<Uri> uris = sourceUris();
+            final long[] boundaries = sourceBoundaries();
+            final List<FFmpegAudioEditor.Segment> segments = ordered;
+            final String name = baseName();
+            List<String> titles = new ArrayList<>(sources.size());
+            for (Source s : sources) titles.add(s.title);
+            withMergeFormatCheck(uris, titles, targetExt ->
+                    startJob(FFmpegAudioEditor.MODE_MERGE, uris, boundaries,
+                            segments, name, targetExt));
+            return;
+        }
+        startJob(FFmpegAudioEditor.MODE_SEPARATE, ordered, baseName());
     }
 
     private void startJob(int mode, List<FFmpegAudioEditor.Segment> segments, String name) {
@@ -1997,6 +2083,19 @@ public class AudioEditorActivity extends AppCompatActivity {
      */
     private void startJob(int mode, List<Uri> uris, long[] boundaries,
                           List<FFmpegAudioEditor.Segment> segments, String name) {
+        startJob(mode, uris, boundaries, segments, name, null);
+    }
+
+    /**
+     * As above, with `mergeTargetExt` naming the container the merged file
+     * should end up in. Only a merge passes one, and only after the user
+     * agreed to the conversion {@link #withMergeFormatCheck} proposed; the
+     * engine then converts just the sources that differ instead of the whole
+     * result. Null is every other job, and the pre-existing behaviour.
+     */
+    private void startJob(int mode, List<Uri> uris, long[] boundaries,
+                          List<FFmpegAudioEditor.Segment> segments, String name,
+                          String mergeTargetExt) {
         stopPreview();
         jobRunning = true;
         progressTitle.setText("Processing…");
@@ -2006,6 +2105,7 @@ public class AudioEditorActivity extends AppCompatActivity {
         progressOverlay.setVisibility(View.VISIBLE);
 
         editor.runJobFromUri(this, uris, boundaries, mode, segments, name,
+                mergeTargetExt,
                 new FFmpegAudioEditor.EditListener() {
                     @Override
                     public void onProgress(int percent) {
