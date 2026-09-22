@@ -436,6 +436,12 @@ public class MainActivity extends AppCompatActivity {
     private boolean voiceRobotEnabled = false;
     private boolean voiceNoiseReductionEnabled = false;
     private boolean voiceAutoTuneEnabled = false;
+    /**
+     * Name of the voice EQ preset in effect, so the voice sheet's "Save" can
+     * capture it along with the sliders (the EQ band levels themselves live in
+     * the platform Equalizer, not in a field here).
+     */
+    private String currentVoiceEqPreset = VoicePresetStore.EQ_NONE;
     private float currentBoost = 1.0f;
 
     // Add PlaylistDatabaseHelper as a class field
@@ -3454,7 +3460,14 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onEqPresetSelected(String presetName) {
+                currentVoiceEqPreset = presetName != null
+                        ? presetName : VoicePresetStore.EQ_NONE;
                 applyVoiceEqPreset(presetName);
+            }
+
+            @Override
+            public String getCurrentEqPreset() {
+                return currentVoiceEqPreset;
             }
             };
         }

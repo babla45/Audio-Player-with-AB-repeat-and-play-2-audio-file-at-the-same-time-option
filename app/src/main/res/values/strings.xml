@@ -147,6 +147,12 @@
     <string name="voice_presets_title">Voice Presets</string>
     <string name="eq_presets_title">EQ Presets</string>
     <string name="voice_master_reset">Reset All Voice Settings</string>
+    <!-- User-saved voice settings (Save snapshots the whole sheet) -->
+    <string name="voice_save_current">Save</string>
+    <string name="voice_saved_title">Saved Settings</string>
+    <string name="voice_saved_empty">No saved settings yet — tap Save above to keep the current values.</string>
+    <string name="voice_saved_long_press_hint">long-press to delete</string>
+    <string name="voice_saved_name_hint">Setting name</string>
     <!-- Share-sheet entry labels: one entry per task, so the chooser says what
          tapping it will do instead of one generic "Audio/Video Editor" -->
     <string name="share_merge_audio">Merge audio</string>

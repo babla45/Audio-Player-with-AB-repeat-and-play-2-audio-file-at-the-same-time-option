@@ -2,11 +2,13 @@ package com.example.aud_player;
 
 import android.app.Dialog;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.widget.LinearLayout;
 
 import androidx.annotation.NonNull;
@@ -18,6 +20,9 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior;
 import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.google.android.material.chip.Chip;
+import com.google.android.material.textfield.TextInputEditText;
+
+import java.util.List;
 
 public class PitchBottomSheet extends BottomSheetDialogFragment {
 
@@ -53,9 +58,18 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         void onAutoTuneToggled(boolean enabled);
         boolean isAutoTuneEnabled();
         void onEqPresetSelected(String presetName);
+        /** Name of the voice EQ preset currently applied ({@code "None"} when none is). */
+        String getCurrentEqPreset();
     }
 
     private PitchListener listener;
+
+    /**
+     * {@link VoicePresetStore#key} of the saved setting that was applied last, so
+     * its chip stays highlighted across a list reload (save/delete). Null when
+     * nothing was applied from the saved row in this sheet session.
+     */
+    private String appliedSavedKey;
 
     /** A named combination of voice-changer settings. */
     private static class VoicePreset {
@@ -321,6 +335,8 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
 
         setupEqPresets(view);
 
+        setupSavedVoiceSettings(view);
+
         View masterReset = view.findViewById(R.id.voice_master_reset);
         if (masterReset != null) {
             masterReset.setOnClickListener(v -> {
@@ -341,12 +357,14 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                     listener.onRobotToggled(false);
                     listener.onNoiseReductionToggled(false);
                     listener.onAutoTuneToggled(false);
-                    listener.onEqPresetSelected("None");
+                    listener.onEqPresetSelected(VoicePresetStore.EQ_NONE);
                 }
                 syncVoiceSliders(view, defaults);
                 syncNewVoiceSliders(view);
                 clearChipSelection(view, R.id.voice_preset_row);
                 clearChipSelection(view, R.id.eq_preset_row);
+                clearChipSelection(view, R.id.voice_saved_row);
+                appliedSavedKey = null;
             });
         }
 
@@ -389,6 +407,10 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 }
                 syncVoiceSliders(view, preset);
                 highlightSelectedChip(presetRow, chip);
+                // A named preset no longer describes the state, so drop the
+                // saved-setting highlight as well
+                clearChipSelection(view, R.id.voice_saved_row);
+                appliedSavedKey = null;
             });
             presetRow.addView(chip);
         }
@@ -414,6 +436,209 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 highlightSelectedChip(presetRow, chip);
             });
             presetRow.addView(chip);
+        }
+    }
+
+    /**
+     * Wires the header's Save action and builds the chip row of the user's own
+     * saved settings. The row lives in a HorizontalScrollView, so a long list
+     * scrolls sideways instead of overflowing the sheet. Tapping a chip applies
+     * that setting; long-pressing it deletes it.
+     */
+    private void setupSavedVoiceSettings(View view) {
+        View saveButton = view.findViewById(R.id.voice_save_current);
+        if (saveButton != null) {
+            saveButton.setOnClickListener(v -> promptSaveCurrentVoiceSettings(view));
+        }
+        refreshSavedVoiceSettings(view);
+    }
+
+    /** Rebuilds the saved-setting chips from storage. */
+    private void refreshSavedVoiceSettings(View view) {
+        LinearLayout row = view.findViewById(R.id.voice_saved_row);
+        if (row == null) {
+            return;
+        }
+        row.removeAllViews();
+
+        List<VoicePresetStore.SavedVoicePreset> presets = VoicePresetStore.load(requireContext());
+
+        View emptyView = view.findViewById(R.id.voice_saved_empty);
+        if (emptyView != null) {
+            emptyView.setVisibility(presets.isEmpty() ? View.VISIBLE : View.GONE);
+        }
+        View scroll = view.findViewById(R.id.voice_saved_scroll);
+        if (scroll != null) {
+            scroll.setVisibility(presets.isEmpty() ? View.GONE : View.VISIBLE);
+        }
+
+        int margin = (int) (8 * getResources().getDisplayMetrics().density);
+        for (VoicePresetStore.SavedVoicePreset preset : presets) {
+            // Built exactly like the built-in preset chips above (not checkable,
+            // selection driven by highlightSelectedChip), so a saved setting
+            // looks and behaves like the presets it sits next to.
+            Chip chip = new Chip(requireContext());
+            chip.setText(preset.name);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMarginEnd(margin);
+            chip.setLayoutParams(lp);
+            chip.setChecked(VoicePresetStore.key(preset).equals(appliedSavedKey));
+            chip.setOnClickListener(v -> {
+                applySavedVoicePreset(view, preset);
+                highlightSelectedChip(row, chip);
+            });
+            chip.setOnLongClickListener(v -> {
+                confirmDeleteSavedVoicePreset(view, preset);
+                return true;
+            });
+            row.addView(chip);
+        }
+    }
+
+    /** Asks for a name, then stores the settings currently in effect. */
+    private void promptSaveCurrentVoiceSettings(View view) {
+        View content = getLayoutInflater().inflate(R.layout.dialog_save_voice_setting, null);
+        TextInputEditText input = content.findViewById(R.id.saveVoiceNameInput);
+        String defaultName = "Setting " + (VoicePresetStore.load(requireContext()).size() + 1);
+        input.setText(defaultName);
+        // Select based on the field's actual length — the text may be shorter
+        // than the default name if anything filtered it
+        input.setSelection(input.getText().length());
+
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Save voice setting")
+                .setView(content)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    String name = input.getText() != null ? input.getText().toString().trim() : "";
+                    if (TextUtils.isEmpty(name)) {
+                        name = defaultName;
+                    }
+                    saveCurrentVoiceSettings(view, name);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void saveCurrentVoiceSettings(View view, String name) {
+        VoicePresetStore.SavedVoicePreset preset = captureCurrentVoiceSettings();
+        preset.name = name;
+        if (!VoicePresetStore.add(requireContext(), preset)) {
+            Toast.makeText(requireContext(),
+                    "You can keep up to " + VoicePresetStore.MAX_PRESETS
+                            + " settings — delete one first",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        refreshSavedVoiceSettings(view);
+        Toast.makeText(requireContext(), "Saved \"" + name + "\"", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Snapshots every control in the sheet into a new setting object. */
+    private VoicePresetStore.SavedVoicePreset captureCurrentVoiceSettings() {
+        VoicePresetStore.SavedVoicePreset preset = new VoicePresetStore.SavedVoicePreset();
+        if (listener != null) {
+            preset.pitch = listener.getCurrentPitch();
+            preset.formant = listener.getCurrentFormant();
+            preset.speed = listener.getCurrentSpeed();
+            preset.bass = listener.getCurrentBass();
+            preset.reverb = listener.getCurrentReverb();
+            preset.treble = listener.getCurrentTreble();
+            preset.clarity = listener.getCurrentVocalClarity();
+            preset.echo = listener.getCurrentEcho();
+            preset.distortion = listener.getCurrentDistortion();
+            preset.vibrato = listener.getCurrentVibrato();
+            preset.volumeBoost = listener.getCurrentVolumeBoost();
+            preset.depth = listener.getCurrentVoiceDepth();
+            preset.robot = listener.isRobotEnabled();
+            preset.noiseReduction = listener.isNoiseReductionEnabled();
+            preset.autoTune = listener.isAutoTuneEnabled();
+            preset.eqPreset = listener.getCurrentEqPreset();
+        }
+        return preset;
+    }
+
+    /** Applies a saved setting to playback and mirrors it onto every control. */
+    private void applySavedVoicePreset(View view, VoicePresetStore.SavedVoicePreset preset) {
+        if (preset == null) {
+            return;
+        }
+
+        if (listener != null) {
+            listener.onPitchChanged(preset.pitch);
+            listener.onFormantChanged(preset.formant);
+            listener.onSpeedChanged(preset.speed);
+            listener.onBassChanged(preset.bass);
+            listener.onReverbChanged(preset.reverb);
+            listener.onTrebleChanged(preset.treble);
+            listener.onVocalClarityChanged(preset.clarity);
+            listener.onEchoChanged(preset.echo);
+            listener.onDistortionChanged(preset.distortion);
+            listener.onVibratoChanged(preset.vibrato);
+            listener.onVolumeBoostChanged(preset.volumeBoost);
+            listener.onVoiceDepthChanged(preset.depth);
+            listener.onRobotToggled(preset.robot);
+            listener.onNoiseReductionToggled(preset.noiseReduction);
+            listener.onAutoTuneToggled(preset.autoTune);
+            listener.onEqPresetSelected(preset.eqPreset);
+        }
+
+        // Mirror the values onto the controls. Programmatic setProgress fires
+        // onProgressChanged with fromUser=false, so nothing is applied twice.
+        setSliderProgress(view, R.id.pitch_slider_row, preset.pitch);
+        setSliderProgress(view, R.id.formant_slider_row, preset.formant);
+        setSliderProgress(view, R.id.speed_slider_row, preset.speed);
+        setSliderProgress(view, R.id.bass_slider_row, preset.bass);
+        setSliderProgress(view, R.id.reverb_slider_row, preset.reverb);
+        syncSignedSliderRow(view, R.id.treble_slider_row, preset.treble);
+        syncPercentSliderRow(view, R.id.clarity_slider_row, preset.clarity);
+        syncPercentSliderRow(view, R.id.echo_slider_row, preset.echo);
+        syncPercentSliderRow(view, R.id.distortion_slider_row, preset.distortion);
+        syncPercentSliderRow(view, R.id.vibrato_slider_row, preset.vibrato);
+        syncFactorSliderRow(view, R.id.volume_boost_slider_row, preset.volumeBoost);
+        syncSignedSliderRow(view, R.id.depth_slider_row, preset.depth);
+        setToggleChecked(view, R.id.robot_toggle_row, preset.robot);
+        setToggleChecked(view, R.id.noise_reduction_toggle_row, preset.noiseReduction);
+        setToggleChecked(view, R.id.autotune_toggle_row, preset.autoTune);
+
+        // The built-in preset chips (and the previous EQ chip) no longer
+        // describe the state, so drop their highlight; the EQ chip that was
+        // saved takes the highlight instead.
+        clearChipSelection(view, R.id.voice_preset_row);
+        highlightChipByText(view, R.id.eq_preset_row, preset.eqPreset);
+
+        appliedSavedKey = VoicePresetStore.key(preset);
+    }
+
+    private void confirmDeleteSavedVoicePreset(View view, VoicePresetStore.SavedVoicePreset preset) {
+        String name = TextUtils.isEmpty(preset.name) ? "this setting" : "\"" + preset.name + "\"";
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Delete setting?")
+                .setMessage("Delete " + name + "? This cannot be undone.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    VoicePresetStore.delete(requireContext(), preset);
+                    if (VoicePresetStore.key(preset).equals(appliedSavedKey)) {
+                        appliedSavedKey = null;
+                    }
+                    refreshSavedVoiceSettings(view);
+                    Toast.makeText(requireContext(), "Setting deleted", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** Checks the preset chip whose text matches, if the row has one. */
+    private void highlightChipByText(View view, int rowId, String text) {
+        LinearLayout row = view.findViewById(rowId);
+        if (row == null) {
+            return;
+        }
+        for (int i = 0; i < row.getChildCount(); i++) {
+            View child = row.getChildAt(i);
+            if (child instanceof Chip && TextUtils.equals(((Chip) child).getText(), text)) {
+                highlightSelectedChip(row, (Chip) child);
+                return;
+            }
         }
     }
 

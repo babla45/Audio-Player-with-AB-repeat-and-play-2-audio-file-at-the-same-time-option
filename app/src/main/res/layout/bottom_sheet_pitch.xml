@@ -39,6 +39,24 @@
             android:textColor="@color/text_primary"
             android:textSize="18sp"
             android:textStyle="bold" />
+
+        <!-- Snapshots every slider/toggle below into a named setting. Lives in
+             the title row (outside the scroll view) so it stays reachable
+             without scrolling back up. -->
+        <TextView
+            android:id="@+id/voice_save_current"
+            android:layout_width="wrap_content"
+            android:layout_height="28dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_icon_container"
+            android:clickable="true"
+            android:contentDescription="@string/voice_save_current"
+            android:focusable="true"
+            android:gravity="center"
+            android:paddingHorizontal="12dp"
+            android:text="@string/voice_save_current"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- NestedScrollView (not plain ScrollView) so the bottom sheet's drag
@@ -255,6 +273,60 @@
 
                 <LinearLayout
                     android:id="@+id/voice_preset_row"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <!-- User-saved settings (the header's Save button snapshots the
+                 current sliders/toggles). The chips scroll horizontally, so a
+                 long list stays reachable instead of overflowing the sheet. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="20dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/voice_saved_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/voice_saved_long_press_hint"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/voice_saved_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="20dp"
+                android:paddingBottom="8dp"
+                android:text="@string/voice_saved_empty"
+                android:textColor="@color/text_tertiary"
+                android:textSize="12sp" />
+
+            <HorizontalScrollView
+                android:id="@+id/voice_saved_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="16dp"
+                android:paddingBottom="8dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/voice_saved_row"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal" />
