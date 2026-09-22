@@ -47,11 +47,26 @@ public class ProcessedVideosActivity extends AppCompatActivity {
     private RecyclerView recyclerView;
     private View emptyView;
     private TextView emptyText;
-    private TextView mergedCountText, splitCountText, compressedCountText, otherCountText;
+    private TextView allCountText, mergedCountText, splitCountText, compressedCountText, otherCountText;
     private TextView subtitleText;
     private VideoAdapter adapter;
+
+    // Filter chips (the "All" chip is the default: everything, combined).
+    private static final int FILTER_ALL = 0;
+    private static final int FILTER_MERGED = 1;
+    private static final int FILTER_SPLIT = 2;
+    private static final int FILTER_COMPRESSED = 3;
+    private static final int FILTER_OTHER = 4;
+    private int currentFilter = FILTER_ALL;
+
+    /** Everything found on disk, kept per category so a chip can filter it. */
+    private final List<VideoFile> mergedVideos = new ArrayList<>();
+    private final List<VideoFile> splitVideos = new ArrayList<>();
+    private final List<VideoFile> compressedVideos = new ArrayList<>();
+    private final List<VideoFile> otherVideos = new ArrayList<>();
+
+    /** The rows currently on screen — the adapter's source list. */
     private final List<VideoFile> processedVideos = new ArrayList<>();
-    private int mergedCount = 0, splitCount = 0, compressedCount = 0, otherCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,16 +76,27 @@ public class ProcessedVideosActivity extends AppCompatActivity {
         recyclerView = findViewById(R.id.processedRecyclerView);
         emptyView = findViewById(R.id.processedEmptyView);
         emptyText = findViewById(R.id.processedEmptyText);
+        allCountText = findViewById(R.id.processedAllCount);
         mergedCountText = findViewById(R.id.processedMergedCount);
         splitCountText = findViewById(R.id.processedSplitCount);
         compressedCountText = findViewById(R.id.processedCompressedCount);
         otherCountText = findViewById(R.id.processedOtherCount);
         subtitleText = findViewById(R.id.processedSubtitle);
 
+        // Chips double as filters; the saved filter survives a reload.
+        allCountText.setOnClickListener(v -> setFilter(FILTER_ALL));
+        mergedCountText.setOnClickListener(v -> setFilter(FILTER_MERGED));
+        splitCountText.setOnClickListener(v -> setFilter(FILTER_SPLIT));
+        compressedCountText.setOnClickListener(v -> setFilter(FILTER_COMPRESSED));
+        otherCountText.setOnClickListener(v -> setFilter(FILTER_OTHER));
+
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         adapter = new VideoAdapter(processedVideos);
         adapter.setOnItemClickListener(videoFile -> playVideo(videoFile));
         adapter.setOnItemLongClickListener(videoFile -> showOptionsDialog(videoFile));
+        // Same menu as the long-press, reachable from the row's overflow button.
+        adapter.setShowOptionsButton(true);
+        adapter.setOnOptionsClickListener(videoFile -> showOptionsDialog(videoFile));
         recyclerView.setAdapter(adapter);
 
         ImageButton backBtn = findViewById(R.id.processedBackBtn);
@@ -88,67 +114,86 @@ public class ProcessedVideosActivity extends AppCompatActivity {
     }
 
     private void loadProcessedVideos() {
-        processedVideos.clear();
-        mergedCount = 0;
-        splitCount = 0;
-        compressedCount = 0;
-        otherCount = 0;
+        mergedVideos.clear();
+        splitVideos.clear();
+        compressedVideos.clear();
+        otherVideos.clear();
 
         // Paths already listed, so a file reachable from two places is shown once.
         Set<String> seen = new HashSet<>();
 
-        // The three job folders, each with its own counter.
-        int[] counts = {0, 0, 0};
-        for (int i = 0; i < PROCESSED_SUBFOLDERS.length; i++) {
-            File dir = getProcessedDir(PROCESSED_SUBFOLDERS[i]);
-            for (File f : listVideoFiles(dir)) {
-                if (seen.add(f.getAbsolutePath())) {
-                    processedVideos.add(videoFileFromFile(f));
-                    counts[i]++;
-                }
-            }
-        }
-        mergedCount = counts[0];
-        splitCount = counts[1];
-        compressedCount = counts[2];
+        // The three job folders, each into its own category.
+        scanInto(getProcessedDir(PROCESSED_SUBFOLDERS[0]), mergedVideos, seen);
+        scanInto(getProcessedDir(PROCESSED_SUBFOLDERS[1]), splitVideos, seen);
+        scanInto(getProcessedDir(PROCESSED_SUBFOLDERS[2]), compressedVideos, seen);
 
         // Everything else under aud_player/ — loose files in the root and any
         // other subfolder (e.g. "edited") — so no processed video is missed.
         File root = getAudPlayerRoot();
         if (root != null) {
-            for (File f : listVideoFiles(root)) {
-                if (seen.add(f.getAbsolutePath())) {
-                    processedVideos.add(videoFileFromFile(f));
-                    otherCount++;
-                }
-            }
+            scanInto(root, otherVideos, seen);
             File[] subs = root.listFiles(File::isDirectory);
             if (subs != null) {
                 for (File sub : subs) {
-                    for (File f : listVideoFiles(sub)) {
-                        if (seen.add(f.getAbsolutePath())) {
-                            processedVideos.add(videoFileFromFile(f));
-                            otherCount++;
-                        }
-                    }
+                    scanInto(sub, otherVideos, seen);
                 }
             }
         }
 
-        mergedCountText.setText("Merged: " + mergedCount);
-        splitCountText.setText("Split: " + splitCount);
-        compressedCountText.setText("Compressed: " + compressedCount);
-        otherCountText.setText("Other: " + otherCount);
+        int total = mergedVideos.size() + splitVideos.size()
+                + compressedVideos.size() + otherVideos.size();
+        allCountText.setText("All: " + total);
+        mergedCountText.setText("Merged: " + mergedVideos.size());
+        splitCountText.setText("Split: " + splitVideos.size());
+        compressedCountText.setText("Compressed: " + compressedVideos.size());
+        otherCountText.setText("Other: " + otherVideos.size());
 
-        int total = processedVideos.size();
-        subtitleText.setText(total > 0
-                ? total + (total == 1 ? " video" : " videos") + " • aud_player folder"
+        applyFilter();
+    }
+
+    /** Switches the visible category; the count badges stay on the totals. */
+    private void setFilter(int filter) {
+        if (currentFilter == filter) return;
+        currentFilter = filter;
+        applyFilter();
+    }
+
+    /** Rebuilds the visible rows for {@link #currentFilter}. */
+    private void applyFilter() {
+        processedVideos.clear();
+        switch (currentFilter) {
+            case FILTER_MERGED:
+                processedVideos.addAll(mergedVideos);
+                break;
+            case FILTER_SPLIT:
+                processedVideos.addAll(splitVideos);
+                break;
+            case FILTER_COMPRESSED:
+                processedVideos.addAll(compressedVideos);
+                break;
+            case FILTER_OTHER:
+                processedVideos.addAll(otherVideos);
+                break;
+            default:
+                // "All": one combined list, grouped by category.
+                processedVideos.addAll(mergedVideos);
+                processedVideos.addAll(splitVideos);
+                processedVideos.addAll(compressedVideos);
+                processedVideos.addAll(otherVideos);
+                break;
+        }
+
+        updateChipStyles();
+
+        int shown = processedVideos.size();
+        subtitleText.setText(shown > 0
+                ? shown + (shown == 1 ? " video" : " videos") + " • aud_player folder"
                 : "aud_player folder");
 
         if (processedVideos.isEmpty()) {
             recyclerView.setVisibility(View.GONE);
             emptyView.setVisibility(View.VISIBLE);
-            emptyText.setText("No processed videos yet\n\nVideos from Merge, Split & Compress will appear here");
+            emptyText.setText(emptyMessage());
         } else {
             recyclerView.setVisibility(View.VISIBLE);
             emptyView.setVisibility(View.GONE);
@@ -157,11 +202,52 @@ public class ProcessedVideosActivity extends AppCompatActivity {
         adapter.updateList(processedVideos);
     }
 
+    /** Selected chip reads solid white on the accent pill, as in the editor tabs. */
+    private void updateChipStyles() {
+        styleChip(allCountText, currentFilter == FILTER_ALL);
+        styleChip(mergedCountText, currentFilter == FILTER_MERGED);
+        styleChip(splitCountText, currentFilter == FILTER_SPLIT);
+        styleChip(compressedCountText, currentFilter == FILTER_COMPRESSED);
+        styleChip(otherCountText, currentFilter == FILTER_OTHER);
+    }
+
+    private void styleChip(TextView chip, boolean selected) {
+        if (chip == null) return;
+        chip.setTextColor(selected ? 0xFFFFFFFF : 0x88FFFFFF);
+        chip.setBackgroundResource(selected
+                ? R.drawable.bg_editor_chip_selected
+                : R.drawable.bg_editor_chip);
+    }
+
+    private String emptyMessage() {
+        switch (currentFilter) {
+            case FILTER_MERGED:
+                return "No merged videos yet";
+            case FILTER_SPLIT:
+                return "No split videos yet";
+            case FILTER_COMPRESSED:
+                return "No compressed videos yet";
+            case FILTER_OTHER:
+                return "No other videos";
+            default:
+                return "No processed videos yet\n\nVideos from Merge, Split & Compress will appear here";
+        }
+    }
+
     /** Video files directly inside {@code dir}, never null. */
     private static File[] listVideoFiles(File dir) {
         if (dir == null || !dir.isDirectory()) return new File[0];
         File[] files = dir.listFiles((f, name) -> isVideoName(name));
         return files != null ? files : new File[0];
+    }
+
+    /** Adds the videos in {@code dir} to {@code target}, skipping paths already listed. */
+    private void scanInto(File dir, List<VideoFile> target, Set<String> seen) {
+        for (File f : listVideoFiles(dir)) {
+            if (seen.add(f.getAbsolutePath())) {
+                target.add(videoFileFromFile(f));
+            }
+        }
     }
 
     private static boolean isVideoName(String name) {

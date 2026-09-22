@@ -56,6 +56,11 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         void onItemLongClick(VideoFile videoFile);
     }
 
+    /** Overflow button on the row — same actions as a long-press. */
+    public interface OnOptionsClickListener {
+        void onOptionsClick(VideoFile videoFile);
+    }
+
     public interface OnSelectionChangedListener {
         void onSelectionChanged(int selectedCount);
     }
@@ -75,6 +80,24 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     }
 
     private OnItemLongClickListener longClickListener;
+
+    /**
+     * Shows the per-row overflow button. Off by default so list pickers keep
+     * their existing look.
+     */
+    public void setShowOptionsButton(boolean show) {
+        if (this.showOptionsButton != show) {
+            this.showOptionsButton = show;
+            notifyDataSetChanged();
+        }
+    }
+
+    public void setOnOptionsClickListener(OnOptionsClickListener listener) {
+        this.optionsClickListener = listener;
+    }
+
+    private boolean showOptionsButton = false;
+    private OnOptionsClickListener optionsClickListener;
 
     public void setOnSelectionChangedListener(OnSelectionChangedListener listener) {
         this.selectionListener = listener;
@@ -189,6 +212,22 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             return false;
         });
 
+        // Overflow button: hidden while multi-select is showing its checkmarks,
+        // so the two never appear together.
+        if (showOptionsButton && !selectionMode) {
+            holder.moreBtn.setVisibility(View.VISIBLE);
+        } else {
+            holder.moreBtn.setVisibility(View.GONE);
+        }
+        holder.moreBtn.setOnClickListener(v -> {
+            if (optionsClickListener != null) {
+                int pos = holder.getAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    optionsClickListener.onOptionsClick(videoFiles.get(pos));
+                }
+            }
+        });
+
         // Thumbnail
         loadThumbnail(holder, file.getUri());
     }
@@ -269,6 +308,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         final TextView titleText;
         final TextView subtitleText;
         final ImageView checkOrOptions;
+        final ImageView moreBtn;
 
         VideoViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -278,6 +318,7 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             titleText = itemView.findViewById(R.id.videoTitle);
             subtitleText = itemView.findViewById(R.id.videoSubtitle);
             checkOrOptions = itemView.findViewById(R.id.videoOptionsOrCheck);
+            moreBtn = itemView.findViewById(R.id.videoMoreBtn);
         }
     }
 }

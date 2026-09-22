@@ -45,6 +45,50 @@
                 android:visibility="gone" />
         </FrameLayout>
 
+        <!-- Trailing actions. Both start hidden and collapse to zero width, so
+             the title runs to the row edge exactly as it did before; whichever
+             one the screen switches on sizes the group and the title follows it.
+             videoOptionsOrCheck = multi-select pickers, videoMoreBtn = overflow. -->
+        <LinearLayout
+            android:id="@+id/videoTrailing"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <!-- Options or Selection Checkbox -->
+            <ImageView
+                android:id="@+id/videoOptionsOrCheck"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_gravity="center_vertical"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="false"
+                android:contentDescription="Select"
+                android:focusable="false"
+                android:padding="6dp"
+                android:src="@drawable/ic_circle_outline"
+                app:tint="@color/text_tertiary" />
+
+            <!-- Overflow: Play / Rename / Delete (same as long-press) -->
+            <ImageView
+                android:id="@+id/videoMoreBtn"
+                android:layout_width="36dp"
+                android:layout_height="36dp"
+                android:layout_gravity="center_vertical"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:clickable="true"
+                android:contentDescription="More options"
+                android:focusable="true"
+                android:padding="6dp"
+                android:src="@drawable/ic_more_vert"
+                android:visibility="gone"
+                app:tint="@color/text_tertiary" />
+        </LinearLayout>
+
         <!-- Text content -->
         <LinearLayout
             android:layout_width="0dp"
@@ -52,7 +96,7 @@
             android:layout_marginHorizontal="14dp"
             android:orientation="vertical"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/videoOptionsOrCheck"
+            app:layout_constraintEnd_toStartOf="@id/videoTrailing"
             app:layout_constraintStart_toEndOf="@id/videoIconContainer"
             app:layout_constraintTop_toTopOf="parent">
 
@@ -76,22 +120,6 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
         </LinearLayout>
-
-        <!-- Options or Selection Checkbox -->
-        <ImageView
-            android:id="@+id/videoOptionsOrCheck"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:clickable="false"
-            android:contentDescription="Select"
-            android:focusable="false"
-            android:padding="6dp"
-            android:src="@drawable/ic_circle_outline"
-            app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toEndOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:tint="@color/text_tertiary" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 </FrameLayout>
