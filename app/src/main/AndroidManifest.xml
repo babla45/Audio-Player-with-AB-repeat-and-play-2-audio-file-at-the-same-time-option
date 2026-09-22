@@ -129,6 +129,18 @@
             android:label="Video Editor"
             android:parentActivityName=".MainActivity" />
 
+        <activity
+            android:name=".ProcessedVideosActivity"
+            android:label="Processed Videos"
+            android:parentActivityName=".VideoEditorActivity" />
+
+        <!-- Plays a processed video from its file path (in-app, no chooser) -->
+        <activity
+            android:name=".VideoPlayerActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
+            android:label="Video"
+            android:parentActivityName=".ProcessedVideosActivity" />
+
         <!-- Share-sheet entries for video: Merge, Split and Compress -->
         <activity
             android:name=".ShareVideoMergeActivity"

@@ -52,6 +52,10 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         void onItemClick(VideoFile videoFile);
     }
 
+    public interface OnItemLongClickListener {
+        void onItemLongClick(VideoFile videoFile);
+    }
+
     public interface OnSelectionChangedListener {
         void onSelectionChanged(int selectedCount);
     }
@@ -65,6 +69,12 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
     public void setOnItemClickListener(OnItemClickListener listener) {
         this.listener = listener;
     }
+
+    public void setOnItemLongClickListener(OnItemLongClickListener listener) {
+        this.longClickListener = listener;
+    }
+
+    private OnItemLongClickListener longClickListener;
 
     public void setOnSelectionChangedListener(OnSelectionChangedListener listener) {
         this.selectionListener = listener;
@@ -168,6 +178,17 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             }
         });
 
+        holder.innerLayout.setOnLongClickListener(v -> {
+            if (longClickListener != null) {
+                int pos = holder.getAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    longClickListener.onItemLongClick(videoFiles.get(pos));
+                    return true;
+                }
+            }
+            return false;
+        });
+
         // Thumbnail
         loadThumbnail(holder, file.getUri());
     }
@@ -188,7 +209,14 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
         thumbExecutor.execute(() -> {
             Bitmap thumb = null;
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if ("file".equals(uri.getScheme())) {
+                    // Plain paths (e.g. processed videos under aud_player/) are
+                    // not MediaStore rows, so decode a frame from the file.
+                    MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                    mmr.setDataSource(uri.getPath());
+                    thumb = mmr.getFrameAtTime(1000000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                    mmr.release();
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     thumb = ctx.getContentResolver().loadThumbnail(uri, new Size(96, 96), null);
                 } else {
                     MediaMetadataRetriever mmr = new MediaMetadataRetriever();

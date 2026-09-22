@@ -67,6 +67,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private static final int TAB_MERGE = 0;
     private static final int TAB_SPLIT = 1;
     private static final int TAB_COMPRESS = 2;
+    private static final int TAB_PROCESSED = 3;
     private static final long PLAYHEAD_UPDATE_MS = 33;
     private static final int MAX_HISTORY = 50;
     private static final float DEFAULT_SPLIT_ZOOM = 10f;
@@ -186,8 +187,8 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
     private EditorTimelineView timeline;
     private HorizontalScrollView timelineScroll;
     private TextView rangeText, durationText, hintText, currentTimeText, zoomText;
-    private TextView tabMerge, tabSplit, addSplitBtn, saveBtn, clearBtn;
-    private TextView tabCompress, compressInfoText;
+    private TextView tabMerge, tabSplit, tabCompress, tabProcessed, addSplitBtn, saveBtn, clearBtn;
+    private TextView compressInfoText;
     private View compressRow, compressOptionsScroll;
     private LinearLayout compressOptionsBar;
     private TextView zoomOutBtn, zoomInBtn, undoBtn, redoBtn, seqPreviewBtn, songNameText;
@@ -524,6 +525,7 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         tabMerge = findViewById(R.id.editorTabMerge);
         tabSplit = findViewById(R.id.editorTabSplit);
         tabCompress = findViewById(R.id.editorTabCompress);
+        tabProcessed = findViewById(R.id.editorTabProcessed);
 
         mergeActionRow = findViewById(R.id.editorMergeActionRow);
         mergeAddSongBtn = findViewById(R.id.editorMergeAddSongBtn);
@@ -637,6 +639,10 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         tabMerge.setOnClickListener(v -> selectTab(TAB_MERGE));
         tabSplit.setOnClickListener(v -> selectTab(TAB_SPLIT));
         tabCompress.setOnClickListener(v -> selectTab(TAB_COMPRESS));
+        tabProcessed.setOnClickListener(v -> {
+            Intent intent = new Intent(this, ProcessedVideosActivity.class);
+            startActivity(intent);
+        });
     }
 
     private void selectTab(int tab) {
@@ -654,10 +660,33 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         boolean isMerge = currentTab == TAB_MERGE;
         boolean isSplit = currentTab == TAB_SPLIT;
         boolean isCompress = currentTab == TAB_COMPRESS;
+        boolean isProcessed = currentTab == TAB_PROCESSED;
 
         tabMerge.setTextColor(isMerge ? 0xFFFFFFFF : 0x88FFFFFF);
         tabSplit.setTextColor(isSplit ? 0xFFFFFFFF : 0x88FFFFFF);
         tabCompress.setTextColor(isCompress ? 0xFFFFFFFF : 0x88FFFFFF);
+        tabProcessed.setTextColor(isProcessed ? 0xFFFFFFFF : 0x88FFFFFF);
+
+        // Processed tab opens a separate activity - hide all editor panels
+        if (isProcessed) {
+            timelinePanel.setVisibility(View.GONE);
+            controlBarScroll.setVisibility(View.GONE);
+            undoRedoRow.setVisibility(View.GONE);
+            mergeActionRow.setVisibility(View.GONE);
+            compressRow.setVisibility(View.GONE);
+            compressOptionsScroll.setVisibility(View.GONE);
+            videoPreviewContainer.setVisibility(View.GONE);
+            segmentList.setVisibility(View.GONE);
+            seqPreviewBtn.setVisibility(View.GONE);
+            saveBtn.setVisibility(View.GONE);
+            return;
+        }
+
+        // Restore visibility for actual editor tabs
+        videoPreviewContainer.setVisibility(View.VISIBLE);
+        segmentList.setVisibility(View.VISIBLE);
+        seqPreviewBtn.setVisibility(isCompress ? View.GONE : View.VISIBLE);
+        saveBtn.setVisibility(View.VISIBLE);
 
         timelinePanel.setVisibility(isSplit ? View.VISIBLE : View.GONE);
         // the bar lives inside a HorizontalScrollView — show/hide the wrapper
@@ -667,10 +696,6 @@ public class VideoEditorActivity extends AppCompatActivity implements TextureVie
         mergeActionRow.setVisibility(isMerge ? View.VISIBLE : View.GONE);
         compressRow.setVisibility(isCompress ? View.VISIBLE : View.GONE);
         compressOptionsScroll.setVisibility(isCompress ? View.VISIBLE : View.GONE);
-        // Preview stays available on Merge and Split: on Merge it plays the
-        // merge list in order, i.e. exactly what Merge writes out. Compressing
-        // does not change the running order, so there is nothing to preview.
-        seqPreviewBtn.setVisibility(isCompress ? View.GONE : View.VISIBLE);
 
         saveBtn.setText(isMerge ? "Merge" : (isCompress ? "Compress" : "Save"));
 
