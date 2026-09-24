@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Compact voice-changer sheet. The effects are laid out as a two-column grid
+     (see the row LinearLayouts below) so twelve sliders fit in six rows instead
+     of twelve; Pitch keeps the full width because its quick-pick chips sit
+     underneath it. Every include keeps its original id, so PitchBottomSheet's
+     findViewById lookups are unaffected by the placement. The chip rows are
+     sized from Java (PitchBottomSheet#applyCompactChip). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_bottom_sheet"
     android:orientation="vertical"
-    android:paddingBottom="16dp">
+    android:paddingBottom="8dp">
 
     <View
-        android:layout_width="40dp"
-        android:layout_height="4dp"
+        android:layout_width="36dp"
+        android:layout_height="3dp"
         android:layout_gravity="center_horizontal"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="12dp"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="6dp"
         android:background="@drawable/bg_icon_container" />
 
     <LinearLayout
@@ -20,12 +26,12 @@
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="20dp"
-        android:paddingBottom="8dp">
+        android:paddingHorizontal="14dp"
+        android:paddingBottom="4dp">
 
         <ImageView
-            android:layout_width="28dp"
-            android:layout_height="28dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:contentDescription="@string/pitch"
             android:src="@drawable/ic_tune"
             app:tint="@color/accent_primary" />
@@ -33,11 +39,13 @@
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:text="@string/voice_controls_title"
             android:textColor="@color/text_primary"
-            android:textSize="18sp"
+            android:textSize="15sp"
             android:textStyle="bold" />
 
         <!-- Snapshots every slider/toggle below into a named setting. Lives in
@@ -46,14 +54,15 @@
         <TextView
             android:id="@+id/voice_save_current"
             android:layout_width="wrap_content"
-            android:layout_height="28dp"
+            android:layout_height="26dp"
             android:layout_marginStart="8dp"
             android:background="@drawable/bg_icon_container"
             android:clickable="true"
             android:contentDescription="@string/voice_save_current"
             android:focusable="true"
             android:gravity="center"
-            android:paddingHorizontal="12dp"
+            android:includeFontPadding="false"
+            android:paddingHorizontal="10dp"
             android:text="@string/voice_save_current"
             android:textColor="@color/text_secondary"
             android:textSize="12sp" />
@@ -74,19 +83,23 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingBottom="8dp">
+            android:paddingHorizontal="12dp"
+            android:paddingBottom="4dp">
 
-            <!-- Pitch -->
+            <!-- Pitch: the primary control, so it keeps the full width and its
+                 quick-pick chips stay directly underneath it. -->
             <include
                 android:id="@+id/pitch_slider_row"
-                layout="@layout/item_voice_slider" />
+                layout="@layout/item_voice_slider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <HorizontalScrollView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="16dp"
-                android:paddingTop="4dp"
-                android:paddingBottom="8dp"
+                android:paddingHorizontal="2dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="4dp"
                 android:scrollbars="none">
 
                 <LinearLayout
@@ -98,77 +111,77 @@
                         android:id="@+id/pitch_chip_025"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="0.25x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_050"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="0.50x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_075"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="0.75x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_085"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="0.85x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_100"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="1.00x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_125"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="1.25x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_150"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="1.50x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_200"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="2.00x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_250"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="2.50x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_300"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="3.00x" />
 
                     <com.google.android.material.chip.Chip
                         android:id="@+id/pitch_chip_400"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="4.00x" />
                 </LinearLayout>
             </HorizontalScrollView>
@@ -176,99 +189,166 @@
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:layout_marginHorizontal="20dp"
-                android:layout_marginVertical="4dp"
+                android:layout_marginHorizontal="2dp"
+                android:layout_marginVertical="3dp"
                 android:background="@color/text_tertiary"
                 android:alpha="0.25" />
 
-            <!-- Formant -->
-            <include
-                android:id="@+id/formant_slider_row"
-                layout="@layout/item_voice_slider" />
+            <!-- Tone / speed grid: two sliders per row. Each include overrides
+                 both layout_width and layout_height, which is what lets the
+                 weight and margin below take effect on the included root. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-            <!-- Speed -->
-            <include
-                android:id="@+id/speed_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/formant_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1" />
 
-            <!-- Bass -->
-            <include
-                android:id="@+id/bass_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/speed_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+            </LinearLayout>
 
-            <!-- Reverb -->
-            <include
-                android:id="@+id/reverb_slider_row"
-                layout="@layout/item_voice_slider" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-            <!-- Treble -->
-            <include
-                android:id="@+id/treble_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/bass_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1" />
 
-            <!-- Vocal Clarity -->
-            <include
-                android:id="@+id/clarity_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/treble_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+            </LinearLayout>
 
-            <!-- Echo -->
-            <include
-                android:id="@+id/echo_slider_row"
-                layout="@layout/item_voice_slider" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-            <!-- Distortion -->
-            <include
-                android:id="@+id/distortion_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/reverb_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1" />
 
-            <!-- Vibrato -->
-            <include
-                android:id="@+id/vibrato_slider_row"
-                layout="@layout/item_voice_slider" />
+                <include
+                    android:id="@+id/echo_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+            </LinearLayout>
 
-            <!-- Volume Boost -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <include
+                    android:id="@+id/clarity_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1" />
+
+                <include
+                    android:id="@+id/distortion_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <include
+                    android:id="@+id/vibrato_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1" />
+
+                <include
+                    android:id="@+id/depth_slider_row"
+                    layout="@layout/item_voice_slider"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+            </LinearLayout>
+
+            <!-- Volume Boost stays full width: it pairs with Pitch as an
+                 overall level control rather than with a single effect. -->
             <include
                 android:id="@+id/volume_boost_slider_row"
-                layout="@layout/item_voice_slider" />
-
-            <!-- Voice Depth -->
-            <include
-                android:id="@+id/depth_slider_row"
-                layout="@layout/item_voice_slider" />
+                layout="@layout/item_voice_slider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <!-- Robot -->
             <include
                 android:id="@+id/robot_toggle_row"
-                layout="@layout/item_voice_toggle" />
+                layout="@layout/item_voice_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <!-- Noise Reduction -->
             <include
                 android:id="@+id/noise_reduction_toggle_row"
-                layout="@layout/item_voice_toggle" />
+                layout="@layout/item_voice_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <!-- Auto-tune -->
             <include
                 android:id="@+id/autotune_toggle_row"
-                layout="@layout/item_voice_toggle" />
+                layout="@layout/item_voice_toggle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
 
             <!-- Voice presets -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="20dp"
-                android:paddingTop="16dp"
-                android:paddingBottom="4dp"
+                android:paddingHorizontal="2dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="2dp"
                 android:text="@string/voice_presets_title"
                 android:textColor="@color/text_primary"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <HorizontalScrollView
                 android:id="@+id/voice_preset_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="16dp"
-                android:paddingBottom="8dp"
+                android:paddingHorizontal="2dp"
+                android:paddingBottom="2dp"
                 android:scrollbars="none">
 
                 <LinearLayout
@@ -278,78 +358,24 @@
                     android:orientation="horizontal" />
             </HorizontalScrollView>
 
-            <!-- User-saved settings (the header's Save button snapshots the
-                 current sliders/toggles). The chips scroll horizontally, so a
-                 long list stays reachable instead of overflowing the sheet. -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="20dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="4dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/voice_saved_title"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/voice_saved_long_press_hint"
-                    android:textColor="@color/text_tertiary"
-                    android:textSize="11sp" />
-            </LinearLayout>
-
-            <TextView
-                android:id="@+id/voice_saved_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingHorizontal="20dp"
-                android:paddingBottom="8dp"
-                android:text="@string/voice_saved_empty"
-                android:textColor="@color/text_tertiary"
-                android:textSize="12sp" />
-
-            <HorizontalScrollView
-                android:id="@+id/voice_saved_scroll"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:paddingHorizontal="16dp"
-                android:paddingBottom="8dp"
-                android:scrollbars="none">
-
-                <LinearLayout
-                    android:id="@+id/voice_saved_row"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal" />
-            </HorizontalScrollView>
-
             <!-- EQ presets -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="20dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="4dp"
+                android:paddingHorizontal="2dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="2dp"
                 android:text="@string/eq_presets_title"
                 android:textColor="@color/text_primary"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="bold" />
 
             <HorizontalScrollView
                 android:id="@+id/eq_preset_scroll"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:paddingHorizontal="16dp"
-                android:paddingBottom="8dp"
+                android:paddingHorizontal="2dp"
+                android:paddingBottom="2dp"
                 android:scrollbars="none">
 
                 <LinearLayout
@@ -359,19 +385,82 @@
                     android:orientation="horizontal" />
             </HorizontalScrollView>
 
-            <!-- Master reset -->
+            <!-- User-saved settings (the header's Save button snapshots the
+                 current sliders/toggles). Sits after the built-in preset rows
+                 because it is the least frequently used. The chips scroll
+                 horizontally, so a long list stays reachable instead of
+                 overflowing the sheet. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="2dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="2dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/voice_saved_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/voice_saved_long_press_hint"
+                    android:textColor="@color/text_tertiary"
+                    android:textSize="10sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/voice_saved_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="2dp"
+                android:paddingBottom="4dp"
+                android:text="@string/voice_saved_empty"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11sp" />
+
+            <HorizontalScrollView
+                android:id="@+id/voice_saved_scroll"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="2dp"
+                android:paddingBottom="2dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/voice_saved_row"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+            </HorizontalScrollView>
+
+            <!-- Master reset. An explicit height plus zero insets is what
+                 actually shortens a Material button: its style otherwise adds a
+                 48dp min height and 6dp of inset at each end. -->
             <Button
                 android:id="@+id/voice_master_reset"
                 style="?attr/materialButtonOutlinedStyle"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginHorizontal="16dp"
-                android:layout_marginTop="12dp"
-                android:layout_marginBottom="8dp"
+                android:layout_height="26dp"
+                android:layout_marginHorizontal="8dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="2dp"
                 android:contentDescription="@string/reset_to_default_argless"
-                android:drawablePadding="8dp"
+                android:includeFontPadding="false"
+                android:insetBottom="0dp"
+                android:insetTop="0dp"
+                android:minHeight="0dp"
+                android:paddingVertical="0dp"
                 android:text="@string/voice_master_reset"
-                android:textColor="@color/text_primary" />
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

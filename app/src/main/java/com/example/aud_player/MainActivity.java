@@ -4106,7 +4106,7 @@ public class MainActivity extends AppCompatActivity {
                 virtualizer.setStrength((short) 0);
                 virtualizer.setEnabled(false);
             }
-            Toast.makeText(this, "None EQ preset applied", Toast.LENGTH_SHORT).show();
+           // Toast.makeText(this, "None EQ preset applied", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Log.e(TAG, "Failed to reset equalizer", e);
         }
@@ -4657,7 +4657,7 @@ public class MainActivity extends AppCompatActivity {
                 setEqBandLevel(band, level);
             }
             equalizer.setEnabled(true);
-            Toast.makeText(this, presetName + " preset applied", Toast.LENGTH_SHORT).show();
+           // Toast.makeText(this, presetName + " preset applied", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Log.e(TAG, "Failed to apply preset: " + presetName, e);
         }
@@ -4726,7 +4726,7 @@ public class MainActivity extends AppCompatActivity {
                 setEqBandLevel(band, level);
             }
             equalizer.setEnabled(true);
-            Toast.makeText(this, presetName + " EQ preset applied", Toast.LENGTH_SHORT).show();
+            //Toast.makeText(this, presetName + " EQ preset applied", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Log.e(TAG, "Failed to apply voice EQ preset: " + presetName, e);
         }

@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Compact voice-slider row. Sized to sit two-to-a-row inside the controls
+     grid of bottom_sheet_pitch.xml (and full width for Pitch / Volume Boost).
+     Only the outer padding is small here: the host supplies the sheet inset. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:paddingHorizontal="20dp"
-    android:paddingTop="8dp"
-    android:paddingBottom="4dp">
+    android:paddingHorizontal="2dp"
+    android:paddingTop="2dp"
+    android:paddingBottom="2dp">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -19,26 +22,29 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textColor="@color/text_primary"
-            android:textSize="13sp"
+            android:textSize="10sp"
             android:textStyle="bold" />
 
         <TextView
             android:id="@+id/voice_slider_value"
             android:layout_width="wrap_content"
-            android:layout_height="24dp"
+            android:layout_height="16dp"
             android:background="@drawable/gradient_accent"
             android:gravity="center"
-            android:minWidth="52dp"
-            android:paddingHorizontal="10dp"
+            android:includeFontPadding="false"
+            android:minWidth="38dp"
+            android:paddingHorizontal="5dp"
             android:textColor="@color/text_on_accent"
-            android:textSize="12sp" />
+            android:textSize="10sp" />
 
         <ImageView
             android:id="@+id/voice_slider_reset"
-            android:layout_width="20dp"
-            android:layout_height="20dp"
-            android:layout_marginStart="8dp"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="4dp"
             android:background="?attr/selectableItemBackgroundBorderless"
             android:clickable="true"
             android:contentDescription="@string/reset_to_default_argless"
@@ -47,33 +53,42 @@
             app:tint="@color/text_tertiary" />
     </LinearLayout>
 
-    <SeekBar
-        android:id="@+id/voice_slider_seekbar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:progressTint="@color/accent_primary"
-        android:thumbTint="@color/accent_primary" />
-
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
             android:id="@+id/voice_slider_min"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="3dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/text_tertiary"
+            android:textSize="9sp" />
+
+        <SeekBar
+            android:id="@+id/voice_slider_seekbar"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
+            android:minHeight="26dp"
+            android:paddingTop="0dp"
+            android:paddingBottom="0dp"
+            android:progressTint="@color/accent_primary"
+            android:thumbTint="@color/accent_primary" />
 
         <TextView
             android:id="@+id/voice_slider_max"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginStart="3dp"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textColor="@color/text_tertiary"
-            android:textSize="10sp" />
+            android:textSize="9sp" />
     </LinearLayout>
 
 </LinearLayout>

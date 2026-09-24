@@ -71,6 +71,13 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
      */
     private String appliedSavedKey;
 
+    /**
+     * Height of every chip in this sheet, in dp. Kept equal to the Reset All
+     * button's height so the preset rows, the saved row and the reset action all
+     * read as one size.
+     */
+    private static final int COMPACT_CHIP_HEIGHT_DP = 26;
+
     /** A named combination of voice-changer settings. */
     private static class VoicePreset {
         final String name;
@@ -397,6 +404,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
             chip.setLayoutParams(lp);
+            applyCompactChip(chip);
             chip.setOnClickListener(v -> {
                 if (listener != null) {
                     listener.onPitchChanged(preset.pitch);
@@ -429,6 +437,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMarginEnd((int) (8 * getResources().getDisplayMetrics().density));
             chip.setLayoutParams(lp);
+            applyCompactChip(chip);
             chip.setOnClickListener(v -> {
                 if (listener != null) {
                     listener.onEqPresetSelected(name);
@@ -483,6 +492,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMarginEnd(margin);
             chip.setLayoutParams(lp);
+            applyCompactChip(chip);
             chip.setChecked(VoicePresetStore.key(preset).equals(appliedSavedKey));
             chip.setOnClickListener(v -> {
                 applySavedVoicePreset(view, preset);
@@ -977,6 +987,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         if (chip == null) {
             return;
         }
+        applyCompactChip(chip);
         chip.setOnClickListener(v -> {
             int progress = Math.round(pitch * 100);
             seekBar.setProgress(progress);
@@ -985,6 +996,39 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
                 listener.onPitchChanged(pitch);
             }
         });
+    }
+
+    /**
+     * Sizes a chip to the density of this sheet. Material chips reserve a 48dp
+     * touch target, a 32dp minimum height and 16dp of padding at each end, which
+     * makes the preset rows read as oversized buttons. The view height is pinned
+     * as well as the minimum, because a chip otherwise stretches to its own text
+     * height instead of matching the Reset All button next to it. Call it after
+     * the chip has its layout params, so the pinned height survives.
+     */
+    private void applyCompactChip(Chip chip) {
+        float density = getResources().getDisplayMetrics().density;
+        int heightPx = Math.round(COMPACT_CHIP_HEIGHT_DP * density);
+        chip.setEnsureMinTouchTargetSize(false);
+        chip.setChipMinHeight(heightPx);
+        chip.setMinHeight(heightPx);
+        chip.setChipStartPadding(10 * density);
+        chip.setChipEndPadding(10 * density);
+        chip.setTextStartPadding(0f);
+        chip.setTextEndPadding(0f);
+        chip.setTextSize(12f);
+
+        // Material pads the chip out to a 48dp touch target. With the height
+        // pinned that padding survives inside the shorter view and pushes the
+        // label past the bottom edge, so drop the vertical part of it. The
+        // horizontal padding is kept so the label stays clear of the sides.
+        chip.setPadding(chip.getPaddingLeft(), 0, chip.getPaddingRight(), 0);
+
+        ViewGroup.LayoutParams params = chip.getLayoutParams();
+        if (params != null) {
+            params.height = heightPx;
+            chip.setLayoutParams(params);
+        }
     }
 
     @Override
