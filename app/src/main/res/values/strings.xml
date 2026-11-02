@@ -106,6 +106,8 @@
     <string name="mixer_position_sync">Adjust Track Positions</string>
     <string name="other_settings">Other Settings</string>
     <string name="pitch">Pitch</string>
+    <string name="decrease_pitch">Decrease pitch by 0.1 semitone</string>
+    <string name="increase_pitch">Increase pitch by 0.1 semitone</string>
     <string name="voice_controls_title">Voice Controls</string>
     <string name="voice_formant">Formant</string>
     <string name="voice_speed">Speed</string>

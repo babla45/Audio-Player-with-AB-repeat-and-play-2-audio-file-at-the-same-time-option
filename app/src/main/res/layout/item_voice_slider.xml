@@ -69,6 +69,19 @@
             android:textColor="@color/text_tertiary"
             android:textSize="9sp" />
 
+        <ImageView
+            android:id="@+id/pitch_decrease_button"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="@string/decrease_pitch"
+            android:focusable="true"
+            android:padding="4dp"
+            android:src="@drawable/ic_nudge_minus"
+            android:visibility="gone"
+            app:tint="@color/text_tertiary" />
+
         <SeekBar
             android:id="@+id/voice_slider_seekbar"
             android:layout_width="0dp"
@@ -79,6 +92,19 @@
             android:paddingBottom="0dp"
             android:progressTint="@color/accent_primary"
             android:thumbTint="@color/accent_primary" />
+
+        <ImageView
+            android:id="@+id/pitch_increase_button"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:contentDescription="@string/increase_pitch"
+            android:focusable="true"
+            android:padding="4dp"
+            android:src="@drawable/ic_nudge_plus"
+            android:visibility="gone"
+            app:tint="@color/text_tertiary" />
 
         <TextView
             android:id="@+id/voice_slider_max"

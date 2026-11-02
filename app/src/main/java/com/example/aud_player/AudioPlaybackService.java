@@ -9,7 +9,10 @@ import android.content.Context;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.content.Intent;
+import android.graphics.BitmapFactory;
 import android.media.MediaPlayer;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.media.AudioManager;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
@@ -28,7 +31,6 @@ import android.content.ComponentName;
 
 import android.telephony.TelephonyManager;
 import android.graphics.Bitmap;
-import android.media.PlaybackParams;
 import android.media.audiofx.LoudnessEnhancer;
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
@@ -36,6 +38,8 @@ import android.graphics.Paint;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.Color;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class AudioPlaybackService extends Service {
     private static final String TAG = "AudioPlaybackService";
@@ -51,6 +55,7 @@ public class AudioPlaybackService extends Service {
     public static final String ACTION_SCHEDULED_PLAY = "ACTION_SCHEDULED_PLAY";
     /** Schedule Timer: resume the player's paused playback. */
     public static final String ACTION_SCHEDULED_RESUME = "ACTION_SCHEDULED_RESUME";
+    public static final String PREF_NOTIFICATION_ALBUM_ART = "notification_mini_player_album_art";
 
     // Shared boost range — must match MainActivity's BOOST_MIN / BOOST_MAX
     // so the slider, service, presets and voice-changer all agree.
@@ -77,13 +82,19 @@ public class AudioPlaybackService extends Service {
     // timer's close-app action). A stopped instance is on its way out, so it
     // must never post its notification again — see updateNotification().
     private boolean serviceStopped = false;
-    private float currentPitch = 1.0f;
+    private float currentPitch = 0.0f;
     private float currentBoost = 1.0f;
     private LoudnessEnhancer loudnessEnhancerMain;
     private LoudnessEnhancer loudnessEnhancerSecond;
     private MediaSessionCompat mediaSession;
     private PlaybackStateCompat.Builder playbackStateBuilder;
     private Bitmap notificationArtwork;
+    private Bitmap currentTrackArtwork;
+    private Uri currentTrackArtworkUri;
+    private volatile int artworkLoadVersion;
+    private boolean showNotificationAlbumArt = true;
+    private final ExecutorService artworkExecutor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     // Cached PendingIntents — recreated only on first use or after service restart.
     // Prevents rebuilding identical PendingIntent objects on every notification update.
     private PendingIntent cachedContentIntent;
@@ -229,13 +240,15 @@ public class AudioPlaybackService extends Service {
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         setupMediaSession();
         try {
-            currentPitch = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
-                    .getFloat("playback_pitch", 1.0f);
+            currentPitch = PitchProcessor.loadPitchSemitones(
+                    getSharedPreferences("audio_player_prefs", MODE_PRIVATE));
         } catch (Exception ignored) {}
         try {
             currentBoost = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
                     .getFloat("volume_boost_factor", 1.0f);
         } catch (Exception ignored) {}
+        showNotificationAlbumArt = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                .getBoolean(PREF_NOTIFICATION_ALBUM_ART, true);
     }
 
     @Override
@@ -253,15 +266,15 @@ public class AudioPlaybackService extends Service {
         // service and nothing can ever remove it (see updateNotification).
         serviceStopped = intent != null && ACTION_STOP.equals(intent.getAction());
 
-        // CRITICAL: Call startForeground IMMEDIATELY before doing any work.
-        // On Android 11 and below, delaying this call can cause the notification
-        // to never appear (the system silently drops it). On Android 12+ it can
-        // cause a ForegroundServiceDidNotStartInTimeException crash.
-        try {
-            startForeground(NOTIFICATION_ID, createNotification());
-            isForegroundStarted = true;
-        } catch (Exception e) {
-            Log.e(TAG, "startForeground failed in onStartCommand", e);
+        // A service that is already foregrounded does not need an identical
+        // notification repost. New services still promote immediately.
+        if (!isForegroundStarted) {
+            try {
+                startForeground(NOTIFICATION_ID, createNotification());
+                isForegroundStarted = true;
+            } catch (Exception e) {
+                Log.e(TAG, "startForeground failed in onStartCommand", e);
+            }
         }
 
         String action = (intent != null) ? intent.getAction() : null;
@@ -641,12 +654,14 @@ public class AudioPlaybackService extends Service {
         if (mediaSession == null) return;
         try {
             long duration = (mediaPlayer != null) ? mediaPlayer.getDuration() : 0;
-            Bitmap art = getOrCreateNotificationArtwork();
+            Bitmap art = getNotificationArtwork();
             MediaMetadataCompat.Builder metadataBuilder = new MediaMetadataCompat.Builder()
                     .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
                     .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "AudPlayer")
-                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
+            if (art != null) {
+                metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art);
+            }
 
             mediaSession.setMetadata(metadataBuilder.build());
         } catch (Exception e) {
@@ -690,14 +705,22 @@ public class AudioPlaybackService extends Service {
     }
 
     public void setMediaPlayers(MediaPlayer main, MediaPlayer second, String title) {
+        setMediaPlayers(main, second, title, null);
+    }
+
+    public void setMediaPlayers(MediaPlayer main, MediaPlayer second, String title, Uri artworkUri) {
         // release any previous loudness enhancers before switching players
         try { releaseLoudnessEnhancers(); } catch (Exception ignored) {}
 
         this.mediaPlayer = main;
         this.secondMediaPlayer = second;
-        this.currentTitle = title != null ? title : "Audio Player";
+        this.currentTitle = title != null ? title
+                : (main == null && second == null ? this.currentTitle : "Audio Player");
         this.isPlaying = main != null && main.isPlaying();
         this.secondAudioActive = second != null;
+        if (artworkUri != null) {
+            loadTrackArtwork(artworkUri);
+        }
         if (this.isPlaying) {
             registerBecomingNoisy();
         } else {
@@ -754,6 +777,117 @@ public class AudioPlaybackService extends Service {
         }
     }
 
+    /**
+     * Detaches the old players while a new track is being prepared without
+     * briefly replacing the visible notification title with a placeholder.
+     */
+    public void clearMediaPlayersForTrackSwitch() {
+        try { releaseLoudnessEnhancers(); } catch (Exception ignored) {}
+        mediaPlayer = null;
+        secondMediaPlayer = null;
+        isPlaying = false;
+        secondAudioActive = false;
+        currentTrackArtworkUri = null;
+        currentTrackArtwork = null;
+        artworkLoadVersion++;
+        unregisterBecomingNoisy();
+        updatePlaybackState();
+    }
+
+    public void refreshNotificationArtworkSetting() {
+        showNotificationAlbumArt = getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
+                .getBoolean(PREF_NOTIFICATION_ALBUM_ART, true);
+        if (showNotificationAlbumArt && currentTrackArtwork == null && currentTrackArtworkUri != null) {
+            loadTrackArtwork(currentTrackArtworkUri);
+        } else {
+            updateMediaSessionMetadata();
+            updateNotification();
+        }
+    }
+
+    private void loadTrackArtwork(Uri uri) {
+        if (uri == null || uri.equals(currentTrackArtworkUri)) {
+            return;
+        }
+        currentTrackArtworkUri = uri;
+        currentTrackArtwork = null;
+        int loadVersion = ++artworkLoadVersion;
+        if (!showNotificationAlbumArt) {
+            return;
+        }
+
+        artworkExecutor.execute(() -> {
+            if (loadVersion != artworkLoadVersion) {
+                return;
+            }
+            Bitmap artwork = null;
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(this, uri);
+                byte[] embeddedPicture = retriever.getEmbeddedPicture();
+                if (embeddedPicture != null && embeddedPicture.length > 0) {
+                    BitmapFactory.Options bounds = new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds = true;
+                    BitmapFactory.decodeByteArray(embeddedPicture, 0, embeddedPicture.length, bounds);
+                    int largestDimension = Math.max(bounds.outWidth, bounds.outHeight);
+                    int sampleSize = 1;
+                    while (largestDimension / sampleSize > 512) {
+                        sampleSize *= 2;
+                    }
+                    BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+                    decodeOptions.inSampleSize = sampleSize;
+                    Bitmap decoded = BitmapFactory.decodeByteArray(
+                            embeddedPicture, 0, embeddedPicture.length, decodeOptions);
+                    if (decoded != null) {
+                        int maxDimension = Math.max(decoded.getWidth(), decoded.getHeight());
+                        if (maxDimension > 512) {
+                            float scale = 512f / maxDimension;
+                            artwork = Bitmap.createScaledBitmap(
+                                    decoded,
+                                    Math.max(1, Math.round(decoded.getWidth() * scale)),
+                                    Math.max(1, Math.round(decoded.getHeight() * scale)),
+                                    true);
+                            if (artwork != decoded) {
+                                decoded.recycle();
+                            }
+                        } else {
+                            artwork = decoded;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Unable to load embedded notification artwork", e);
+            } finally {
+                try {
+                    retriever.release();
+                } catch (Exception e) {
+                    Log.w(TAG, "Unable to release artwork metadata retriever", e);
+                }
+            }
+
+            Bitmap loadedArtwork = artwork;
+            mainHandler.post(() -> {
+                if (loadVersion != artworkLoadVersion || !uri.equals(currentTrackArtworkUri)) {
+                    if (loadedArtwork != null && !loadedArtwork.isRecycled()) {
+                        loadedArtwork.recycle();
+                    }
+                    return;
+                }
+                currentTrackArtwork = loadedArtwork;
+                updateMediaSessionMetadata();
+                updateNotification();
+            });
+        });
+    }
+
+    private Bitmap getNotificationArtwork() {
+        if (!showNotificationAlbumArt) {
+            return null;
+        }
+        return currentTrackArtwork != null && !currentTrackArtwork.isRecycled()
+                ? currentTrackArtwork : getOrCreateNotificationArtwork();
+    }
+
     private void applyBoostToEnhancers() {
         try {
             // convert boost factor to millibels (100 * dB). dB = 20*log10(factor)
@@ -802,85 +936,35 @@ public class AudioPlaybackService extends Service {
     }
 
     private void applyPitchToPlayers() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (mediaPlayer != null) {
-                    try {
-                        PlaybackParams params = mediaPlayer.getPlaybackParams();
-                        params.setPitch(currentPitch);
-                        mediaPlayer.setPlaybackParams(params);
-                    } catch (Exception e) {
-                        // Some players may not support querying params yet — try setting fresh params
-                        try {
-                            PlaybackParams p2 = new PlaybackParams();
-                            p2.setPitch(currentPitch);
-                            mediaPlayer.setPlaybackParams(p2);
-                        } catch (Exception ignored) {}
-                    }
-                }
-
-                if (secondMediaPlayer != null) {
-                    try {
-                        PlaybackParams params2 = secondMediaPlayer.getPlaybackParams();
-                        params2.setPitch(currentPitch);
-                        secondMediaPlayer.setPlaybackParams(params2);
-                    } catch (Exception e) {
-                        try {
-                            PlaybackParams p3 = new PlaybackParams();
-                            p3.setPitch(currentPitch);
-                            secondMediaPlayer.setPlaybackParams(p3);
-                        } catch (Exception ignored) {}
-                    }
-                }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                currentPitch = PitchProcessor.normalizeSemitones(currentPitch);
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Invalid saved pitch; restoring unity pitch", e);
+                currentPitch = 0.0f;
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error applying pitch to players", e);
+            PitchProcessor.applyPitchSemitones(mediaPlayer, currentPitch);
+            PitchProcessor.applyPitchSemitones(secondMediaPlayer, currentPitch);
         }
     }
 
     public void setPitch(float pitch) {
         try {
-            if (pitch <= 0f) pitch = 1.0f;
-            // Constrain sensible range
-            pitch = Math.max(0.5f, Math.min(2.0f, pitch));
-            currentPitch = pitch;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                if (mediaPlayer != null) {
-                    try {
-                        PlaybackParams params = mediaPlayer.getPlaybackParams();
-                        params.setPitch(pitch);
-                        mediaPlayer.setPlaybackParams(params);
-                    } catch (Exception e) {
-                        try {
-                            PlaybackParams p2 = new PlaybackParams();
-                            p2.setPitch(pitch);
-                            mediaPlayer.setPlaybackParams(p2);
-                        } catch (Exception ignored) {}
-                    }
-                }
+            currentPitch = PitchProcessor.normalizeSemitones(pitch);
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "Ignoring invalid pitch value", e);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PitchProcessor.applyPitchSemitones(mediaPlayer, currentPitch);
+            PitchProcessor.applyPitchSemitones(secondMediaPlayer, currentPitch);
+        }
 
-                if (secondMediaPlayer != null) {
-                    try {
-                        PlaybackParams params2 = secondMediaPlayer.getPlaybackParams();
-                        params2.setPitch(pitch);
-                        secondMediaPlayer.setPlaybackParams(params2);
-                    } catch (Exception e) {
-                        try {
-                            PlaybackParams p3 = new PlaybackParams();
-                            p3.setPitch(pitch);
-                            secondMediaPlayer.setPlaybackParams(p3);
-                        } catch (Exception ignored) {}
-                    }
-                }
-            }
-
-            // Persist preference
-            try {
-                getSharedPreferences("audio_player_prefs", MODE_PRIVATE)
-                        .edit().putFloat("playback_pitch", currentPitch).apply();
-            } catch (Exception ignored) {}
+        try {
+            PitchProcessor.savePitchSemitones(
+                    getSharedPreferences("audio_player_prefs", MODE_PRIVATE), currentPitch);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to set pitch", e);
+            Log.e(TAG, "Failed to persist pitch", e);
         }
     }
 
@@ -1005,7 +1089,7 @@ public class AudioPlaybackService extends Service {
             .setContentText(isPlaying ? "Now playing" : "Playback paused")
             .setSubText("AudPlayer Mini Player")
             .setSmallIcon(R.drawable.ic_music_note)
-            .setLargeIcon(getOrCreateNotificationArtwork())
+            .setLargeIcon(getNotificationArtwork())
             .setContentIntent(cachedContentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -1158,6 +1242,12 @@ public class AudioPlaybackService extends Service {
             if (notificationArtwork != null && !notificationArtwork.isRecycled()) {
                 notificationArtwork.recycle();
                 notificationArtwork = null;
+            }
+            artworkLoadVersion++;
+            artworkExecutor.shutdownNow();
+            if (currentTrackArtwork != null && !currentTrackArtwork.isRecycled()) {
+                currentTrackArtwork.recycle();
+                currentTrackArtwork = null;
             }
             // Release loudness enhancers
             try { releaseLoudnessEnhancers(); } catch (Exception ignored) {}
@@ -1440,6 +1530,7 @@ public class AudioPlaybackService extends Service {
     private void playScheduled(Intent intent) {
         android.net.Uri uri = intent.getData();
         if (uri == null) return;
+        loadTrackArtwork(uri);
         String title = intent.getStringExtra("title");
         if (title == null || title.isEmpty()) title = "Scheduled song";
         final String songTitle = title;

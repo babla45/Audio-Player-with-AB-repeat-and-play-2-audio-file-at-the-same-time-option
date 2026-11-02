@@ -10,6 +10,7 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.LinearLayout;
+import android.widget.ImageView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -27,7 +28,9 @@ import java.util.List;
 public class PitchBottomSheet extends BottomSheetDialogFragment {
 
     public interface PitchListener {
+        /** Pitch adjustment in semitones, from -12 through +12. */
         void onPitchChanged(float pitch);
+        /** Current pitch adjustment in semitones. */
         float getCurrentPitch();
         void onSpeedChanged(float speed);
         float getCurrentSpeed();
@@ -81,15 +84,15 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     /** A named combination of voice-changer settings. */
     private static class VoicePreset {
         final String name;
-        final float pitch;
+        final float pitchSemitones;
         final float formant;
         final float speed;
         final int bass;      // 0-1000
         final int reverb;    // 0-1000
 
-        VoicePreset(String name, float pitch, float formant, float speed, int bass, int reverb) {
+        VoicePreset(String name, float pitchSemitones, float formant, float speed, int bass, int reverb) {
             this.name = name;
-            this.pitch = pitch;
+            this.pitchSemitones = pitchSemitones;
             this.formant = formant;
             this.speed = speed;
             this.bass = bass;
@@ -98,23 +101,23 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     }
 
     private static final VoicePreset[] VOICE_PRESETS = {
-            new VoicePreset("None", 1.0f, 1.0f, 1.0f, 0, 0),
-            new VoicePreset("Normal", 1.0f, 1.0f, 1.0f, 0, 0),
-            new VoicePreset("Robot", 1.0f, 0.55f, 1.0f, 0, 0),
-            new VoicePreset("Monster", 0.45f, 0.5f, 0.85f, 700, 150),
-            new VoicePreset("Chipmunk", 2.5f, 1.8f, 1.25f, 0, 0),
-            new VoicePreset("Old Man", 0.7f, 0.85f, 0.9f, 100, 0),
-            new VoicePreset("Deep Male", 0.65f, 0.7f, 1.0f, 450, 0),
-            new VoicePreset("Female", 1.6f, 1.25f, 1.0f, 0, 0),
-            new VoicePreset("Child", 2.0f, 1.5f, 1.0f, 0, 0),
-            new VoicePreset("Alien", 1.9f, 0.6f, 1.0f, 0, 250),
-            new VoicePreset("Cave", 0.85f, 1.0f, 1.0f, 0, 900),
-            new VoicePreset("Underwater", 0.75f, 0.8f, 0.85f, 300, 800),
-            new VoicePreset("Radio", 1.1f, 0.9f, 1.0f, 0, 0),
-            new VoicePreset("Telephone", 1.2f, 0.85f, 1.0f, 0, 0),
-            new VoicePreset("Giant", 0.5f, 0.65f, 0.9f, 800, 100),
-            new VoicePreset("Kid", 1.85f, 1.4f, 1.05f, 0, 0),
-            new VoicePreset("Ghost", 0.8f, 1.1f, 0.8f, 0, 1000),
+            new VoicePreset("None", 0.0f, 1.0f, 1.0f, 0, 0),
+            new VoicePreset("Normal", 0.0f, 1.0f, 1.0f, 0, 0),
+            new VoicePreset("Robot", 0.0f, 0.55f, 1.0f, 0, 0),
+            new VoicePreset("Monster", -12.0f, 0.5f, 0.85f, 700, 150),
+            new VoicePreset("Chipmunk", 12.0f, 1.8f, 1.25f, 0, 0),
+            new VoicePreset("Old Man", -6.17f, 0.85f, 0.9f, 100, 0),
+            new VoicePreset("Deep Male", -7.46f, 0.7f, 1.0f, 450, 0),
+            new VoicePreset("Female", 8.14f, 1.25f, 1.0f, 0, 0),
+            new VoicePreset("Child", 12.0f, 1.5f, 1.0f, 0, 0),
+            new VoicePreset("Alien", 11.11f, 0.6f, 1.0f, 0, 250),
+            new VoicePreset("Cave", -2.81f, 1.0f, 1.0f, 0, 900),
+            new VoicePreset("Underwater", -4.98f, 0.8f, 0.85f, 300, 800),
+            new VoicePreset("Radio", 1.65f, 0.9f, 1.0f, 0, 0),
+            new VoicePreset("Telephone", 3.16f, 0.85f, 1.0f, 0, 0),
+            new VoicePreset("Giant", -12.0f, 0.65f, 0.9f, 800, 100),
+            new VoicePreset("Kid", 10.65f, 1.4f, 1.05f, 0, 0),
+            new VoicePreset("Ghost", -3.86f, 1.1f, 0.8f, 0, 1000),
     };
 
     private static final String[] EQ_PRESETS = {
@@ -130,21 +133,15 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.bottom_sheet_pitch, container, false);
 
-        SeekBar pitchSeekBar = setupFactorSlider(
+        SeekBar pitchSeekBar = setupSemitoneSlider(
                 view.findViewById(R.id.pitch_slider_row),
                 getString(R.string.pitch),
-                "0.05x",
-                "4.00x",
-                5,
-                400,
-                listener != null ? listener.getCurrentPitch() : 1.0f,
-                1.0f,
+                listener != null ? listener.getCurrentPitch() : 0.0f,
                 value -> {
                     if (listener != null) {
                         listener.onPitchChanged(value);
                     }
-                },
-                value -> String.format("%.2fx", value)
+                }
         );
 
         setupFactorSlider(
@@ -326,17 +323,17 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         );
 
         TextView pitchValue = view.findViewById(R.id.pitch_slider_row).findViewById(R.id.voice_slider_value);
-        setupChip(view, R.id.pitch_chip_025, 0.25f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_050, 0.5f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_075, 0.75f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_085, 0.85f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_100, 1.0f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_125, 1.25f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_150, 1.5f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_200, 2.0f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_250, 2.5f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_300, 3.0f, pitchSeekBar, pitchValue);
-        setupChip(view, R.id.pitch_chip_400, 4.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_m12, -12.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_m9, -9.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_m6, -6.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_m3, -3.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_m2, -2.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_0, 0.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_p2, 2.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_p3, 3.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_p6, 6.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_p9, 9.0f, pitchSeekBar, pitchValue);
+        setupChip(view, R.id.pitch_chip_p12, 12.0f, pitchSeekBar, pitchValue);
 
         setupVoicePresets(view);
 
@@ -349,7 +346,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             masterReset.setOnClickListener(v -> {
                 VoicePreset defaults = VOICE_PRESETS[0]; // "None" — all defaults
                 if (listener != null) {
-                    listener.onPitchChanged(defaults.pitch);
+                    listener.onPitchChanged(defaults.pitchSemitones);
                     listener.onFormantChanged(defaults.formant);
                     listener.onSpeedChanged(defaults.speed);
                     listener.onBassChanged(defaults.bass);
@@ -407,7 +404,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             applyCompactChip(chip);
             chip.setOnClickListener(v -> {
                 if (listener != null) {
-                    listener.onPitchChanged(preset.pitch);
+                    listener.onPitchChanged(preset.pitchSemitones);
                     listener.onFormantChanged(preset.formant);
                     listener.onSpeedChanged(preset.speed);
                     listener.onBassChanged(preset.bass);
@@ -654,7 +651,7 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
 
     /** Updates the slider UI to reflect the preset values. */
     private void syncVoiceSliders(View view, VoicePreset preset) {
-        setSliderProgress(view, R.id.pitch_slider_row, preset.pitch);
+        setSliderProgress(view, R.id.pitch_slider_row, preset.pitchSemitones);
         setSliderProgress(view, R.id.formant_slider_row, preset.formant);
         setSliderProgress(view, R.id.speed_slider_row, preset.speed);
         setSliderProgress(view, R.id.bass_slider_row, preset.bass);
@@ -680,16 +677,20 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
             min = 0;
         }
         max = seekBar.getMax();
-        // Percent rows (Bass/Reverb) use min=0 and max=1000 with the value already
-        // in per-mille units; factor rows (Pitch/Formant/Speed) use min>0 with 100 per unit.
-        boolean isPercentRow = min == 0 && max >= 1000;
-        if (isPercentRow) {
+        if (rowId == R.id.pitch_slider_row) {
+            float semitones = PitchProcessor.normalizeSemitones(value);
+            progress = Math.round((semitones - PitchProcessor.MIN_SEMITONES) * 10.0f);
+            valueView.setText(formatSemitones(semitones));
+        } else if (min == 0 && max >= 1000) {
+            // Percent rows (Bass/Reverb) use per-mille values.
             progress = (int) value;
+            valueView.setText(formatPercent((int) value));
         } else {
+            // Factor rows (Formant/Speed) use 100 progress units per factor.
             progress = Math.round(value * 100f);
+            valueView.setText(String.format("%.2fx", value));
         }
         seekBar.setProgress(Math.max(min, Math.min(max, progress)));
-        valueView.setText(isPercentRow ? formatPercent((int) value) : String.format("%.2fx", value));
     }
 
     private void highlightSelectedChip(LinearLayout presetRow, Chip selected) {
@@ -750,7 +751,6 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         TextView minView = row.findViewById(R.id.voice_slider_min);
         TextView maxView = row.findViewById(R.id.voice_slider_max);
         SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
-
         labelView.setText(label);
         minView.setText(minLabel);
         maxView.setText(maxLabel);
@@ -791,6 +791,75 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
         }
 
         return seekBar;
+    }
+
+    private SeekBar setupSemitoneSlider(
+            View row,
+            String label,
+            float currentSemitones,
+            FloatValueListener changeListener) {
+        TextView labelView = row.findViewById(R.id.voice_slider_label);
+        TextView valueView = row.findViewById(R.id.voice_slider_value);
+        TextView minView = row.findViewById(R.id.voice_slider_min);
+        TextView maxView = row.findViewById(R.id.voice_slider_max);
+        SeekBar seekBar = row.findViewById(R.id.voice_slider_seekbar);
+        ImageView decreaseButton = row.findViewById(R.id.pitch_decrease_button);
+        ImageView increaseButton = row.findViewById(R.id.pitch_increase_button);
+
+        labelView.setText(label);
+        minView.setText("-12 st");
+        maxView.setText("+12 st");
+        seekBar.setMin(0);
+        seekBar.setMax(240);
+        float initial = PitchProcessor.normalizeSemitones(currentSemitones);
+        valueView.setText(formatSemitones(initial));
+        seekBar.setProgress(Math.round((initial - PitchProcessor.MIN_SEMITONES) * 10.0f));
+        decreaseButton.setVisibility(View.VISIBLE);
+        increaseButton.setVisibility(View.VISIBLE);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                float semitones = progress / 10.0f + PitchProcessor.MIN_SEMITONES;
+                valueView.setText(formatSemitones(semitones));
+                if (fromUser) {
+                    changeListener.onValueChanged(semitones);
+                }
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+                changeListener.onValueChanged(
+                        bar.getProgress() / 10.0f + PitchProcessor.MIN_SEMITONES);
+            }
+        });
+
+        decreaseButton.setOnClickListener(v -> adjustSemitonePitch(seekBar, -1, changeListener));
+        increaseButton.setOnClickListener(v -> adjustSemitonePitch(seekBar, 1, changeListener));
+
+        View resetButton = row.findViewById(R.id.voice_slider_reset);
+        if (resetButton != null) {
+            resetButton.setOnClickListener(v -> {
+                seekBar.setProgress(120);
+                valueView.setText(formatSemitones(0.0f));
+                changeListener.onValueChanged(0.0f);
+            });
+        }
+        return seekBar;
+    }
+
+    private void adjustSemitonePitch(
+            SeekBar seekBar, int progressDelta, FloatValueListener changeListener) {
+        int nextProgress = Math.max(seekBar.getMin(),
+                Math.min(seekBar.getMax(), seekBar.getProgress() + progressDelta));
+        seekBar.setProgress(nextProgress);
+        changeListener.onValueChanged(
+                nextProgress / 10.0f + PitchProcessor.MIN_SEMITONES);
+    }
+
+    private static String formatSemitones(float semitones) {
+        return String.format("%+.1f st", semitones);
     }
 
     private void setupPercentSlider(
@@ -982,18 +1051,18 @@ public class PitchBottomSheet extends BottomSheetDialogFragment {
     }
 
 
-    private void setupChip(View root, int chipId, float pitch, SeekBar seekBar, TextView display) {
+    private void setupChip(View root, int chipId, float pitchSemitones, SeekBar seekBar, TextView display) {
         Chip chip = root.findViewById(chipId);
         if (chip == null) {
             return;
         }
         applyCompactChip(chip);
         chip.setOnClickListener(v -> {
-            int progress = Math.round(pitch * 100);
+            int progress = Math.round((pitchSemitones - PitchProcessor.MIN_SEMITONES) * 10.0f);
             seekBar.setProgress(progress);
-            display.setText(String.format("%.2fx", pitch));
+            display.setText(formatSemitones(pitchSemitones));
             if (listener != null) {
-                listener.onPitchChanged(pitch);
+                listener.onPitchChanged(pitchSemitones);
             }
         });
     }

@@ -16,7 +16,8 @@ release/
 local.properties
 CLAUDE.md
 docs/
-
+.kilo/
+.vscode/
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -25,3 +26,4 @@ desktop.ini
 *.temp
 *.swp
 *.swo
+.claude/

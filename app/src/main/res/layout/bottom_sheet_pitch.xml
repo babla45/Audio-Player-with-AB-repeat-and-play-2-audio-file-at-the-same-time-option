@@ -108,81 +108,81 @@
                     android:orientation="horizontal">
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_025"
+                        android:id="@+id/pitch_chip_m12"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="0.25x" />
+                        android:text="-12 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_050"
+                        android:id="@+id/pitch_chip_m9"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="0.50x" />
+                        android:text="-9 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_075"
+                        android:id="@+id/pitch_chip_m6"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="0.75x" />
+                        android:text="-6 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_085"
+                        android:id="@+id/pitch_chip_m3"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="0.85x" />
+                        android:text="-3 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_100"
+                        android:id="@+id/pitch_chip_m2"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="1.00x" />
+                        android:text="-2 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_125"
+                        android:id="@+id/pitch_chip_0"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="1.25x" />
+                        android:text="0 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_150"
+                        android:id="@+id/pitch_chip_p2"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="1.50x" />
+                        android:text="+2 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_200"
+                        android:id="@+id/pitch_chip_p3"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="2.00x" />
+                        android:text="+3 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_250"
+                        android:id="@+id/pitch_chip_p6"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="2.50x" />
+                        android:text="+6 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_300"
+                        android:id="@+id/pitch_chip_p9"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="3.00x" />
+                        android:text="+9 st" />
 
                     <com.google.android.material.chip.Chip
-                        android:id="@+id/pitch_chip_400"
+                        android:id="@+id/pitch_chip_p12"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="6dp"
-                        android:text="4.00x" />
+                        android:text="+12 st" />
                 </LinearLayout>
             </HorizontalScrollView>
 

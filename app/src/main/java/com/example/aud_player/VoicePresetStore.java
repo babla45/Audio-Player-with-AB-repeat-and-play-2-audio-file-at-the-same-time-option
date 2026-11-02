@@ -37,7 +37,7 @@ final class VoicePresetStore {
     /** One named snapshot of the voice controls. */
     static class SavedVoicePreset {
         String name = "";
-        float pitch = 1.0f;
+        float pitch = 0.0f;   // semitones
         float formant = 1.0f;
         float speed = 1.0f;
         float volumeBoost = 1.0f;
@@ -128,7 +128,24 @@ final class VoicePresetStore {
     private static SavedVoicePreset fromJson(JSONObject obj) {
         SavedVoicePreset preset = new SavedVoicePreset();
         preset.name = obj.optString("name", "");
-        preset.pitch = (float) obj.optDouble("pitch", 1.0);
+        if (obj.has("pitchSemitones")) {
+            float semitones = (float) obj.optDouble("pitchSemitones", 0.0);
+            try {
+                preset.pitch = PitchProcessor.normalizeSemitones(semitones);
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Invalid saved pitch; restoring unity pitch", e);
+                preset.pitch = 0.0f;
+            }
+        } else {
+            float oldPitchRatio = (float) obj.optDouble("pitch", 1.0);
+            try {
+                preset.pitch = PitchProcessor.normalizeSemitones(
+                        (float) PitchProcessor.semitonesFromPitchRatio(oldPitchRatio));
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Invalid legacy pitch ratio; restoring unity pitch", e);
+                preset.pitch = 0.0f;
+            }
+        }
         preset.formant = (float) obj.optDouble("formant", 1.0);
         preset.speed = (float) obj.optDouble("speed", 1.0);
         preset.volumeBoost = (float) obj.optDouble("volumeBoost", 1.0);
@@ -151,7 +168,7 @@ final class VoicePresetStore {
         JSONObject obj = new JSONObject();
         try {
             obj.put("name", preset.name);
-            obj.put("pitch", preset.pitch);
+            obj.put("pitchSemitones", preset.pitch);
             obj.put("formant", preset.formant);
             obj.put("speed", preset.speed);
             obj.put("volumeBoost", preset.volumeBoost);

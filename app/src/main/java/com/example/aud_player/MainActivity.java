@@ -419,7 +419,7 @@ public class MainActivity extends AppCompatActivity {
     private float primaryPlaybackSpeed = 1.0f;
     private float secondaryPlaybackSpeed = 1.0f;
     private boolean useIndividualPlaybackSpeeds = false;
-    private float currentPitch = 1.0f;
+    private float currentPitch = 0.0f;
     private float currentFormant = 1.0f;
     // Voice-changer listener (lazily created) — kept in a field so the
     // bottom-sheet Reset button can reuse its reset logic
@@ -469,11 +469,12 @@ public class MainActivity extends AppCompatActivity {
             syncFromServiceToUi();
 
             // Normal flow: pass the current MediaPlayer instances to the service with title
-            if (mediaPlayer != null && secondMediaPlayer != null) {
+            if (mediaPlayer != null) {
                 String currentTitle = fileNameText != null ? fileNameText.getText().toString() : "Audio Player";
                 // Only hand over the second player if it's actually active, so the
                 // service's secondAudioActive flag mirrors the true mixer state
-                audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null, currentTitle);
+                audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null,
+                        currentTitle, selectedAudioUri);
             }
         }
 
@@ -592,7 +593,7 @@ public class MainActivity extends AppCompatActivity {
         float primarySpeed;
         float secondarySpeed;
         // Voice changer settings captured at save time
-        float pitch;
+        float pitch; // semitones
         float formant;
         int bass;
         int reverb;
@@ -640,7 +641,7 @@ public class MainActivity extends AppCompatActivity {
         seekForwardMs = forwardSeconds * 1000;
         seekBackwardMs = backwardSeconds * 1000;
         // Load saved pitch
-        currentPitch = prefs.getFloat("playback_pitch", 1.0f);
+        currentPitch = PitchProcessor.loadPitchSemitones(prefs);
         currentFormant = prefs.getFloat(PREF_VOICE_FORMANT, 1.0f);
         voiceBassStrength = prefs.getInt(PREF_VOICE_BASS, 0);
         voiceReverbLevel = prefs.getInt(PREF_VOICE_REVERB, 0);
@@ -1238,7 +1239,7 @@ public class MainActivity extends AppCompatActivity {
                     // Update service with current state
                     if (serviceBound && audioService != null) {
                         audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null,
-                                fileNameText.getText().toString());
+                                fileNameText.getText().toString(), selectedAudioUri);
                     }
 
                 } catch (IllegalStateException e) {
@@ -1653,7 +1654,7 @@ public class MainActivity extends AppCompatActivity {
             // player so it doesn't hold a stale MediaPlayer. onPrepared will
             // re-set them once the new player is ready.
             if (serviceBound && audioService != null) {
-                try { audioService.setMediaPlayers(null, null, null); } catch (Exception ignored) {}
+                try { audioService.clearMediaPlayersForTrackSwitch(); } catch (Exception ignored) {}
             }
 
             // Update the adapter to highlight the current track
@@ -1719,14 +1720,15 @@ public class MainActivity extends AppCompatActivity {
                         lastAutoRetriedUri = null;
                         lastAutoRetryAtMs = 0L;
 
-                        // Start the service
-                        startPlaybackService("ACTION_PLAY");
-
-                        // Update service with media players
+                        // Update the foreground notification with the new
+                        // track before sending the play command.
                         if (serviceBound && audioService != null) {
                             audioService.setMediaPlayers(mediaPlayer, secondAudioActive ? secondMediaPlayer : null,
-                                    fileNameText.getText().toString());
+                                    fileNameText.getText().toString(), selectedAudioUri);
                         }
+
+                        // Start/resume the service after its title is current.
+                        startPlaybackService("ACTION_PLAY");
 
                         // Reset the flag after use
                         
@@ -3225,20 +3227,29 @@ public class MainActivity extends AppCompatActivity {
             pitchListener = new PitchBottomSheet.PitchListener() {
             @Override
             public void onPitchChanged(float pitch) {
-                currentPitch = pitch;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit().putFloat("playback_pitch", currentPitch).apply();
+                try {
+                    currentPitch = PitchProcessor.normalizeSemitones(pitch);
+                } catch (IllegalArgumentException e) {
+                    Log.w(TAG, "Ignoring invalid pitch value", e);
+                    return;
+                }
+                PitchProcessor.savePitchSemitones(
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE), currentPitch);
 
                 if (serviceBound && audioService != null) {
-                    audioService.setPitch(pitch);
+                    audioService.setPitch(currentPitch);
                     if (Math.abs(currentFormant - 1.0f) > 0.001f || voiceAutoTuneEnabled) {
                         applyVoiceSettingsToActivePlayers();
                     }
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && mediaPlayer != null) {
-                    float speed = secondAudioActive && useIndividualPlaybackSpeeds
-                            ? primaryPlaybackSpeed
-                            : currentPlaybackSpeed;
-                    applyPlaybackParams(mediaPlayer, speed, pitch);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (Math.abs(currentFormant - 1.0f) > 0.001f || voiceAutoTuneEnabled) {
+                        applyVoiceSettingsToActivePlayers();
+                    } else {
+                        PitchProcessor.applyPitchSemitones(mediaPlayer, currentPitch);
+                        if (secondAudioActive) {
+                            PitchProcessor.applyPitchSemitones(secondMediaPlayer, currentPitch);
+                        }
+                    }
                 }
             }
 
@@ -4129,11 +4140,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (resetPitch) {
-            currentPitch = 1.0f;
+            currentPitch = 0.0f;
             if (serviceBound && audioService != null) {
-                audioService.setPitch(1.0f);
+                audioService.setPitch(0.0f);
             }
-            prefs.edit().putFloat("playback_pitch", 1.0f).apply();
+            PitchProcessor.savePitchSemitones(prefs, 0.0f);
             resetItems.add(getString(R.string.reset_option_pitch));
         }
 
@@ -4216,7 +4227,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        float pitchToApply = resetPitch ? 1.0f : currentPitch;
+        float pitchToApply = resetPitch ? 0.0f : currentPitch;
 
         if (mediaPlayer != null) {
             float speedToApply = resetSpeed
@@ -4241,16 +4252,14 @@ public class MainActivity extends AppCompatActivity {
         }
         try {
             float formant = currentFormant > 0f ? currentFormant : 1.0f;
-            float finalPitch = pitch * formant;
-            if (voiceAutoTuneEnabled && finalPitch > 0f) {
-                // Auto-tune: constrain the playback pitch to the nearest exact
-                // semitone of the equal-tempered scale (2^(n/12))
-                double semitones = Math.round(12.0 * (Math.log(finalPitch) / Math.log(2)));
-                finalPitch = (float) Math.pow(2.0, semitones / 12.0);
+            double finalPitchSemitones = pitch
+                    + PitchProcessor.semitonesFromPitchRatio(formant);
+            if (voiceAutoTuneEnabled) {
+                finalPitchSemitones = Math.round(finalPitchSemitones);
             }
             PlaybackParams params = new PlaybackParams();
             params.setSpeed(speed / formant);
-            params.setPitch(finalPitch);
+            params.setPitch((float) PitchProcessor.pitchRatioFromSemitones(finalPitchSemitones));
             player.setPlaybackParams(params);
         } catch (Exception e) {
             Log.e(TAG, "Error applying playback params", e);
@@ -4590,13 +4599,17 @@ public class MainActivity extends AppCompatActivity {
             float speed = secondAudioActive && useIndividualPlaybackSpeeds
                     ? primaryPlaybackSpeed
                     : currentPlaybackSpeed;
-            applyPlaybackParams(mediaPlayer, speed, currentPitch * pitchMod);
+            float pitchSemitones = currentPitch
+                    + (float) PitchProcessor.semitonesFromPitchRatio(pitchMod);
+            applyPlaybackParams(mediaPlayer, speed, pitchSemitones);
         }
         if (secondMediaPlayer != null && secondAudioActive && isPlayerActuallyPlaying(secondMediaPlayer)) {
             float speed = useIndividualPlaybackSpeeds
                     ? secondaryPlaybackSpeed
                     : currentPlaybackSpeed;
-            applyPlaybackParams(secondMediaPlayer, speed, currentPitch * pitchMod);
+            float pitchSemitones = currentPitch
+                    + (float) PitchProcessor.semitonesFromPitchRatio(pitchMod);
+            applyPlaybackParams(secondMediaPlayer, speed, pitchSemitones);
         }
     }
 
@@ -4912,7 +4925,11 @@ public class MainActivity extends AppCompatActivity {
     private void updateMiniPlayer() {
         if (miniPlayerTitle != null && fileNameText != null) {
             String title = fileNameText.getText().toString();
-            miniPlayerTitle.setText(title.isEmpty() ? "No song selected" : title);
+            String displayTitle = title.isEmpty() ? "No song selected" : title;
+            // Avoid restarting the title marquee on every playback progress tick.
+            if (!TextUtils.equals(miniPlayerTitle.getText(), displayTitle)) {
+                miniPlayerTitle.setText(displayTitle);
+            }
         }
         if (miniPlayerSubtitle != null && currentTimeText != null && totalTimeText != null) {
             // Cache the subtitle string — it changes only when the second
@@ -5024,7 +5041,9 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(primaryPlaybackSpeed);
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            params.setPitch((float) PitchProcessor.pitchRatioFromSemitones(currentPitch));
+                        }
                         mediaPlayer.setPlaybackParams(params);
                         Log.d(TAG, "Applied initial primary speed: " + primaryPlaybackSpeed);
                     } catch (Exception e) {
@@ -5036,7 +5055,9 @@ public class MainActivity extends AppCompatActivity {
                     try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(secondaryPlaybackSpeed);
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            params.setPitch((float) PitchProcessor.pitchRatioFromSemitones(currentPitch));
+                        }
                         secondMediaPlayer.setPlaybackParams(params);
                         Log.d(TAG, "Applied initial secondary speed: " + secondaryPlaybackSpeed);
                     } catch (Exception e) {
@@ -5114,7 +5135,9 @@ public class MainActivity extends AppCompatActivity {
                         try {
                         PlaybackParams params = new PlaybackParams();
                         params.setSpeed(speed);
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) params.setPitch(currentPitch);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            params.setPitch((float) PitchProcessor.pitchRatioFromSemitones(currentPitch));
+                        }
 
                         if (isPrimary && mediaPlayer != null) {
                             mediaPlayer.setPlaybackParams(params);
@@ -6104,7 +6127,7 @@ public class MainActivity extends AppCompatActivity {
             if (serviceBound && audioService != null) {
                 audioService.setMediaPlayers(mediaPlayer,
                         secondAudioActive ? secondMediaPlayer : null,
-                        fileNameText.getText().toString());
+                        fileNameText.getText().toString(), selectedAudioUri);
             }
             Toast.makeText(this, "⏰ Resuming playback", Toast.LENGTH_SHORT).show();
         } catch (IllegalStateException e) {
@@ -7394,6 +7417,9 @@ public class MainActivity extends AppCompatActivity {
             setPlaybackSpeed(currentPlaybackSpeed);
 
             currentPitch = restore.pitch;
+            if (serviceBound && audioService != null) {
+                audioService.setPitch(currentPitch);
+            }
             currentFormant = restore.formant;
             voiceBassStrength = restore.bass;
             voiceReverbLevel = restore.reverb;
@@ -7407,8 +7433,8 @@ public class MainActivity extends AppCompatActivity {
             voiceNoiseReductionEnabled = restore.noiseReduction;
             voiceAutoTuneEnabled = restore.autoTune;
             SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+            PitchProcessor.savePitchSemitones(prefs, currentPitch);
             prefs.edit()
-                    .putFloat("playback_pitch", currentPitch)
                     .putFloat(PREF_VOICE_FORMANT, currentFormant)
                     .putInt(PREF_VOICE_BASS, voiceBassStrength)
                     .putInt(PREF_VOICE_REVERB, voiceReverbLevel)
@@ -8132,6 +8158,8 @@ public class MainActivity extends AppCompatActivity {
 
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         boolean saved = prefs.getBoolean(AudioAdapter.PREF_SONG_LIST_ALBUM_ART, false);
+        boolean showNotificationAlbumArt = prefs.getBoolean(
+                AudioPlaybackService.PREF_NOTIFICATION_ALBUM_ART, true);
 
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
@@ -8161,8 +8189,13 @@ public class MainActivity extends AppCompatActivity {
         }
         container.addView(group);
 
+        CheckBox notificationAlbumArtCheckBox = new CheckBox(this);
+        notificationAlbumArtCheckBox.setText("Show album art in notification mini-player");
+        notificationAlbumArtCheckBox.setChecked(showNotificationAlbumArt);
+        container.addView(notificationAlbumArtCheckBox);
+
         TextView helper = new TextView(this);
-        helper.setText("Album art shows the song's embedded cover art; songs without artwork keep the default icon.");
+        helper.setText("Album art shows the song's embedded cover art; songs without artwork keep the default icon. Notification artwork can be enabled separately.");
         helper.setPadding(0, (int) dpToPx(12), 0, 0);
         helper.setTextColor(ContextCompat.getColor(this, R.color.text_secondary));
         container.addView(helper);
@@ -8178,9 +8211,14 @@ public class MainActivity extends AppCompatActivity {
                     boolean useAlbumArt = (boolean) selected.getTag();
                     prefs.edit()
                             .putBoolean(AudioAdapter.PREF_SONG_LIST_ALBUM_ART, useAlbumArt)
+                            .putBoolean(AudioPlaybackService.PREF_NOTIFICATION_ALBUM_ART,
+                                    notificationAlbumArtCheckBox.isChecked())
                             .apply();
                     if (audioAdapter != null) {
                         audioAdapter.setShowAlbumArt(useAlbumArt);
+                    }
+                    if (serviceBound && audioService != null) {
+                        audioService.refreshNotificationArtworkSetting();
                     }
                     Toast.makeText(this, R.string.settings_saved, Toast.LENGTH_SHORT).show();
                 })
@@ -10804,6 +10842,9 @@ public class MainActivity extends AppCompatActivity {
 
         // Restore voice changer settings exactly as they were at save time
         currentPitch = preset.pitch;
+        if (serviceBound && audioService != null) {
+            audioService.setPitch(currentPitch);
+        }
         currentFormant = preset.formant;
         voiceBassStrength = preset.bass;
         voiceReverbLevel = preset.reverb;
@@ -10818,8 +10859,8 @@ public class MainActivity extends AppCompatActivity {
         voiceAutoTuneEnabled = preset.autoTune;
         // Persist them so the voice sheet reflects the restored values too
         SharedPreferences prefs = getSharedPreferences("audio_player_prefs", MODE_PRIVATE);
+        PitchProcessor.savePitchSemitones(prefs, currentPitch);
         prefs.edit()
-                .putFloat("playback_pitch", currentPitch)
                 .putFloat(PREF_VOICE_FORMANT, currentFormant)
                 .putInt(PREF_VOICE_BASS, voiceBassStrength)
                 .putInt(PREF_VOICE_REVERB, voiceReverbLevel)
@@ -10917,8 +10958,24 @@ public class MainActivity extends AppCompatActivity {
         preset.globalSpeed = (float) obj.optDouble("globalSpeed", 1.0);
         preset.primarySpeed = (float) obj.optDouble("primarySpeed", 1.0);
         preset.secondarySpeed = (float) obj.optDouble("secondarySpeed", 1.0);
-        // Voice changer settings (defaults keep old presets unchanged)
-        preset.pitch = (float) obj.optDouble("pitch", 1.0);
+        // Old mixer presets stored a pitch ratio under "pitch".
+        if (obj.has("pitchSemitones")) {
+            try {
+                preset.pitch = PitchProcessor.normalizeSemitones(
+                        (float) obj.optDouble("pitchSemitones", 0.0));
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Invalid saved mixer pitch; restoring unity pitch", e);
+                preset.pitch = 0.0f;
+            }
+        } else {
+            try {
+                preset.pitch = PitchProcessor.normalizeSemitones((float)
+                        PitchProcessor.semitonesFromPitchRatio(obj.optDouble("pitch", 1.0)));
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "Invalid legacy mixer pitch ratio; restoring unity pitch", e);
+                preset.pitch = 0.0f;
+            }
+        }
         preset.formant = (float) obj.optDouble("formant", 1.0);
         preset.bass = obj.optInt("bass", 0);
         preset.reverb = obj.optInt("reverb", 0);
@@ -10955,7 +11012,7 @@ public class MainActivity extends AppCompatActivity {
                 obj.put("primarySpeed", preset.primarySpeed);
                 obj.put("secondarySpeed", preset.secondarySpeed);
                 // Voice changer settings
-                obj.put("pitch", preset.pitch);
+                obj.put("pitchSemitones", preset.pitch);
                 obj.put("formant", preset.formant);
                 obj.put("bass", preset.bass);
                 obj.put("reverb", preset.reverb);
