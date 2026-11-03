@@ -2526,7 +2526,11 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPlaybackModeClicked(View anchorView) {
-                showPlaybackModePopup(anchorView);
+                int nextMode = currentPlaybackMode < PLAYBACK_MODE_REPEAT_CURRENT
+                        || currentPlaybackMode >= PLAYBACK_MODE_RANDOM
+                        ? PLAYBACK_MODE_REPEAT_CURRENT
+                        : currentPlaybackMode + 1;
+                applyPlaybackMode(nextMode);
             }
 
             @Override
@@ -2646,29 +2650,6 @@ public class MainActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
-    private void showPlaybackModePopup(View anchorView) {
-        if (anchorView == null) {
-            return;
-        }
-
-        PopupMenu popupMenu = new PopupMenu(this, anchorView);
-        popupMenu.getMenu().add(0, PLAYBACK_MODE_REPEAT_CURRENT, 0, "Repeat Current Song");
-        popupMenu.getMenu().add(0, PLAYBACK_MODE_NEXT_IN_LIST, 1, "Play Next in List");
-        popupMenu.getMenu().add(0, PLAYBACK_MODE_RANDOM, 2, "Random Play");
-        popupMenu.getMenu().setGroupCheckable(0, true, true);
-
-        if (currentPlaybackMode >= PLAYBACK_MODE_REPEAT_CURRENT
-                && currentPlaybackMode <= PLAYBACK_MODE_RANDOM) {
-            popupMenu.getMenu().findItem(currentPlaybackMode).setChecked(true);
-        }
-
-        popupMenu.setOnMenuItemClickListener(item -> {
-            applyPlaybackMode(item.getItemId());
-            return true;
-        });
-        popupMenu.show();
-    }
-
     private void applyPlaybackMode(int selectedMode) {
         if (selectedMode < PLAYBACK_MODE_REPEAT_CURRENT || selectedMode > PLAYBACK_MODE_RANDOM) {
             return;
@@ -2676,9 +2657,6 @@ public class MainActivity extends AppCompatActivity {
 
         currentPlaybackMode = selectedMode;
         savePlaybackMode();
-
-        String[] modeOptions = {"Repeat Current Song", "Play Next in List", "Random Play"};
-        Toast.makeText(this, "Mode: " + modeOptions[currentPlaybackMode], Toast.LENGTH_SHORT).show();
     }
 
     private void setupMoreButtonSwipeGesture(View moreButton) {

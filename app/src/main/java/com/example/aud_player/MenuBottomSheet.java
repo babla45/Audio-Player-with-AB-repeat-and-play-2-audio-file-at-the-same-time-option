@@ -92,7 +92,10 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         });
 
         view.findViewById(R.id.menu_playback_mode_btn).setOnClickListener(v -> {
-            if (listener != null) listener.onPlaybackModeClicked(v);
+            if (listener != null) {
+                listener.onPlaybackModeClicked(v);
+                updatePlaybackModeDisplay(v, listener.getCurrentPlaybackMode());
+            }
         });
 
         view.findViewById(R.id.menu_speed_btn).setOnClickListener(v -> {
@@ -178,12 +181,7 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
             TextView speedLabel = view.findViewById(R.id.menu_speed_label);
             speedLabel.setText(String.format("%.1fx", listener.getCurrentSpeed()));
 
-            // Playback mode icon & label
-            TextView modeLabel = view.findViewById(R.id.menu_mode_label);
-            int mode = listener.getCurrentPlaybackMode();
-            if (mode == 0) modeLabel.setText("Repeat");
-            else if (mode == 1) modeLabel.setText("Next");
-            else modeLabel.setText("Shuffle");
+            updatePlaybackModeDisplay(view, listener.getCurrentPlaybackMode());
 
             TextView mixerToggleLabel = view.findViewById(R.id.menu_mixer_toggle_label);
             ImageView mixerToggleIcon = view.findViewById(R.id.menu_mixer_toggle_icon);
@@ -195,6 +193,26 @@ public class MenuBottomSheet extends BottomSheetDialogFragment {
         normalizeMenuGridAppearance(view);
 
         return view;
+    }
+
+    private void updatePlaybackModeDisplay(View menuView, int mode) {
+        ImageView modeIcon = menuView.findViewById(R.id.menu_mode_icon);
+        TextView modeLabel = menuView.findViewById(R.id.menu_mode_label);
+        int iconResource;
+        String label;
+        if (mode == 0) {
+            iconResource = R.drawable.ic_repeat_one;
+            label = "Repeat";
+        } else if (mode == 1) {
+            iconResource = R.drawable.ic_list;
+            label = "Next";
+        } else {
+            iconResource = R.drawable.ic_shuffle;
+            label = "Shuffle";
+        }
+        modeIcon.setImageResource(iconResource);
+        modeIcon.setContentDescription(label);
+        modeLabel.setText(label);
     }
 
     @Override
