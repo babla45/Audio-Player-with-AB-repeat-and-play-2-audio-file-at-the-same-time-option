@@ -162,7 +162,8 @@ public class AudioListActivity extends AppCompatActivity {
                 MediaStore.Audio.Media.DURATION,
                 MediaStore.Audio.Media.SIZE,
                 MediaStore.Audio.Media.DISPLAY_NAME,
-                MediaStore.Audio.Media.DATE_ADDED
+                MediaStore.Audio.Media.DATE_ADDED,
+                MediaStore.Audio.Media.ARTIST
         };
 
         String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
@@ -182,6 +183,7 @@ public class AudioListActivity extends AppCompatActivity {
             int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION);
             int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE);
             int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED);
+            int artistColumn = cursor.getColumnIndex(MediaStore.Audio.Media.ARTIST);
 
             while (cursor.moveToNext()) {
                 long id = cursor.getLong(idColumn);
@@ -206,7 +208,10 @@ public class AudioListActivity extends AppCompatActivity {
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
 
                 // Use display name instead of title
-                audioFiles.add(new AudioFile(displayName, durationFormatted, contentUri, id, size, dateAdded));
+                AudioFile audioFile = new AudioFile(
+                        displayName, durationFormatted, contentUri, id, size, dateAdded);
+                audioFile.setArtist(artistColumn >= 0 ? cursor.getString(artistColumn) : null);
+                audioFiles.add(audioFile);
             }
             cursor.close();
         }

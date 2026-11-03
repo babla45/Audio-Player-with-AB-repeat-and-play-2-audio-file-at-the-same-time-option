@@ -288,6 +288,15 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         AudioFile audioFile = audioFiles.get(position);
         holder.titleTextView.setText(buildHighlightedTitle(
                 audioFile.getTitle(), holder.titleTextView.getContext()));
+        String artist = audioFile.getArtist();
+        if (artist != null && !artist.trim().isEmpty()
+                && !"<unknown>".equalsIgnoreCase(artist.trim())) {
+            holder.artistTextView.setText(artist.trim());
+            holder.artistTextView.setVisibility(View.VISIBLE);
+        } else {
+            holder.artistTextView.setText("");
+            holder.artistTextView.setVisibility(View.GONE);
+        }
         bindRowIcon(holder, audioFile, position);
         
         // Combine duration and file size with a separator
@@ -573,6 +582,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
 
     static class AudioViewHolder extends RecyclerView.ViewHolder {
         TextView titleTextView;
+        TextView artistTextView;
         TextView durationTextView;
         TextView nowPlayingTag;
         ImageView optionsMenu;
@@ -584,6 +594,7 @@ public class AudioAdapter extends RecyclerView.Adapter<AudioAdapter.AudioViewHol
         AudioViewHolder(View itemView) {
             super(itemView);
             titleTextView = itemView.findViewById(R.id.audioTitle);
+            artistTextView = itemView.findViewById(R.id.audioArtist);
             durationTextView = itemView.findViewById(R.id.audioDuration);
             nowPlayingTag = itemView.findViewById(R.id.nowPlayingTag);
             optionsMenu = itemView.findViewById(R.id.fileOptionsMenu);

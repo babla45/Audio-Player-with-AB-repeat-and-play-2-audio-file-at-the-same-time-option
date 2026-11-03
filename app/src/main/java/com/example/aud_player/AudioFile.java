@@ -12,6 +12,7 @@ public class AudioFile {
     private long dateAdded;
     private String originalTitle; // MediaStore TITLE (metadata tag)
     private String folderName; // MediaStore BUCKET_DISPLAY_NAME (parent folder)
+    private String artist;
 
     public AudioFile(String title, String duration, Uri uri, long id, long fileSize, long dateAdded) {
         this(title, duration, uri, id, fileSize, dateAdded, null);
@@ -31,6 +32,14 @@ public class AudioFile {
 
     public String getTitle() {
         return title;
+    }
+
+    public String getArtist() {
+        return artist;
+    }
+
+    public void setArtist(String artist) {
+        this.artist = artist;
     }
 
     /**
