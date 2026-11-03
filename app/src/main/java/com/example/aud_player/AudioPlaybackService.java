@@ -881,11 +881,12 @@ public class AudioPlaybackService extends Service {
     }
 
     private Bitmap getNotificationArtwork() {
-        if (!showNotificationAlbumArt) {
-            return null;
+        if (showNotificationAlbumArt
+                && currentTrackArtwork != null
+                && !currentTrackArtwork.isRecycled()) {
+            return currentTrackArtwork;
         }
-        return currentTrackArtwork != null && !currentTrackArtwork.isRecycled()
-                ? currentTrackArtwork : getOrCreateNotificationArtwork();
+        return getOrCreateNotificationArtwork();
     }
 
     private void applyBoostToEnhancers() {
